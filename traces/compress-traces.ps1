@@ -2,17 +2,17 @@
 # threshold, verifying the round trip by SHA-256 and length before deleting the
 # original.
 #
-# This is the WINDOWS LUA ROUTE path: the Lua recorders in tools/bizhawk/ write
+# This is the Windows Lua route: the Lua recorders in bizhawk/ write
 # uncompressed output into a directory, and this compresses that directory in
 # place. The native headless harness no longer needs it — pass --compress to
-# tools/bizhawk-headless (same filter, same threshold, same verify-before-delete
+# bizhawk-headless (same filter, same threshold, same verify-before-delete
 # ordering, applied inside its atomic publication). Keep both in step if the
 # semantics ever change.
 
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)]
-    [string]$Path = "tools/bizhawk/trace_output",
+    [Parameter(Position = 0, Mandatory = $true)]
+    [string]$Path,
 
     [long]$ThresholdBytes = 1048576,
 

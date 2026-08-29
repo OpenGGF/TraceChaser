@@ -13,10 +13,10 @@
 #   run_bizhawk_lua.sh <lua_script> <bk2_movie> <rom> [extra EmuHawk args...]
 #
 # Env:
-#   BIZHAWK_HOME        BizHawk install dir. Default: repo-local
-#                       docs/BizHawk-2.11-linux-x64. An explicit override is
+#   BIZHAWK_HOME        BizHawk install dir. Default: checkout-local
+#                       .dependencies/BizHawk-2.11-linux-x64. An override is
 #                       allowed, but no unversioned system build is selected.
-#   OGGF_WORKDIR        directory to cd into before launch (default: $PWD). NOTE:
+#   OGGF_WORKDIR        required external directory to cd into before launch. NOTE:
 #                       BizHawk resets CWD to the Lua script's own directory, so
 #                       recorders that write a CWD-relative trace_output/ (s1/s2)
 #                       land it next to the .lua, NOT here. Use
@@ -34,7 +34,7 @@
 # CachyOS/Wayland + mono box:
 #   * BizHawk runs "portable" and writes config/system dirs beside EmuHawk.exe,
 #     so BIZHAWK_HOME must be a WRITABLE tree. The repo-local
-#     docs/BizHawk-2.11-linux-x64 build is the supported default.
+#     .dependencies/BizHawk-2.11-linux-x64 build is the supported default.
 #   * DISPLAY must be set (EmuHawk is WinForms even headless); XWayland :0 works
 #     (the X BadMatch on the display control is a non-fatal layout warning).
 #   * --luaconsole avoids a "Stack empty" crash that command-line --lua + --movie
@@ -54,24 +54,11 @@ LUA_SCRIPT=$(realpath "$1"); shift
 BK2_PATH=$(realpath "$1"); shift
 ROM_PATH=$(realpath "$1"); shift
 
-# Resolve BIZHAWK_HOME: explicit env wins; otherwise search candidate locations
-# for a build containing EmuHawk.exe. The repo-local docs/BizHawk-2.11-linux-x64
-# build is required by default. It is untracked and lives in whichever checkout
-# downloaded it, so across git worktrees you may need to set BIZHAWK_HOME
-# explicitly.
+# Resolve all checkout-owned paths from this script, never from the caller's
+# current directory or a discovered sibling repository.
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-if [ -z "${BIZHAWK_HOME:-}" ]; then
-	# git-toplevel/docs covers the main checkout; ../../docs covers this script's
-	# checkout; the sibling OpenGGF checkout covers the worktree case.
-	GIT_TOP=$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel 2>/dev/null || true)
-	for cand in \
-		"$SCRIPT_DIR"/../../docs/BizHawk-2.11-linux-x64 \
-		${GIT_TOP:+"$GIT_TOP"/docs/BizHawk-2.11-linux-x64} \
-		"$SCRIPT_DIR"/../../../OpenGGF/docs/BizHawk-2.11-linux-x64; do
-		if [ -f "$cand/EmuHawk.exe" ]; then BIZHAWK_HOME="$cand"; break; fi
-	done
-fi
-BIZHAWK_HOME="${BIZHAWK_HOME:-"$SCRIPT_DIR/../../docs/BizHawk-2.11-linux-x64"}"
+TRACECHASER_ROOT=$(cd "$SCRIPT_DIR/.." && pwd -P)
+BIZHAWK_HOME="${BIZHAWK_HOME:-"$TRACECHASER_ROOT/.dependencies/BizHawk-2.11-linux-x64"}"
 EMUHAWK_EXE="$BIZHAWK_HOME/EmuHawk.exe"
 # Resolve mono to an absolute path so the launcher is independent of PATH (a
 # non-login/background shell may not have /usr/bin on PATH).
@@ -131,8 +118,11 @@ ARGS+=(--lua "$LUA_SCRIPT" --movie "$BK2_PATH" "$ROM_PATH")
 [ -n "${BIZHAWK_EXTRA_ARGS:-}" ] && ARGS+=($BIZHAWK_EXTRA_ARGS)
 ARGS+=("$@")
 
-WORKDIR="${OGGF_WORKDIR:-$PWD}"
-mkdir -p "$WORKDIR"
+WORKDIR="${OGGF_WORKDIR:?set OGGF_WORKDIR to an external scratch directory}"
+case "$(realpath -m "$WORKDIR")" in
+	"$TRACECHASER_ROOT"|"$TRACECHASER_ROOT"/*) echo "OGGF_WORKDIR must be outside the TraceChaser source tree" >&2; exit 2 ;;
+esac
+mkdir -p -- "$WORKDIR"
 cd "$WORKDIR"
 
 echo "=== BizHawk Lua Launcher (Linux) ==="

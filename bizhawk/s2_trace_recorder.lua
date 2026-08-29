@@ -52,7 +52,7 @@
 --- Shared lib ---
 ------------------
 
--- Locate tools/bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
+-- Locate bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
 -- direct --lua= route, and headless launches (see lib/oggf_trace_common.lua and
 -- SHARED_MODULE_HANDOFF.md). The launcher-provided env var wins; otherwise fall
 -- back to this recorder's own directory, then CWD. Scoped in a do-block so the
@@ -117,7 +117,7 @@ end
 -- except this version string (see the run/detour functions block below for
 -- the placement rationale and the on_frame_end comments for the exact
 -- plain-mode-unreachable gates).
--- v9.13-s2 changes: complete-run extension (design: tools/bizhawk-headless/
+-- v9.13-s2 changes: complete-run extension (design: bizhawk-headless/
 -- docs/s2-run-mode-behavior.md §11). (a) Run mode survives in-level reloads:
 -- Game_Mode $8C (Level|TitleCard, the death-restart / act-transition /
 -- zone-transition reload family) observed while a level segment is armed now
@@ -139,7 +139,8 @@ end
 local LUA_SCRIPT_VERSION = "9.13-s2"
 
 -- Output directory (relative to BizHawk working dir)
-local OUTPUT_DIR = "trace_output/"
+local OUTPUT_DIR = os.getenv("OGGF_TRACE_OUTPUT_DIR") or "trace_output/"
+if OUTPUT_DIR:sub(-1) ~= "/" and OUTPUT_DIR:sub(-1) ~= "\\" then OUTPUT_DIR = OUTPUT_DIR .. "/" end
 
 -- Headless mode: run at maximum speed, auto-exit when done.
 -- Enable when running via CLI: EmuHawk.exe --chromeless --lua ... --movie ... rom.gen

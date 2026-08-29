@@ -37,8 +37,8 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// Native port of the S2 Lua trace recorder's run mode
-    /// (OGGF_TRACE_RUN_ID; tools/bizhawk/s2_trace_recorder.lua v9.13-s2;
-    /// spec tools/bizhawk-headless/docs/s2-run-mode-behavior.md incl. §11):
+    /// (OGGF_TRACE_RUN_ID; bizhawk/s2_trace_recorder.lua v9.13-s2;
+    /// spec bizhawk-headless/docs/s2-run-mode-behavior.md incl. §11):
     /// the stage-detour state machine for giant-ring special-stage round
     /// trips (level -> ss -> level), in-level reload survival across the
     /// Game_Mode $8C title-card family (Block 1.5: death/star-post restarts,

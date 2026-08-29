@@ -6,11 +6,11 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua trace recorder's run-mode special-stage
-    /// aux_state.jsonl event generation (tools/bizhawk/s2_trace_recorder.lua
+    /// aux_state.jsonl event generation (bizhawk/s2_trace_recorder.lua
     /// v9.13-s2, write_ss_pretrace_snapshot / ss_check_control_state /
     /// ss_check_checkpoint / ss_check_message_state /
     /// ss_check_results_started; spec
-    /// tools/bizhawk-headless/docs/s2-run-mode-behavior.md §11.3): the
+    /// bizhawk-headless/docs/s2-run-mode-behavior.md §11.3): the
     /// hook-free subset of s2_ss_trace_recorder.lua v1.4-s2ss's aux surface
     /// (templates verbatim from that file — all events are "type"-keyed,
     /// lowercase zero-padded hex). NOT ported: run_objects_end (needs the

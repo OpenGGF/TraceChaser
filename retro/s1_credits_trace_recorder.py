@@ -2,7 +2,7 @@
 """
 Sonic 1 Credits Trace Recorder for stable-retro.
 
-Equivalent of tools/bizhawk/s1_credits_trace_recorder.lua (v1.2).
+Equivalent of bizhawk/s1_credits_trace_recorder.lua (v1.2).
 Forces Sonic 1 into the ending credits and records the built-in ending
 demos as trace directories.  The ROM contains its own input data for
 these replays -- no external movie file is needed.

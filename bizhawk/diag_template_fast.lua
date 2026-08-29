@@ -24,7 +24,7 @@
 
 local START = tonumber(os.getenv("OGGF_START") or "0")
 local STOP  = tonumber(os.getenv("OGGF_STOP")  or "0")
-local OUT   = os.getenv("OGGF_OUT") or "tools/bizhawk/trace_output/diag.txt"
+local OUT   = assert(os.getenv("OGGF_OUT"), "OGGF_OUT must name an explicit external output path")
 
 -- ---- FAST HEADLESS (this is what makes it ~100x faster + low memory) --------
 emu.limitframerate(false)        -- remove the 60fps cap

@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the Lua trace recorder's metadata.json layout
-    /// (tools/bizhawk/s1_trace_recorder.lua): 2-space indent, fixed key
+    /// (bizhawk/s1_trace_recorder.lua): 2-space indent, fixed key
     /// order, LF line endings, and a trailing newline after the closing
     /// brace. The recording date is injected as a string (production passes
     /// DateTime.Now formatted yyyy-MM-dd; tests pass a fixed value) — it is

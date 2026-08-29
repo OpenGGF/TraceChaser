@@ -6,8 +6,8 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S1 complete-run recorder's level-segment
-    /// metadata.json layout (tools/bizhawk/s1_complete_run_recorder.lua
-    /// write_metadata; spec tools/bizhawk-headless/docs/
+    /// metadata.json layout (bizhawk/s1_complete_run_recorder.lua
+    /// write_metadata; spec bizhawk-headless/docs/
     /// s1-complete-run-behavior.md section 7): 2-space indent, fixed key
     /// order, LF line endings, and a trailing newline after the closing
     /// brace. Differs from the standard recorder's

@@ -21,7 +21,7 @@ namespace OpenGGF.BizHawk.Headless
     /// container bytes for identical content, which surfaces as a spurious
     /// binary diff in a fixture commit.
     ///
-    /// The semantics are a deliberate port of tools/traces/compress-traces.ps1
+    /// The semantics are a deliberate port of traces/compress-traces.ps1
     /// (which remains the Windows Lua-route path and is not superseded for
     /// that route):
     ///

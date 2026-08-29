@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BIZHAWK_TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BIZHAWK_REPO_ROOT="$(cd "$BIZHAWK_TOOL_DIR/../.." && pwd -P)"
+BIZHAWK_REPO_ROOT="$(cd "$BIZHAWK_TOOL_DIR/.." && pwd -P)"
 
 if [[ -v BIZHAWK_HOME ]]; then
   if [[ ! -e "$BIZHAWK_HOME" ]]; then
@@ -11,7 +11,7 @@ if [[ -v BIZHAWK_HOME ]]; then
   fi
   BIZHAWK_HOME="$(realpath "$BIZHAWK_HOME")"
 else
-  BIZHAWK_HOME="$BIZHAWK_REPO_ROOT/docs/BizHawk-2.11-linux-x64"
+  BIZHAWK_HOME="$BIZHAWK_REPO_ROOT/.dependencies/BizHawk-2.11-linux-x64"
 fi
 
 if [[ "$BIZHAWK_HOME" != /* || ! -d "$BIZHAWK_HOME" ]]; then

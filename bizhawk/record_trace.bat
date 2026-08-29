@@ -2,12 +2,10 @@
 REM Record a BizHawk trace for any Sonic 1 zone/act.
 REM The Lua script auto-detects zone and act from RAM.
 REM
-REM Usage:  record_trace.bat <rom_path> <bk2_path>
+REM Usage:  set OGGF_TRACE_OUTPUT_DIR=<external-dir> then record_trace.bat <rom_path> <bk2_path>
 REM Example: record_trace.bat "s1.gen" "Movies\s1-mz1.bk2"
 REM
-REM Output goes to: <repo>\tools\bizhawk\trace_output\
-REM   (BizHawk resolves the script's relative trace_output folder from the
-REM    recorder script location)
+REM OGGF_TRACE_OUTPUT_DIR is mandatory and must identify external scratch.
 REM
 REM BizHawk path can be overridden with BIZHAWK_EXE env var.
 REM To see the emulator window during recording, edit HEADLESS_VISIBLE in
@@ -17,7 +15,11 @@ setlocal
 
 set "LUA_SCRIPT=%~dp0s1_trace_recorder.lua"
 
-set "OUTPUT_DIR=%~dp0trace_output"
+if "%OGGF_TRACE_OUTPUT_DIR%"=="" (
+    echo ERROR: set OGGF_TRACE_OUTPUT_DIR to an explicit external directory.
+    exit /b 1
+)
+for %%I in ("%OGGF_TRACE_OUTPUT_DIR%") do set "OUTPUT_DIR=%%~fI"
 set "COMPRESS_SCRIPT=%~dp0..\traces\compress-traces.ps1"
 
 if "%~1"=="" (

@@ -3,7 +3,7 @@
 
 local START = tonumber(os.getenv("OGGF_START") or "0")
 local STOP  = tonumber(os.getenv("OGGF_STOP")  or "0")
-local OUT   = os.getenv("OGGF_OUT") or "tools/bizhawk/trace_output/diag_s2_arz2_round68_obj28.txt"
+local OUT   = assert(os.getenv("OGGF_OUT"), "OGGF_OUT must name an explicit external output path")
 local TRACE_OFFSET = tonumber(os.getenv("OGGF_TRACE_OFFSET") or "7998")
 
 emu.limitframerate(false)

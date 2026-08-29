@@ -4,7 +4,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Sonic 2 REV01 68K work-RAM address map used by the S2 trace recorder
-    /// port (tools/bizhawk/s2_trace_recorder.lua v9.12-s2). Addresses are
+    /// port (bizhawk/s2_trace_recorder.lua v9.12-s2). Addresses are
     /// the mainmemory-domain form: the $FF0000 base is stripped, so 0xF600
     /// here is $FFF600 on hardware. Typed big-endian reads delegate to the
     /// game-independent helpers on <see cref="S1Ram"/>.

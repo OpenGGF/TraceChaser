@@ -13,13 +13,13 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.traces.trace_fixture_inventory import build_inventory, compare_inventory_documents
-from tools.traces.validate_trace_v5 import LEGACY_KEYS, Validation
-from tools.traces.no_replace_output import write_bytes_no_replace
+from traces.trace_fixture_inventory import build_inventory, compare_inventory_documents
+from traces.validate_trace_v5 import LEGACY_KEYS, Validation
+from traces.no_replace_output import write_bytes_no_replace
 
 
 REPORT_FORMAT = "openggf-trace-v5-candidate-comparison-v1"

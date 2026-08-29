@@ -22,7 +22,7 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// Full-trace capture runner: the native port of the Lua trace recorder's
-    /// frame loop (tools/bizhawk-headless/docs/s1-trace-recorder-behavior.md
+    /// frame loop (bizhawk-headless/docs/s1-trace-recorder-behavior.md
     /// sections 2 and 6). Auto-detects the recording start (game_mode 0x0C
     /// with control lock 0), then emits one physics.csv row plus aux events
     /// per trace frame until the level is left or the movie runs out. Every

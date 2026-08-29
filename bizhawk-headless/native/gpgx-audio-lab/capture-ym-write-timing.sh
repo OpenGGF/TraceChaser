@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-repo_root="$(cd "$script_dir/../../../.." && pwd -P)"
+repo_root="$(cd "$script_dir/../../.." && pwd -P)"
 observer_dir="$script_dir/../gpgx-audio-observer"
 fail() { printf 'capture-ym-write-timing: %s\n' "$*" >&2; exit 1; }
 sha256() { sha256sum -- "$1" | awk '{print $1}'; }
@@ -30,6 +30,7 @@ elif [[ -n "$sound_id" || -n "$fm_channel" ]]; then
   fail 'S3K capture does not accept --sound-id or --fm-channel'
 fi
 [[ "$output" = /* ]] || fail '--output must be absolute'
+case "$output" in "$repo_root"|"$repo_root"/*) fail '--output must be outside the TraceChaser source tree' ;; esac
 [[ ! -e "$output" && ! -L "$output" ]] || fail "output already exists: $output"
 instructions_output=${output%.json}.native-instructions.tsv
 [[ ! -e "$instructions_output" && ! -L "$instructions_output" ]] \
@@ -40,7 +41,8 @@ output_parent=${output%/*}; [[ -n "$output_parent" ]] || output_parent=/
 
 source_path=${GPGX_SOURCE_PATH:?set GPGX_SOURCE_PATH to the pinned pristine BizHawk source}
 toolchain_path=${GPGX_TOOLCHAIN_PATH:?set GPGX_TOOLCHAIN_PATH to the pinned native toolchain}
-stock_path=${BIZHAWK_STOCK_PATH:-${OPENGGF_MAIN_WORKSPACE:?set OPENGGF_MAIN_WORKSPACE}/docs/BizHawk-2.11-linux-x64}
+stock_path=${BIZHAWK_STOCK_PATH:-$repo_root/.dependencies/BizHawk-2.11-linux-x64}
+source_program_path=${YM_SOURCE_PROGRAM_PATH:?set YM_SOURCE_PROGRAM_PATH to the explicit source-program JSON}
 case "$game" in
   s1)
     rom_path=${S1_ROM_PATH:?set S1_ROM_PATH}
@@ -74,6 +76,8 @@ for pair in "ROM:$rom_path" "BK2:$movie_path"; do
   [[ "$value" = /* && -f "$value" && ! -L "$value" ]] \
     || fail "$name must be an absolute non-symlink file"
 done
+[[ "$source_program_path" = /* && -f "$source_program_path" && ! -L "$source_program_path" ]] \
+  || fail 'YM source program must be an absolute non-symlink file'
 
 [[ "$(sha1sum -- "$rom_path" | awk '{print $1}')" == "$rom_sha1" ]] \
   || fail "$game ROM SHA-1 differs"
@@ -197,12 +201,12 @@ OPENGGF_YM_TIMING_PATCH_SHA256="$lab_patch_sha" \
 OPENGGF_YM_TIMING_CORE_SHA256="$compressed_core_sha" \
 OPENGGF_YM_TIMING_CAPTURE_SCRIPT_SHA256="$capture_script_sha" \
 OPENGGF_YM_TIMING_GAME="$game" \
-OPENGGF_YM_SOURCE_PROGRAM_PATH="$repo_root/docs/architecture/research/audio/s1-fm5-ym-busy-write-program-v1.json" \
+OPENGGF_YM_SOURCE_PROGRAM_PATH="$source_program_path" \
 S1_ROM_PATH="$rom_path" S1_BK2_PATH="$movie_path" \
 S2_ROM_PATH="$rom_path" S2_BK2_PATH="$movie_path" \
 S3K_ROM_PATH="$rom_path" S3K_BK2_PATH="$movie_path" \
 BIZHAWK_HOME="$stage/install" \
-  "$repo_root/tools/bizhawk-headless/test.sh" \
+  "$repo_root/bizhawk-headless/test.sh" \
     --filter "$test_filter" \
     --jobs 1
 

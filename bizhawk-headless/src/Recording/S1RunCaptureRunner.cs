@@ -38,8 +38,8 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// Native port of the S1 complete-run recorder's detour-aware run
-    /// machinery (tools/bizhawk/s1_complete_run_recorder.lua; spec
-    /// tools/bizhawk-headless/docs/s1-run-mode-behavior.md): the
+    /// machinery (bizhawk/s1_complete_run_recorder.lua; spec
+    /// bizhawk-headless/docs/s1-run-mode-behavior.md): the
     /// giant-ring special-stage detour state machine (level -> ss ->
     /// level), the 14-column s1_special_stage segment writer, transition
     /// records with their exact RAM-read moments, and run_manifest.json.

@@ -5,8 +5,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 {
     /// <summary>
     /// Stage-B tests for the S3K COMPLETE-RUN recorder's profile surface
-    /// (tools/bizhawk/s3k_complete_run_recorder.lua v6.33-s3k-completerun;
-    /// spec tools/bizhawk-headless/docs/s3k-completerun-profiles.md):
+    /// (bizhawk/s3k_complete_run_recorder.lua v6.33-s3k-completerun;
+    /// spec bizhawk-headless/docs/s3k-completerun-profiles.md):
     ///
     /// - the 42-column complete_run / s3k_bonus_stage physics row, which
     ///   is now the standard recorder's row with NO substitution at all:
@@ -509,7 +509,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void StandardProfilesEmitNoGamePausedState()
         {
-            // grep -c game_paused tools/bizhawk/s3k_trace_recorder.lua = 0:
+            // grep -c game_paused bizhawk/s3k_trace_recorder.lua = 0:
             // the family does not exist in the standard recorder, so its
             // three profiles must never emit it.
             var host = new RamBackedHost();

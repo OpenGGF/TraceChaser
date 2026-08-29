@@ -124,7 +124,7 @@
 --- Shared lib ---
 ------------------
 
--- Locate tools/bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
+-- Locate bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
 -- direct --lua= route, and headless launches (see lib/oggf_trace_common.lua and
 -- SHARED_MODULE_HANDOFF.md). The launcher-provided env var wins; otherwise fall
 -- back to this recorder's own directory, then CWD. Scoped in a do-block so the

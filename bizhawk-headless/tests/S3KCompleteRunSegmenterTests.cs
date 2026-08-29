@@ -8,7 +8,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
     /// Unit gate for the S3K complete-run SEGMENTATION engine
     /// (<see cref="S3KCompleteRunSegmenter"/> /
     /// <see cref="S3KZoneTokens"/>; spec
-    /// tools/bizhawk-headless/docs/s3k-complete-run-behavior.md).
+    /// bizhawk-headless/docs/s3k-complete-run-behavior.md).
     ///
     /// Two layers:
     ///

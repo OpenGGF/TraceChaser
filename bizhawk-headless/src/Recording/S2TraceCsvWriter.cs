@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua trace recorder's physics.csv v7 row
-    /// formatting (tools/bizhawk/s2_trace_recorder.lua v9.12-s2). The header
+    /// formatting (bizhawk/s2_trace_recorder.lua v9.12-s2). The header
     /// text, 42-field format shape, uhex two's-complement rendering, and
     /// ground-mode thresholds are byte-shared with the S1 port; the
     /// fundamental S2 delta is the live symmetric sidekick block read from

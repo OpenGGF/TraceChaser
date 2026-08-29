@@ -20,6 +20,10 @@ done
 [[ "$OUTPUT_ROOT" = /* && ! -e "$OUTPUT_ROOT" ]] || usage
 
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TRACECHASER_ROOT="$(cd "$TOOL_DIR/.." && pwd -P)"
+case "$OUTPUT_ROOT" in
+  "$TRACECHASER_ROOT"|"$TRACECHASER_ROOT"/*) usage ;;
+esac
 grep -F '"$BIZHAWK_TOOL_DIR/build.sh"' "$TOOL_DIR/run.sh" >/dev/null
 grep -F '"$BIZHAWK_TOOL_DIR/build.sh"' "$TOOL_DIR/test.sh" >/dev/null
 if grep -F 'if [[ ! -f "$HARNESS_EXE" ]]' "$TOOL_DIR/run.sh" >/dev/null; then
@@ -28,11 +32,11 @@ if grep -F 'if [[ ! -f "$HARNESS_EXE" ]]' "$TOOL_DIR/run.sh" >/dev/null; then
 fi
 FIRST_ROOT="$OUTPUT_ROOT/path-a"
 SECOND_ROOT="$OUTPUT_ROOT/path with spaces"
-mkdir -p "$FIRST_ROOT/tools/bizhawk-headless" \
-  "$SECOND_ROOT/tools/bizhawk-headless"
+mkdir -p "$FIRST_ROOT/bizhawk-headless" \
+  "$SECOND_ROOT/bizhawk-headless"
 
 for name in "path-a" "path with spaces"; do
-  destination="$OUTPUT_ROOT/$name/tools/bizhawk-headless"
+  destination="$OUTPUT_ROOT/$name/bizhawk-headless"
   cp -a "$TOOL_DIR/." "$destination/"
   rm -rf -- "$destination/bin" "$destination/obj" "$destination/.scratch"
   if [[ "$name" == "path with spaces" ]]; then
@@ -58,13 +62,13 @@ for artifact in \
   BizHawk.Headless.Gpgx.Tests.exe \
   BizHawk.Headless.Gpgx.Tests.pdb
 do
-  cmp "$FIRST_ROOT/tools/bizhawk-headless/bin/Release/$artifact" \
-    "$SECOND_ROOT/tools/bizhawk-headless/bin/Release/$artifact"
+  cmp "$FIRST_ROOT/bizhawk-headless/bin/Release/$artifact" \
+    "$SECOND_ROOT/bizhawk-headless/bin/Release/$artifact"
 done
 
 for name in "path-a" "path with spaces"; do
   (
-    cd "$OUTPUT_ROOT/$name/tools/bizhawk-headless"
+    cd "$OUTPUT_ROOT/$name/bizhawk-headless"
     BIZHAWK_HOME="$BIZHAWK_HOME_ARG" \
       MONO_PATH="$BIZHAWK_HOME_ARG/dll" \
       LD_LIBRARY_PATH="$BIZHAWK_HOME_ARG/dll${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -75,7 +79,7 @@ done
 
 DIRECT_LOG="$OUTPUT_ROOT/direct-xbuild.log"
 if (
-  cd "$FIRST_ROOT/tools/bizhawk-headless"
+  cd "$FIRST_ROOT/bizhawk-headless"
   xbuild /nologo /verbosity:minimal /target:Rebuild \
     /property:Configuration=Release \
     /property:BizHawkDllDir="$BIZHAWK_HOME_ARG/dll" \
@@ -87,6 +91,6 @@ fi
 grep -F "requires the pinned Roslyn csc.exe" "$DIRECT_LOG" >/dev/null
 
 sha256sum \
-  "$FIRST_ROOT/tools/bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe" \
-  "$FIRST_ROOT/tools/bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.Tests.exe"
+  "$FIRST_ROOT/bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe" \
+  "$FIRST_ROOT/bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.Tests.exe"
 echo "DETERMINISTIC_BIZHAWK_HEADLESS_BUILD_OK"

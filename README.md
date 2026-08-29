@@ -30,10 +30,11 @@ outside both the TraceChaser and OpenGGF repositories.
 
 ## Documentation
 
-The history-preserving import is documented now in
-[History import](docs/history-import.md). The following reviewed workflow
-documents are forthcoming; none of these links represents a currently shipped
-command or support promise:
+The history-preserving import and the portable path/input boundary are documented
+in [History import](docs/history-import.md) and
+[Migration from OpenGGF](docs/migration-from-openggf.md). The following reviewed
+workflow documents are forthcoming; none of these links represents a currently
+shipped command or support promise:
 
 - Installation: [BizHawk 2.11](docs/install-bizhawk-2.11.md) and
   [scratch and security policy](docs/scratch-and-security.md).
@@ -46,8 +47,7 @@ command or support promise:
   [validation](docs/validation.md), [comparison](docs/comparison.md),
   [compression](docs/compression.md), [inventory](docs/inventory.md), and
   [publication](docs/publication.md).
-- Project work: [migration from OpenGGF](docs/migration-from-openggf.md),
-  [contributing](docs/contributing.md), [testing](docs/testing.md), and
+- Project work: [contributing](docs/contributing.md), [testing](docs/testing.md), and
   [releasing](docs/releasing.md).
 
 Until those guides land, treat the imported component READMEs as historical

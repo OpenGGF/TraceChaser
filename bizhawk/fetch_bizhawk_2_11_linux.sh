@@ -7,9 +7,9 @@ readonly ARCHIVE_URL="https://github.com/TASEmulators/BizHawk/releases/download/
 readonly ARCHIVE_SHA256="cdaf9650d880bae660d63a388430f630b8d8a96b1ba59ebf0e0195a645c3bab8"
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "${script_dir}/../.." && pwd)"
-docs_dir="${repo_root}/docs"
-destination="${docs_dir}/BizHawk-${BIZHAWK_VERSION}-linux-x64"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+dependencies_dir="${repo_root}/.dependencies"
+destination="${dependencies_dir}/BizHawk-${BIZHAWK_VERSION}-linux-x64"
 
 if [[ -e "${destination}" || -L "${destination}" ]]; then
     echo "ERROR: BizHawk destination already exists: ${destination}" >&2
@@ -17,7 +17,8 @@ if [[ -e "${destination}" || -L "${destination}" ]]; then
     exit 1
 fi
 
-staging_root="$(mktemp -d "${docs_dir}/.bizhawk-${BIZHAWK_VERSION}-install.XXXXXX")"
+mkdir -p -- "${dependencies_dir}"
+staging_root="$(mktemp -d "${dependencies_dir}/.bizhawk-${BIZHAWK_VERSION}-install.XXXXXX")"
 cleanup() {
     rm -rf -- "${staging_root}"
 }

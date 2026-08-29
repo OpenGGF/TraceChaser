@@ -8,7 +8,7 @@ namespace OpenGGF.BizHawk.Headless
     /// The S3K complete-run recorder's zone-id to directory/metadata token
     /// map (s3k_complete_run_recorder.lua ZONE_TOKEN / BONUS_TOKENS /
     /// zone_token_for, L439-664; spec
-    /// tools/bizhawk-headless/docs/s3k-complete-run-behavior.md §5.5/§6.1).
+    /// bizhawk-headless/docs/s3k-complete-run-behavior.md §5.5/§6.1).
     ///
     /// This is deliberately NOT <see cref="S3KRam.ZoneName"/>. The two
     /// tables DISAGREE for every id from 10 up — ZONE_NAMES[10] is "ssz"

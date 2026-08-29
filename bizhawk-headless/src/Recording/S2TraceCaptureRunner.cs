@@ -29,8 +29,8 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// Native port of the S2 Lua trace recorder's level-gameplay frame loop
-    /// (tools/bizhawk/s2_trace_recorder.lua v9.12-s2; spec
-    /// tools/bizhawk-headless/docs/s2-trace-recorder-behavior.md §2-§3).
+    /// (bizhawk/s2_trace_recorder.lua v9.12-s2; spec
+    /// bizhawk-headless/docs/s2-trace-recorder-behavior.md §2-§3).
     /// Supports both profiles: plain "gameplay_unlock" (arm at the first
     /// frame with game_mode 0x0C and Sonic's move_lock 0), and
     /// "level_gated_reset_aware" (skip earlier gameplay segments up to the

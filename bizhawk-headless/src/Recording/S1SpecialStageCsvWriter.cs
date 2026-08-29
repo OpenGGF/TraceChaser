@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S1 complete-run recorder's special-stage
-    /// physics.csv writer (tools/bizhawk/s1_complete_run_recorder.lua,
+    /// physics.csv writer (bizhawk/s1_complete_run_recorder.lua,
     /// write_ss_row L671-702; spec s1-run-mode-behavior.md §4). One
     /// 14-column row per $10 continuation frame, ss_csv_version 1:
     /// <c>frame</c> and <c>lag</c> are decimal, everything else is

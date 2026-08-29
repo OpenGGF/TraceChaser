@@ -7,9 +7,9 @@ namespace OpenGGF.BizHawk.Headless
     /// <summary>
     /// Byte-exact port of the S3K complete-run recorder's
     /// <c>s3k_special_stage</c> physics.csv writer
-    /// (tools/bizhawk/s3k_complete_run_recorder.lua v6.37-s3k-completerun,
+    /// (bizhawk/s3k_complete_run_recorder.lua v6.37-s3k-completerun,
     /// write_ss_row L5174; spec
-    /// tools/bizhawk-headless/docs/s3k-completerun-profiles.md §2.2).
+    /// bizhawk-headless/docs/s3k-completerun-profiles.md §2.2).
     ///
     /// This is a COMPLETELY separate writer from
     /// <see cref="S3KTraceCsvWriter"/>, not a variant of it: 20 columns

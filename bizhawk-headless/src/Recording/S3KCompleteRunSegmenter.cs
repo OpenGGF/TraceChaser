@@ -167,8 +167,8 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// Native port of the S3K complete-run recorder's SEGMENTATION engine
-    /// (tools/bizhawk/s3k_complete_run_recorder.lua v6.37-s3k-completerun;
-    /// spec tools/bizhawk-headless/docs/s3k-complete-run-behavior.md): the
+    /// (bizhawk/s3k_complete_run_recorder.lua v6.37-s3k-completerun;
+    /// spec bizhawk-headless/docs/s3k-complete-run-behavior.md): the
     /// level / bonus / special-stage state machine, every arm / finalize /
     /// stop predicate in the Lua's exact on_frame_end source order, the
     /// bk2_frame_offset and trace_frame_count derivation, the repeat-visit

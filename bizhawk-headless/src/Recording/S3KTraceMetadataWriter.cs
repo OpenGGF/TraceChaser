@@ -6,9 +6,9 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Native S3K strict-v5 metadata.json writer, derived from the Lua
-    /// recorder's layout (tools/bizhawk/s3k_trace_recorder.lua
+    /// recorder's layout (bizhawk/s3k_trace_recorder.lua
     /// write_metadata); spec
-    /// tools/bizhawk-headless/docs/s3k-trace-recorder-behavior.md,
+    /// bizhawk-headless/docs/s3k-trace-recorder-behavior.md,
     /// "Current v5 container contract"):
     /// 2-space indent, fixed key order, LF line endings, and a trailing
     /// newline after the closing brace. The Lua rewrites the file at arm,

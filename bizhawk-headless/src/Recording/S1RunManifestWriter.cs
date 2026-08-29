@@ -4,7 +4,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S1 complete-run recorder's run_manifest.json
-    /// emitter (tools/bizhawk/s1_complete_run_recorder.lua
+    /// emitter (bizhawk/s1_complete_run_recorder.lua
     /// write_run_manifest L785-849; spec s1-run-mode-behavior.md §6),
     /// delegating the structural layout to the shared
     /// <see cref="RunManifestWriter"/> core. S1 deltas versus S2: the game

@@ -4,7 +4,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// S2 recorder zone identity maps, ported verbatim from
-    /// tools/bizhawk/s2_trace_recorder.lua (ZONE_NAMES,
+    /// bizhawk/s2_trace_recorder.lua (ZONE_NAMES,
     /// ROM_ZONE_TO_ENGINE_ZONE, apparent_act_for). Shared by the aux event
     /// engine (zone_act_state/checkpoint naming, CNZ gate) and the S2
     /// metadata writer.

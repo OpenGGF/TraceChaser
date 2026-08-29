@@ -20,7 +20,7 @@ local runtimePath = assert(os.getenv("OGGF_BIZHAWK_PROBE_RUNTIME"),
     "run through run_bizhawk_lua so OGGF_BIZHAWK_PROBE_RUNTIME is absolute")
 local ProbeRuntime = dofile(runtimePath)
 
--- Addresses taken from the production S2 recorder (tools/bizhawk/s2_trace_recorder.lua
+-- Addresses taken from the production S2 recorder (bizhawk/s2_trace_recorder.lua
 -- ADDR_GAME_MODE/ADDR_ZONE/ADDR_ACT/PLAYER_BASE/OFF_STATUS), not re-derived here.
 local GAME_MODE     = 0xF600
 local CURRENT_ZONE  = 0xFE10

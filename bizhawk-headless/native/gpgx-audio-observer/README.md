@@ -84,7 +84,7 @@ listed by `prepare-toolchain.sh`; the script checks every SHA-256 against
 `toolchain-lock.json` before publishing the toolchain.
 
 ```bash
-observer=$PWD/tools/bizhawk-headless/native/gpgx-audio-observer
+observer=$PWD/bizhawk-headless/native/gpgx-audio-observer
 native=$PWD/target/audio-parity/native/task7-reproduction
 packages=/absolute/path/to/locked-package-input
 stock=/absolute/path/to/BizHawk-2.11-linux-x64

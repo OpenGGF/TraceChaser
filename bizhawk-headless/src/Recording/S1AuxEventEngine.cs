@@ -7,8 +7,8 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the Lua trace recorder's per-frame aux_state.jsonl
-    /// event generation (tools/bizhawk/s1_trace_recorder.lua and, in the
-    /// complete-run profile, tools/bizhawk/s1_complete_run_recorder.lua). One
+    /// event generation (bizhawk/s1_trace_recorder.lua and, in the
+    /// complete-run profile, bizhawk/s1_complete_run_recorder.lua). One
     /// instance carries all persistent tracker state across the recording —
     /// the complete-run recorder shares that single instance across every
     /// level segment (its trackers are never reset between arms); call
@@ -19,7 +19,7 @@ namespace OpenGGF.BizHawk.Headless
     /// '\n'; the caller terminates every line with a single LF.
     ///
     /// The complete-run profile differs from the standard recorder in exactly
-    /// two ways (tools/bizhawk-headless/docs/s1-complete-run-behavior.md
+    /// two ways (bizhawk-headless/docs/s1-complete-run-behavior.md
     /// section 6): object_near carries seven extra per-object fields, and four
     /// per-frame diagnostic events (v_objstate, camera_boundary, v_oscillate,
     /// lag_state) are emitted after the object scan and before cursor_state.

@@ -132,7 +132,7 @@ namespace BizHawk.Headless.Gpgx
         /// Trace-mode payload compression, ON by default: physics.csv and
         /// aux_state.jsonl are gzipped inside the publication once they
         /// reach --compress-threshold (default 1 MiB, inherited from
-        /// tools/traces/compress-traces.ps1).
+        /// traces/compress-traces.ps1).
         ///
         /// The default is on because the risk being managed is a commit, not
         /// disk usage: a full S3K complete-run aux stream measures ~254 MB
@@ -1799,7 +1799,7 @@ namespace BizHawk.Headless.Gpgx
                     + " Lua recorder's M68K exec/memory-write diagnostic"
                     + " hooks, which the native S3K recorder does not"
                     + " implement (deferred; see"
-                    + " tools/bizhawk-headless/docs/"
+                    + " bizhawk-headless/docs/"
                     + "s3k-profiles-and-hooks.md section 2.4). Unset it"
                     + " or capture with the Lua recorder.");
             }
@@ -1898,7 +1898,7 @@ namespace BizHawk.Headless.Gpgx
         /// <summary>
         /// The COMPLETE-RUN recorder's own environment surface
         /// (s3k_complete_run_recorder.lua; spec
-        /// tools/bizhawk-headless/docs/s3k-run-publication.md §8.1). It is
+        /// bizhawk-headless/docs/s3k-run-publication.md §8.1). It is
         /// deliberately NOT the standard recorder's table: that recorder
         /// honors OGGF_S3K_TRACE_PROFILE, while this one hard-pins
         /// TRACE_PROFILE to "complete_run" at L341, which makes three
@@ -1973,7 +1973,7 @@ namespace BizHawk.Headless.Gpgx
                     + " Lua complete-run recorder's M68K exec/memory-write"
                     + " diagnostic hooks, which the native S3K complete-run"
                     + " recorder does not implement (deferred; see"
-                    + " tools/bizhawk-headless/docs/"
+                    + " bizhawk-headless/docs/"
                     + "s3k-run-publication.md section 8.2). It also removes"
                     + " the capture_mode metadata line. Unset it or capture"
                     + " with the Lua recorder.");
@@ -2051,7 +2051,7 @@ namespace BizHawk.Headless.Gpgx
             "is the only gate on the frame-polled cnz_event_ram aux event"
             + " family, which the native S3K complete-run recorder does not"
             + " implement and which appears in no canonical fixture (see"
-            + " tools/bizhawk-headless/docs/s3k-run-publication.md"
+            + " bizhawk-headless/docs/s3k-run-publication.md"
             + " section 8.1).";
 
         private const string CompleteRunEarlyStopRejectionReason =
@@ -2059,13 +2059,13 @@ namespace BizHawk.Headless.Gpgx
             + " truncates physics.csv and aux_state.jsonl; the native"
             + " recorder models the movie-length signal through"
             + " --effective-movie-length instead (see"
-            + " tools/bizhawk-headless/docs/s3k-run-publication.md"
+            + " bizhawk-headless/docs/s3k-run-publication.md"
             + " section 8.1).";
 
         private const string HookArmingRejectionReason =
             "arms a hook-driven aux event family that the native S3K"
             + " recorder does not implement (deferred; see"
-            + " tools/bizhawk-headless/docs/s3k-profiles-and-hooks.md"
+            + " bizhawk-headless/docs/s3k-profiles-and-hooks.md"
             + " section 2.4).";
 
         private const string PolledWindowRejectionReason =
@@ -2073,13 +2073,13 @@ namespace BizHawk.Headless.Gpgx
             + " that the native S3K recorder implements with the Lua's"
             + " default window pinned as a constant, so honoring it would"
             + " require rebuilding the port rather than re-running it"
-            + " (see tools/bizhawk-headless/docs/s3k-aux-events.md).";
+            + " (see bizhawk-headless/docs/s3k-aux-events.md).";
 
         private const string EarlyStopRejectionReason =
             "finalizes the Lua recorder's capture before the movie/zone"
             + " stop and truncates physics.csv and aux_state.jsonl, which"
             + " the native S3K recorder does not model (see"
-            + " tools/bizhawk-headless/docs/s3k-profiles-and-hooks.md"
+            + " bizhawk-headless/docs/s3k-profiles-and-hooks.md"
             + " section 3).";
 
         /// <summary>

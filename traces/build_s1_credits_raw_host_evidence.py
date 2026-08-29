@@ -8,11 +8,11 @@ import json
 import sys
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.traces.s1_credits_raw_evidence import (
+from traces.s1_credits_raw_evidence import (
     build_expected_evidence,
     write_no_replace_outside_roots,
 )

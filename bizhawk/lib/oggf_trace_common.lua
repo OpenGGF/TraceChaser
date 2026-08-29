@@ -1,7 +1,7 @@
 ------------------------------------------------------------------------------
 -- oggf_trace_common.lua
 -- Shared, game-agnostic leaf helpers for the BizHawk trace recorders in
--- tools/bizhawk/. Consumed by the per-game recorders via a robust loader
+-- bizhawk/. Consumed by the per-game recorders via a robust loader
 -- (see SHARED_MODULE_HANDOFF.md). This module holds ONLY pure leaf helpers
 -- whose output is byte-for-byte identical to the inline copies they replace.
 --

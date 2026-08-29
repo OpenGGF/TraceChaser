@@ -46,8 +46,7 @@ if "%~2"=="" goto :usage
 if "%~3"=="" goto :usage
 
 set "BIZHAWK_EXE=%BIZHAWK_EXE%"
-if "%BIZHAWK_EXE%"=="" if exist "%~dp0..\..\docs\BizHawk-2.11-win-x64\EmuHawk.exe" set "BIZHAWK_EXE=%~dp0..\..\docs\BizHawk-2.11-win-x64\EmuHawk.exe"
-if "%BIZHAWK_EXE%"=="" if exist ".dependencies\\BizHawk-2.11-win-x64\\EmuHawk.exe" set "BIZHAWK_EXE=.dependencies\\BizHawk-2.11-win-x64\\EmuHawk.exe"
+if "%BIZHAWK_EXE%"=="" if exist "%~dp0..\.dependencies\BizHawk-2.11-win-x64\EmuHawk.exe" set "BIZHAWK_EXE=%~dp0..\.dependencies\BizHawk-2.11-win-x64\EmuHawk.exe"
 if "%BIZHAWK_EXE%"=="" (
     echo ERROR: BIZHAWK_EXE is not set and no default EmuHawk.exe was found.
     exit /b 1
@@ -73,8 +72,7 @@ set "BIZHAWK_HAS_DIAG_CONFIG=0"
 if not "%BIZHAWK_USE_DIAG_CONFIG%"=="1" goto :after_diag_config
 
 set "BIZHAWK_SOURCE_CONFIG=%BIZHAWK_SOURCE_CONFIG%"
-if "%BIZHAWK_SOURCE_CONFIG%"=="" if exist "%~dp0..\..\docs\BizHawk-2.11-win-x64\config.ini" set "BIZHAWK_SOURCE_CONFIG=%~dp0..\..\docs\BizHawk-2.11-win-x64\config.ini"
-if "%BIZHAWK_SOURCE_CONFIG%"=="" if exist ".dependencies\\BizHawk-2.11-win-x64\\config.ini" set "BIZHAWK_SOURCE_CONFIG=.dependencies\\BizHawk-2.11-win-x64\\config.ini"
+if "%BIZHAWK_SOURCE_CONFIG%"=="" if exist "%~dp0..\.dependencies\BizHawk-2.11-win-x64\config.ini" set "BIZHAWK_SOURCE_CONFIG=%~dp0..\.dependencies\BizHawk-2.11-win-x64\config.ini"
 if "%BIZHAWK_DIAG_CONFIG%"=="" set "BIZHAWK_DIAG_CONFIG=%TEMP%\openggf-bizhawk-diag-config-%BIZHAWK_LAUNCH_ID%.ini"
 if "%BIZHAWK_SOURCE_CONFIG%"=="" (
     echo WARNING: No BizHawk config.ini found; relying on Lua-side sound/render toggles only.
@@ -139,7 +137,7 @@ if not "%OGGF_OUT%"=="" echo OGGF_OUT=%OGGF_OUT%
 echo.
 
 REM Authoritative shared-lib path for the recorders' oggf_lib_dir() loader
-REM (tools/bizhawk/lib/oggf_trace_common.lua). Wins over the debug.getinfo and
+REM (bizhawk/lib/oggf_trace_common.lua). Wins over the debug.getinfo and
 REM CWD fallbacks; child EmuHawk inherits it on both the direct and wrapper
 REM launch routes. Trailing backslash matches the loader's dir .. "file" concat.
 set "OGGF_BIZHAWK_LIB=%~dp0lib\"

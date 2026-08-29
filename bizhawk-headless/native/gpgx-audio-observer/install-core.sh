@@ -53,7 +53,7 @@ secure_require_absent_output "$output"
 secure_verify_recipe "$script_dir" >/dev/null
 artifact_lock_sha=$(/usr/bin/sha256sum "$script_dir/artifact-lock.json"); artifact_lock_sha=${artifact_lock_sha%% *}
 readme_sha=$(/usr/bin/sha256sum "$script_dir/README.md"); readme_sha=${readme_sha%% *}
-repo_root=$(cd -P -- "$script_dir/../../../.." && pwd)
+repo_root=$(cd -P -- "$script_dir/../../.." && pwd)
 output_parent=${output%/*}; output_name=${output##*/}
 [[ -n "$output_name" && "$output_name" != . && "$output_name" != .. ]] \
   || fail "output has an unsafe final component"
@@ -61,8 +61,7 @@ output_parent=$(cd -P -- "$output_parent" && pwd) \
   || fail "output parent must already exist"
 output=$output_parent/$output_name
 case "$output" in
-  "$repo_root"/target/audio-parity/native/*|"$repo_root"/tools/bizhawk-headless/.scratch/*) ;;
-  *) fail "output must be beneath an ignored audio-parity target or harness scratch root" ;;
+  "$repo_root"|"$repo_root"/*) fail "output must be outside the TraceChaser source tree" ;;
 esac
 for pair in "build:$build" "stock:$stock"; do
   name=${pair%%:*}; value=${pair#*:}

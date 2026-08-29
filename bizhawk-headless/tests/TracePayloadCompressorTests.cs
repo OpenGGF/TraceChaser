@@ -10,7 +10,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 {
     /// <summary>
     /// Covers publish-time payload compression: the filter and threshold
-    /// ported from tools/traces/compress-traces.ps1, the verify-before-
+    /// ported from traces/compress-traces.ps1, the verify-before-
     /// destroy ordering that makes the port safe, output determinism, and
     /// the CLI wiring (compression on by default, --no-compress to opt out).
     ///

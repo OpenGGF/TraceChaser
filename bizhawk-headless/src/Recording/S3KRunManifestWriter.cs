@@ -5,8 +5,8 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// S3K front-end over the shared <see cref="RunManifestWriter"/>
-    /// (tools/bizhawk/s3k_complete_run_recorder.lua write_run_manifest
-    /// L1458; spec tools/bizhawk-headless/docs/s3k-run-publication.md §4).
+    /// (bizhawk/s3k_complete_run_recorder.lua write_run_manifest
+    /// L1458; spec bizhawk-headless/docs/s3k-run-publication.md §4).
     /// The structural layout is character-identical to the S1 and S2
     /// manifests, so only the literals live here: the game id, the inline
     /// rom_checksum, and Lua %q quoting for

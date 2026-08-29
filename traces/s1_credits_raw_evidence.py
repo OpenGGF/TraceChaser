@@ -11,13 +11,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from tools.traces.compare_trace_v5_candidates import (
+from traces.compare_trace_v5_candidates import (
     CREDITS_CANDIDATE_DIRECTORIES,
     CREDITS_COLUMN_MAP,
     REPORT_FORMAT,
     compare_roots,
 )
-from tools.traces.no_replace_output import write_bytes_no_replace
+from traces.no_replace_output import write_bytes_no_replace
 
 
 RAW_FORMAT = "openggf-s1-credits-raw-observations-v1"

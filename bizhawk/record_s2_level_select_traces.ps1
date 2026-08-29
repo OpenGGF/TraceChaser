@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$RomPath = "s2.gen",
-    [string]$MoviesDir = "docs/BizHawk-2.11-win-x64/Movies",
-    [string]$OutputRoot = "src/test/resources/traces/s2",
+    [Parameter(Mandatory=$true)][string]$RomPath,
+    [Parameter(Mandatory=$true)][string]$MoviesDir,
+    [Parameter(Mandatory=$true)][string]$OutputRoot,
     [string]$Only,
     [switch]$Help
 )
@@ -35,12 +35,12 @@ $Routes = @(
 
 function Show-Usage {
     Write-Host "Usage:"
-    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File tools/bizhawk/record_s2_level_select_traces.ps1 -RomPath `"<rom>`" [-Only cpz]"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File record_s2_level_select_traces.ps1 -RomPath `"<rom>`" -MoviesDir `"<movies>`" -OutputRoot `"<external-output>`" [-Only cpz]"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -RomPath     Sonic 2 REV01 ROM path. Defaults to repo-root expected filename."
+    Write-Host "  -RomPath     Explicit Sonic 2 REV01 ROM path."
     Write-Host "  -MoviesDir   Directory containing s2-lvl-select-*.bk2 movies."
-    Write-Host "  -OutputRoot  Trace resource root. Defaults to src/test/resources/traces/s2."
+    Write-Host "  -OutputRoot  Explicit output root outside the TraceChaser source tree."
     Write-Host ("  -Only        Generate one route slug: {0}." -f (($Routes | ForEach-Object { $_.Route }) -join ", "))
     Write-Host ""
     Write-Host "Routes:"
@@ -738,20 +738,27 @@ if ($Only) {
 
 $romFullPath = Resolve-RepoPath $RomPath
 $moviesFullPath = Resolve-RepoPath $MoviesDir
+$traceChaserRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$requestedOutput = [System.IO.Path]::GetFullPath($OutputRoot)
+if ($requestedOutput -eq $traceChaserRoot -or $requestedOutput.StartsWith(
+        $traceChaserRoot + [System.IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputRoot must be outside the TraceChaser source tree"
+}
 $outputFullPath = if (Test-Path -LiteralPath $OutputRoot) {
     (Resolve-Path -LiteralPath $OutputRoot).Path
 } else {
     New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
     (Resolve-Path -LiteralPath $OutputRoot).Path
 }
-$recordScript = Resolve-RepoPath "tools/bizhawk/record_s2_trace.bat"
-$bizhawkToolsDir = Resolve-RepoPath "tools/bizhawk"
+$recordScript = Resolve-RepoPath (Join-Path $PSScriptRoot "record_s2_trace.bat")
+$bizhawkToolsDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $traceOutput = [System.IO.Path]::GetFullPath(
-    (Join-Path $bizhawkToolsDir "trace_output"))
-$runBizhawkLuaBat = Resolve-RepoPath "tools/bizhawk/run_bizhawk_lua.bat"
-$countBk2FramesScript = Resolve-RepoPath "tools/bizhawk/count_bk2_input_frames.ps1"
-$compressScript = Resolve-RepoPath "tools/traces/compress-traces.ps1"
-$ssLuaScript = Resolve-RepoPath "tools/bizhawk/s2_ss_trace_recorder.lua"
+    (Join-Path $outputFullPath ".capture-work"))
+$runBizhawkLuaBat = Resolve-RepoPath (Join-Path $PSScriptRoot "run_bizhawk_lua.bat")
+$countBk2FramesScript = Resolve-RepoPath (Join-Path $PSScriptRoot "count_bk2_input_frames.ps1")
+$compressScript = Resolve-RepoPath (Join-Path $PSScriptRoot "../traces/compress-traces.ps1")
+$ssLuaScript = Resolve-RepoPath (Join-Path $PSScriptRoot "s2_ss_trace_recorder.lua")
 
 foreach ($route in $selectedRoutes) {
     $bk2Path = Join-Path $moviesFullPath $route.Bk2
@@ -761,7 +768,7 @@ foreach ($route in $selectedRoutes) {
 
     $resolvedTraceOutput = [System.IO.Path]::GetFullPath($traceOutput)
     $expectedTraceOutput = [System.IO.Path]::GetFullPath(
-        (Join-Path $bizhawkToolsDir "trace_output"))
+        (Join-Path $outputFullPath ".capture-work"))
     if ($resolvedTraceOutput -ne $expectedTraceOutput) {
         throw "Refusing to clean unexpected trace output path: $resolvedTraceOutput"
     }
@@ -797,6 +804,7 @@ foreach ($route in $selectedRoutes) {
         }
     } else {
         $env:OGGF_TRACE_GAMEPLAY_SEGMENT = [string]$route.Segment
+        $env:OGGF_TRACE_OUTPUT_DIR = $resolvedTraceOutput
         & $recordScript $romFullPath $bk2Path "level_gated_reset_aware"
         if ($LASTEXITCODE -ne 0) {
             throw "record_s2_trace.bat failed for $($route.Route) with exit code $LASTEXITCODE"

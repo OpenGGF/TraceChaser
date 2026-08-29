@@ -1,6 +1,6 @@
 local START = tonumber(os.getenv("OGGF_START") or "0")
 local STOP  = tonumber(os.getenv("OGGF_STOP")  or "0")
-local OUT   = os.getenv("OGGF_OUT") or "tools/bizhawk/trace_output/s2_mtz2_hurt_probe.txt"
+local OUT   = assert(os.getenv("OGGF_OUT"), "OGGF_OUT must name an explicit external output path")
 
 emu.limitframerate(false)
 client.speedmode(6400)

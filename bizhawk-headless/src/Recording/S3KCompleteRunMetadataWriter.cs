@@ -7,9 +7,9 @@ namespace OpenGGF.BizHawk.Headless
     /// <summary>
     /// Native writer for the S3K complete-run recorder's THREE
     /// metadata.json shapes, derived from the recorder layout
-    /// (tools/bizhawk/s3k_complete_run_recorder.lua): <c>write_metadata</c>
+    /// (bizhawk/s3k_complete_run_recorder.lua): <c>write_metadata</c>
     /// for the level and bonus shapes, <c>write_ss_metadata</c> for the
-    /// special-stage shape; spec tools/bizhawk-headless/docs/
+    /// special-stage shape; spec bizhawk-headless/docs/
     /// s3k-run-publication.md §3).
     ///
     /// This is deliberately NOT an extension of

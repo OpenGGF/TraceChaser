@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the Lua trace recorder's physics.csv v7 header and
-    /// row formatting (tools/bizhawk/s1_trace_recorder.lua). Rows are
+    /// row formatting (bizhawk/s1_trace_recorder.lua). Rows are
     /// returned WITHOUT the trailing '\n'; the caller terminates every line
     /// (including the last) with a single LF.
     /// </summary>

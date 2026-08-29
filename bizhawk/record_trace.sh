@@ -6,20 +6,21 @@
 # writes trace_output/ (physics.csv, aux_state.jsonl, metadata.json) into the
 # working directory (override with OGGF_WORKDIR).
 #
-# Usage:  record_trace.sh <rom_path> <bk2_path>
-# Example: record_trace.sh s1.gen src/test/resources/traces/s1/ghz1_fullrun/ghz1_fullrun.bk2
+# Usage:  record_trace.sh <rom_path> <bk2_path> <external_output_dir>
 #
 # See run_bizhawk_lua.sh for the environment knobs (BIZHAWK_HOME, DISPLAY,
 # software-GL, --luaconsole) and the KNOWN BLOCKER note about command-line BK2
 # loading hanging on the BizHawk 2.11.1 + mono build.
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-	echo "Usage: $(basename "$0") <rom_path> <bk2_path>" >&2
+if [ "$#" -ne 3 ]; then
+	echo "Usage: $(basename "$0") <rom_path> <bk2_path> <external_output_dir>" >&2
 	echo "  rom_path   Path to Sonic 1 REV01 ROM" >&2
 	echo "  bk2_path   Path to BK2 movie file" >&2
 	exit 2
 fi
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+export OGGF_TRACE_OUTPUT_DIR=$3
+export OGGF_WORKDIR=$3
 exec "$HERE/run_bizhawk_lua.sh" "$HERE/s1_trace_recorder.lua" "$2" "$1"

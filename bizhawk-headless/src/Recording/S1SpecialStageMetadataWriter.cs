@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S1 complete-run recorder's ss metadata.json
-    /// layout (tools/bizhawk/s1_complete_run_recorder.lua, write_ss_metadata
+    /// layout (bizhawk/s1_complete_run_recorder.lua, write_ss_metadata
     /// L583-605; spec s1-run-mode-behavior.md §4): a distinct shape from the
     /// level metadata — trace_profile is unconditionally "s1_special_stage",
     /// characters/main_character/sidekicks are the hardcoded solo-Sonic

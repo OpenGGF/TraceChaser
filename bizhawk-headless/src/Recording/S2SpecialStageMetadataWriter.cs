@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua run-mode ss metadata.json layout
-    /// (tools/bizhawk/s2_trace_recorder.lua v9.13-s2, write_ss_metadata;
+    /// (bizhawk/s2_trace_recorder.lua v9.13-s2, write_ss_metadata;
     /// spec s2-run-mode-behavior.md §4): a distinct shape from the
     /// level metadata — trace_profile is unconditionally "s2_special_stage",
     /// characters/sidekicks are hardcoded sonic+tails (not derived from slot

@@ -5,7 +5,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua run-mode run_manifest.json emitter
-    /// (tools/bizhawk/s2_trace_recorder.lua v9.13-s2, write_run_manifest;
+    /// (bizhawk/s2_trace_recorder.lua v9.13-s2, write_run_manifest;
     /// spec s2-run-mode-behavior.md §6, §11). Written exactly once at
     /// run termination to the run root. rom_checksum is the inline literal
     /// "7B905383" (S2 World REV01 CRC32), not computed at runtime. String fields

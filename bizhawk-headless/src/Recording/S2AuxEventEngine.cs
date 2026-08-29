@@ -7,7 +7,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua trace recorder's aux_state.jsonl event
-    /// generation (tools/bizhawk/s2_trace_recorder.lua v9.12-s2): the arm
+    /// generation (bizhawk/s2_trace_recorder.lua v9.12-s2): the arm
     /// block (<see cref="EmitArmEvents"/>: frame -1 player_history_snapshot
     /// / cpu_state_snapshot / per-slot object_state_snapshot, then the
     /// arm-time zone_act_state and "gameplay_start" checkpoint), the step-1

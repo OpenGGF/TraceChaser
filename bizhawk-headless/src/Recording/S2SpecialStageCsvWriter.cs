@@ -6,9 +6,9 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua trace recorder's run-mode special-stage
-    /// physics.csv writer (tools/bizhawk/s2_trace_recorder.lua v9.12-s2,
+    /// physics.csv writer (bizhawk/s2_trace_recorder.lua v9.12-s2,
     /// read_ss_character/read_ss_state/write_ss_row, L765-931; spec
-    /// tools/bizhawk-headless/docs/s2-run-mode-behavior.md §4). One 48-column
+    /// bizhawk-headless/docs/s2-run-mode-behavior.md §4). One 48-column
     /// row per $10 frame, ss_csv_version 1: <c>frame</c> and <c>lag</c> are
     /// decimal, everything else is lowercase unpadded hex (the SS
     /// convention — NOT the level writer's zero-padded %04X helpers).

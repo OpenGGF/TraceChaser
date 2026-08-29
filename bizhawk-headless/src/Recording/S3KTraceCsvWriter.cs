@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S3K Lua trace recorder's physics.csv v7 row
-    /// formatting (tools/bizhawk/s3k_trace_recorder.lua v6.32-s3k). The
+    /// formatting (bizhawk/s3k_trace_recorder.lua v6.32-s3k). The
     /// header text, 42-field format shape, uhex two's-complement
     /// rendering, and ground-mode thresholds are byte-shared with the
     /// S1/S2 ports; the S3K deltas are the RAM sources: player/sidekick

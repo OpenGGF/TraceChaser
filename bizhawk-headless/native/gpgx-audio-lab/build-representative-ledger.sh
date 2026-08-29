@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-game=${1:?usage: build-representative-ledger.sh s1|s2 INPUT OUTPUT}
-input=${2:?usage: build-representative-ledger.sh s1|s2 INPUT OUTPUT}
-output=${3:?usage: build-representative-ledger.sh s1|s2 INPUT OUTPUT}
+game=${1:?usage: build-representative-ledger.sh s1|s2 SOURCE_MAP INPUT OUTPUT}
+source_map=${2:?usage: build-representative-ledger.sh s1|s2 SOURCE_MAP INPUT OUTPUT}
+input=${3:?usage: build-representative-ledger.sh s1|s2 SOURCE_MAP INPUT OUTPUT}
+output=${4:?usage: build-representative-ledger.sh s1|s2 SOURCE_MAP INPUT OUTPUT}
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-source_map="$script_dir/../../../../docs/architecture/research/audio/s1-s2-ym-write-source-map-v1.tsv"
+repo_root=$(cd -- "$script_dir/../../.." && pwd -P)
 [[ "$game" == s1 || "$game" == s2 ]] || { echo 'game must be s1 or s2' >&2; exit 2; }
-[[ -f "$input" && ! -e "$output" ]] || { echo 'input must exist and output must not' >&2; exit 2; }
+[[ "$source_map" = /* && -f "$source_map" && "$input" = /* && -f "$input" && "$output" = /* && ! -e "$output" ]] \
+  || { echo 'source map/input must be absolute files and output must be an absent absolute path' >&2; exit 2; }
+case "$output" in "$repo_root"|"$repo_root"/*) echo 'output must be outside the TraceChaser source tree' >&2; exit 2 ;; esac
 
 gawk -F '\t' -v OFS='\t' -v game="$game" '
 function hex(value) { return strtonum(value) }

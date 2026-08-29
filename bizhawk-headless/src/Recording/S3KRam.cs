@@ -6,7 +6,7 @@ namespace OpenGGF.BizHawk.Headless
     /// <summary>
     /// Sonic 3 &amp; Knuckles (locked-on combined image) 68K work-RAM
     /// address map used by the S3K trace recorder port
-    /// (tools/bizhawk/s3k_trace_recorder.lua v6.32-s3k). Addresses are the
+    /// (bizhawk/s3k_trace_recorder.lua v6.32-s3k). Addresses are the
     /// mainmemory-domain form: the $FF0000 base is stripped, so 0xF600
     /// here is $FFF600 on hardware. Typed big-endian reads delegate to
     /// the game-independent helpers on <see cref="S1Ram"/>.

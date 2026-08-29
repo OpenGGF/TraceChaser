@@ -6,9 +6,7 @@ REM Usage:  record_s3k_trace.bat <rom_path> <bk2_path> [trace_profile]
 REM Example: record_s3k_trace.bat "s3k.gen" "Movies\s3k-aiz1.bk2"
 REM Example: record_s3k_trace.bat "s3k.gen" "src\test\resources\traces\s3k\aiz1_to_hcz_fullrun\s3k-aiz1-aiz2-sonictails.bk2" aiz_end_to_end
 REM
-REM Output goes to: <repo>\tools\bizhawk\trace_output\
-REM   (BizHawk resolves the script's relative trace_output folder from the
-REM    recorder script location)
+REM OGGF_TRACE_OUTPUT_DIR is mandatory and must identify external scratch.
 REM
 REM BizHawk path can be overridden with BIZHAWK_EXE env var.
 REM To see the emulator window during recording, edit HEADLESS_VISIBLE in
@@ -18,7 +16,11 @@ setlocal
 
 set "LUA_SCRIPT=%~dp0s3k_trace_recorder.lua"
 
-set "OUTPUT_DIR=%~dp0trace_output"
+if "%OGGF_TRACE_OUTPUT_DIR%"=="" (
+    echo ERROR: set OGGF_TRACE_OUTPUT_DIR to an explicit external directory.
+    exit /b 1
+)
+for %%I in ("%OGGF_TRACE_OUTPUT_DIR%") do set "OUTPUT_DIR=%%~fI"
 set "COMPRESS_SCRIPT=%~dp0..\traces\compress-traces.ps1"
 
 if "%~1"=="" (

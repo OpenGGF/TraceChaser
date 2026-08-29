@@ -2,7 +2,7 @@
 """
 Sonic 1 Trace Recorder for stable-retro.
 
-Equivalent of tools/bizhawk/s1_trace_recorder.lua (v2.2).
+Equivalent of bizhawk/s1_trace_recorder.lua (v2.2).
 Records frame-by-frame Sonic 1 physics state during gameplay and produces
 output files in the same format consumed by the Java trace replay tests:
 

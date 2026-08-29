@@ -6,8 +6,8 @@ namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
     /// Byte-exact port of the S2 Lua trace recorder's strict-v5 metadata.json layout
-    /// (tools/bizhawk/s2_trace_recorder.lua;
-    /// spec tools/bizhawk-headless/docs/s2-trace-recorder-behavior.md §8):
+    /// (bizhawk/s2_trace_recorder.lua;
+    /// spec bizhawk-headless/docs/s2-trace-recorder-behavior.md §8):
     /// 2-space indent, fixed key order, LF line endings, and a trailing
     /// newline after the closing brace. The Lua rewrites the file at arm,
     /// every 300 recorded frames, and at finalize; only the final bytes

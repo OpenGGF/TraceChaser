@@ -24,15 +24,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
+TRACECHASER_ROOT = Path(__file__).resolve().parents[1]
+if str(TRACECHASER_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRACECHASER_ROOT))
 MATRIX_FORMAT = "openggf-trace-v5-capture-matrix-v1"
 EXTRACTION_MATRIX_FORMAT = "openggf-tracechaser-extraction-capture-matrix-v1"
-MATRIX_DOCUMENT = (REPOSITORY_ROOT / "docs" / "architecture" / "validation" /
-                   "trace" / "2026-08-04-trace-v5-capture-matrix.json")
-EXTRACTION_MATRIX_DOCUMENT = (REPOSITORY_ROOT / "docs" / "architecture" / "validation" /
-                              "trace" / "2026-08-29-tracechaser-extraction-capture-matrix.json")
+DEFAULT_BIZHAWK_HOME = TRACECHASER_ROOT / ".dependencies" / "BizHawk-2.11-linux-x64"
 EXTRACTION_IDS = (
     "s1-ghz1",
     "s1-emeralds-run",
@@ -66,8 +63,9 @@ ROMS = {
     },
 }
 
-# Paths are relative to src/test/resources/traces.  ``source`` is relative to
-# a capture root; an empty source maps all output files at the root.  Keeping
+# Publication paths are relative to the explicitly supplied fixture root.
+# ``source`` is relative to a capture root; an empty source maps all output
+# files at the root.  Keeping
 # this declarative makes the copy plan reviewable before any capture exists.
 def _mapping(source: str, destination: str, duplicate: bool = False) -> dict[str, Any]:
     item = {"source": source, "destination": destination}
@@ -112,7 +110,7 @@ ROWS.extend([
 ])
 
 
-def matrix_document() -> dict[str, Any]:
+def matrix_document(path: Path) -> dict[str, Any]:
     """Return the reviewed on-disk matrix, including its publication mappings.
 
     The constants above retain the original command-generation defaults for
@@ -120,10 +118,10 @@ def matrix_document() -> dict[str, Any]:
     by the JSON document so a corrected destination cannot be silently masked
     by a stale embedded copy.
     """
-    return load_document(MATRIX_DOCUMENT)
+    return load_document(path)
 
 
-def load_document(path: Path = MATRIX_DOCUMENT) -> dict[str, Any]:
+def load_document(path: Path) -> dict[str, Any]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -255,13 +253,13 @@ def _run_clean_native_build_tests(
             environment["MONO_PATH"] = str(bizhawk_home / "dll")
             environment["LD_LIBRARY_PATH"] = str(bizhawk_home / "dll")
             build_result = subprocess.run(
-                [str(checkout / "tools/bizhawk-headless/build.sh")],
+                [str(checkout / "bizhawk-headless/build.sh")],
                 cwd=checkout,
                 env=environment,
             )
             if build_result.returncode != 0:
                 return {"exit_code": build_result.returncode, "artifacts": {}}
-            test_executable = checkout / "tools/bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.Tests.exe"
+            test_executable = checkout / "bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.Tests.exe"
             for test_filter in native_test_filters:
                 result = subprocess.run(
                     ["/usr/bin/mono", str(test_executable), "--filter", test_filter, "--jobs", "1"],
@@ -270,7 +268,7 @@ def _run_clean_native_build_tests(
                 )
                 if result.returncode != 0:
                     return {"exit_code": result.returncode, "artifacts": {}}
-            release = checkout / "tools/bizhawk-headless/bin/Release"
+            release = checkout / "bizhawk-headless/bin/Release"
             artifacts: dict[str, dict[str, Any]] = {}
             for name in (
                 "BizHawk.Headless.Gpgx.exe",
@@ -397,7 +395,7 @@ def verify_extraction_freeze(
 
     if bizhawk_home is None:
         configured = os.environ.get("BIZHAWK_HOME")
-        bizhawk_home = Path(configured) if configured else repository_root / "docs/BizHawk-2.11-linux-x64"
+        bizhawk_home = Path(configured) if configured else DEFAULT_BIZHAWK_HOME
     bizhawk_home = bizhawk_home.resolve()
     if not bizhawk_home.is_dir():
         raise ValueError(f"extraction BizHawk home is unavailable: {bizhawk_home}")
@@ -427,50 +425,68 @@ def verify_extraction_freeze(
             raise ValueError(f"deterministic native artifact identity mismatch: {name}")
 
 
-def verify_roms(repository_root: Path, document: dict[str, Any]) -> dict[str, Path]:
-    result = configured_rom_paths(repository_root, document)
-    for game, path in result.items():
+def verify_roms(document: dict[str, Any], roms: dict[str, Path]) -> dict[str, Path]:
+    required_games = set(ROMS)
+    if set(roms) != required_games:
+        raise ValueError("explicit ROM paths are required for s1, s2, and s3k")
+    for game, path in roms.items():
         expected = document["roms"][game]
         if not path.is_file():
             raise ValueError(f"verified {game} ROM is absent: {path}")
         if sha256_file(path).lower() != expected["sha256"].lower() or sha1_file(path).lower() != expected["sha1"].lower() or crc32_file(path) != expected["crc32"]:
             raise ValueError(f"verified {game} ROM identity mismatch: {path}")
-    return result
+    return roms
 
 
-def configured_rom_paths(repository_root: Path, document: dict[str, Any]) -> dict[str, Path]:
-    result: dict[str, Path] = {}
-    for game, expected in document["roms"].items():
-        configured = os.environ.get(expected["environment"])
-        path = Path(configured).expanduser() if configured else repository_root / expected["filename"]
-        result[game] = path.resolve()
-    return result
-
-
-def verify_movies(repository_root: Path, document: dict[str, Any]) -> None:
+def verify_movies(movie_root: Path, document: dict[str, Any]) -> None:
     for row in document["rows"]:
         if row["movie"] is None:
             continue
-        path = repository_root / "src/test/resources/traces" / row["movie"]
+        path = movie_root / row["movie"]
         if not path.is_file() or sha256_file(path).lower() != row["movie_sha256"].lower():
             raise ValueError(f"movie identity mismatch for {row['id']}: {path}")
 
 
-def preflight(repository_root: Path, batch_root: Path, candidate_root: Path, document: dict[str, Any], *, require_capacity: bool = True) -> dict[str, Any]:
-    repository_root = repository_root.resolve()
+def require_external_scratch(
+    tracechaser_root: Path,
+    input_repository_root: Path,
+    *scratch_roots: Path,
+) -> None:
+    protected = (tracechaser_root.resolve(), input_repository_root.resolve())
+    for scratch_root in scratch_roots:
+        resolved = scratch_root.resolve()
+        if any(resolved == root or resolved.is_relative_to(root) for root in protected):
+            raise ValueError("scratch roots must remain outside both repositories")
+
+
+def preflight(
+    tracechaser_root: Path,
+    input_repository_root: Path,
+    fixture_root: Path,
+    movie_root: Path,
+    fixture_inventory: Path,
+    batch_root: Path,
+    candidate_root: Path,
+    document: dict[str, Any],
+    roms: dict[str, Path],
+    *,
+    bizhawk_home: Path = DEFAULT_BIZHAWK_HOME,
+    require_capacity: bool = True,
+) -> dict[str, Any]:
+    tracechaser_root = tracechaser_root.resolve()
+    input_repository_root = input_repository_root.resolve()
+    fixture_root = fixture_root.resolve()
+    movie_root = movie_root.resolve()
     batch_root = batch_root.resolve()
     candidate_root = candidate_root.resolve()
-    installed_root = repository_root / "src/test/resources/traces"
+    require_external_scratch(tracechaser_root, input_repository_root, batch_root, candidate_root)
     if candidate_root.exists():
         raise ValueError(f"candidate root must be absent: {candidate_root}")
-    if batch_root.is_relative_to(installed_root) or candidate_root.is_relative_to(installed_root):
-        raise ValueError("scratch paths must remain outside installed fixtures")
-    verify_freeze(repository_root, document)
-    verify_roms(repository_root, document)
-    verify_movies(repository_root, document)
-    inventory = repository_root / document["freeze"]["fixture_inventory"]["path"]
-    from tools.traces.trace_fixture_inventory import load_inventory, verify_inventory
-    verify_inventory(installed_root, load_inventory(inventory))
+    verify_extraction_freeze(tracechaser_root, document, bizhawk_home=bizhawk_home)
+    verify_roms(document, roms)
+    verify_movies(movie_root, document)
+    from traces.trace_fixture_inventory import load_inventory, verify_inventory
+    verify_inventory(fixture_root, load_inventory(fixture_inventory))
     absent: list[str] = []
     for row in document["rows"]:
         output = batch_root / document["capture"]["output_template"].format(id=row["id"])
@@ -488,22 +504,28 @@ def preflight(repository_root: Path, batch_root: Path, candidate_root: Path, doc
     return {"batch_root": str(batch_root), "candidate_root": str(candidate_root), "required_free_bytes": required, "available_free_bytes": usage.free, "absent_outputs": absent}
 
 
-def expand_commands(repository_root: Path, batch_root: Path, document: dict[str, Any], roms: dict[str, Path] | None = None) -> list[str]:
-    repository_root = repository_root.resolve()
+def expand_commands(
+    tracechaser_root: Path,
+    movie_root: Path,
+    batch_root: Path,
+    document: dict[str, Any],
+    roms: dict[str, Path],
+) -> list[list[str]]:
+    tracechaser_root = tracechaser_root.resolve()
+    movie_root = movie_root.resolve()
     batch_root = batch_root.resolve()
-    roms = roms or {game: repository_root / expected["filename"] for game, expected in document["roms"].items()}
-    runner = repository_root / document["capture"]["runner"]
-    commands: list[str] = []
+    runner = tracechaser_root / "bizhawk-headless" / "run.sh"
+    commands: list[list[str]] = []
     for row in document["rows"]:
         output = batch_root / document["capture"]["output_template"].format(id=row["id"])
         args = [str(runner), "--mode", document["capture"]["mode"], "--rom", str(roms[row["game"]])]
         if row["movie"] is not None:
-            args.extend(["--movie", str(repository_root / "src/test/resources/traces" / row["movie"])])
+            args.extend(["--movie", str(movie_root / row["movie"])])
         args.extend(["--output", str(output)])
         args.extend(row["selectors"])
         if row.get("credits"):
             args.extend(["--credits-raw-observations", str(batch_root / row["credits"]["raw_sidecar"]), "--credits-raw-observation-id", row["credits"]["observation_id"]])
-        commands.append(" ".join(shlex.quote(argument) for argument in args))
+        commands.append(args)
     return commands
 
 
@@ -532,25 +554,32 @@ def copy_tree_no_replace(source_root: Path, source_prefix: str, destination_root
     return copied
 
 
-def assemble(repository_root: Path, batch_root: Path, candidate_root: Path, document: dict[str, Any]) -> dict[str, Any]:
-    repository_root = repository_root.resolve()
+def assemble(
+    tracechaser_root: Path,
+    input_repository_root: Path,
+    fixture_root: Path,
+    batch_root: Path,
+    candidate_root: Path,
+    document: dict[str, Any],
+) -> dict[str, Any]:
+    tracechaser_root = tracechaser_root.resolve()
+    input_repository_root = input_repository_root.resolve()
+    fixture_root = fixture_root.resolve()
     batch_root = batch_root.resolve()
     candidate_root = candidate_root.resolve()
-    installed_root = repository_root / "src/test/resources/traces"
+    require_external_scratch(tracechaser_root, input_repository_root, batch_root, candidate_root)
     if candidate_root.exists():
         raise ValueError(f"candidate root must be absent: {candidate_root}")
-    if candidate_root.is_relative_to(installed_root):
-        raise ValueError("candidate root must remain outside installed fixtures")
     candidate_root.mkdir(parents=True)
     copied = 0
     # Static inputs are copied byte-for-byte; generated trace payloads are not.
-    for path in sorted(installed_root.rglob("*.bk2")):
-        destination = candidate_root / path.relative_to(installed_root)
+    for path in sorted(fixture_root.rglob("*.bk2")):
+        destination = candidate_root / path.relative_to(fixture_root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(path.read_bytes())
         copied += 1
     for relative_static in document.get("static_paths", []):
-        static_path = installed_root / relative_static
+        static_path = fixture_root / relative_static
         if not static_path.is_file():
             raise ValueError(f"declared static input is absent: {static_path}")
         destination = candidate_root / relative_static
@@ -570,8 +599,15 @@ def assemble(repository_root: Path, batch_root: Path, candidate_root: Path, docu
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("validate", "expand", "preflight", "assemble"))
-    parser.add_argument("--repository-root", type=Path, default=REPOSITORY_ROOT)
-    parser.add_argument("--matrix", type=Path, default=MATRIX_DOCUMENT)
+    parser.add_argument("--matrix", type=Path, required=True)
+    parser.add_argument("--input-repository-root", type=Path)
+    parser.add_argument("--fixture-root", type=Path)
+    parser.add_argument("--fixture-inventory", type=Path)
+    parser.add_argument("--movie-root", type=Path)
+    parser.add_argument("--s1-rom", type=Path)
+    parser.add_argument("--s2-rom", type=Path)
+    parser.add_argument("--s3k-rom", type=Path)
+    parser.add_argument("--bizhawk-home", type=Path, default=DEFAULT_BIZHAWK_HOME)
     parser.add_argument("--batch-root", type=Path)
     parser.add_argument("--candidate-root", type=Path)
     parser.add_argument("--output", type=Path)
@@ -584,22 +620,31 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "expand":
             if args.batch_root is None:
                 raise ValueError("--batch-root is required for expand")
-            roms = configured_rom_paths(args.repository_root, document)
-            content = ("\n".join(expand_commands(args.repository_root, args.batch_root, document, roms)) + "\n").encode()
+            if args.input_repository_root is None or args.fixture_root is None or args.movie_root is None:
+                raise ValueError("--input-repository-root, --fixture-root, and --movie-root are required for expand")
+            roms = {"s1": args.s1_rom, "s2": args.s2_rom, "s3k": args.s3k_rom}
+            if any(path is None for path in roms.values()):
+                raise ValueError("--s1-rom, --s2-rom, and --s3k-rom are required for expand")
+            require_external_scratch(TRACECHASER_ROOT, args.input_repository_root, args.batch_root)
+            argv_rows = expand_commands(TRACECHASER_ROOT, args.movie_root, args.batch_root, document, roms)  # type: ignore[arg-type]
+            content = ("\n".join(" ".join(shlex.quote(argument) for argument in row) for row in argv_rows) + "\n").encode()
             if args.output:
-                from tools.traces.no_replace_output import write_bytes_no_replace
+                from traces.no_replace_output import write_bytes_no_replace
                 write_bytes_no_replace(args.output, content, "capture command ledger")
             else:
                 sys.stdout.buffer.write(content)
         elif args.command == "preflight":
-            if args.batch_root is None or args.candidate_root is None:
-                raise ValueError("--batch-root and --candidate-root are required for preflight")
-            result = preflight(args.repository_root, args.batch_root, args.candidate_root, document, require_capacity=not args.skip_capacity)
+            if None in (args.input_repository_root, args.fixture_root, args.fixture_inventory, args.movie_root, args.batch_root, args.candidate_root):
+                raise ValueError("explicit input, fixture, movie, inventory, batch, and candidate roots are required for preflight")
+            roms = {"s1": args.s1_rom, "s2": args.s2_rom, "s3k": args.s3k_rom}
+            if any(path is None for path in roms.values()):
+                raise ValueError("--s1-rom, --s2-rom, and --s3k-rom are required for preflight")
+            result = preflight(TRACECHASER_ROOT, args.input_repository_root, args.fixture_root, args.movie_root, args.fixture_inventory, args.batch_root, args.candidate_root, document, roms, bizhawk_home=args.bizhawk_home, require_capacity=not args.skip_capacity)  # type: ignore[arg-type]
             print(json.dumps(result, indent=2, sort_keys=True))
         else:
-            if args.batch_root is None or args.candidate_root is None:
-                raise ValueError("--batch-root and --candidate-root are required for assemble")
-            result = assemble(args.repository_root, args.batch_root, args.candidate_root, document)
+            if None in (args.input_repository_root, args.fixture_root, args.batch_root, args.candidate_root):
+                raise ValueError("explicit input, fixture, batch, and candidate roots are required for assemble")
+            result = assemble(TRACECHASER_ROOT, args.input_repository_root, args.fixture_root, args.batch_root, args.candidate_root, document)  # type: ignore[arg-type]
             print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as error:

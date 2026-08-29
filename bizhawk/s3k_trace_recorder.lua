@@ -264,7 +264,7 @@
 --- Shared lib ---
 ------------------
 
--- Locate tools/bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
+-- Locate bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
 -- direct --lua= route, and headless launches (see lib/oggf_trace_common.lua and
 -- SHARED_MODULE_HANDOFF.md). The launcher-provided env var wins; otherwise fall
 -- back to this recorder's own directory, then CWD. Scoped in a do-block so the
@@ -1013,7 +1013,7 @@ local function write_metadata()
     meta_file:write('  "recorder": "lua-bizhawk-diagnostic",\n')
     meta_file:write('  "recorder_version": "3.0",\n')
     -- Historical pre-v5 trace_schema 7 added the timing stream. Native v5
-    -- publication is handled by tools/bizhawk-headless.
+    -- publication is handled by bizhawk-headless/.
     -- csv_version 7
     -- adds player and sidekick animation_id/mapping_frame to physics.csv. New per-frame
     -- cpu_state, oscillation_state, object_state, and interact_state aux

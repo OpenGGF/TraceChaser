@@ -1,10 +1,18 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string[]]$Routes,
-    [string]$OutputRoot = "src/test/resources/traces/s2"
+    [Parameter(Mandatory=$true)][string]$OutputRoot
 )
 
 $ErrorActionPreference = "Stop"
+$traceChaserRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+if ($resolvedOutputRoot -eq $traceChaserRoot -or $resolvedOutputRoot.StartsWith(
+        $traceChaserRoot + [System.IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputRoot must be outside the TraceChaser source tree"
+}
+$OutputRoot = $resolvedOutputRoot
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 

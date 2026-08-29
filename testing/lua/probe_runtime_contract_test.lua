@@ -104,9 +104,9 @@ local function runWindowsSiblingPath()
     newEnvironment()
     local runtime = dofile(runtimePath)
     local actual = runtime.siblingPath(
-        [[C:\OpenGGF\tools\bizhawk\probes\probe_runtime.lua]],
+        [[C:\TraceChaser\bizhawk\probes\probe_runtime.lua]],
         "audio/s1_audio_parity_contract.lua")
-    check(actual == "C:/OpenGGF/tools/bizhawk/audio/s1_audio_parity_contract.lua",
+    check(actual == "C:/TraceChaser/bizhawk/audio/s1_audio_parity_contract.lua",
         "Windows runtime path did not normalize to the audio contract")
 end
 
