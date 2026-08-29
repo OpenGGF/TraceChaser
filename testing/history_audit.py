@@ -31,52 +31,81 @@ CONTENT_OVERLAP_BYTES = 512
 
 
 @dataclass(frozen=True, order=True)
+class Occurrence:
+    commit: str
+    path: bytes
+
+
+@dataclass(frozen=True)
 class Violation:
     commit: str
     object_id: str
-    path: str
+    path: bytes | None
     reason: str
 
     def render(self) -> str:
         return (
             f"commit={self.commit} object={self.object_id} "
-            f"path={self.path} reason={self.reason}"
+            f"path={_display_path(self.path)} reason={self.reason}"
         )
 
 
 def find_violations(root: Path) -> list[Violation]:
     root = root.resolve()
-    object_paths = _reachable_objects(root)
-    object_metadata = _object_metadata(root, object_paths)
+    objects = _reachable_objects(root)
+    object_metadata = _object_metadata(root, objects)
+    occurrences = _committed_blob_occurrences(root, object_metadata)
     violations = []
 
-    for path in _historical_paths(root, object_paths, object_metadata):
-        reasons = path_violations(path)
-        if not reasons:
-            continue
-        commit, object_id = _locate_path(root, path)
-        violations.extend(Violation(commit, object_id, path, reason) for reason in reasons)
+    for object_id, blob_occurrences in occurrences.items():
+        for occurrence in blob_occurrences:
+            policy_path = occurrence.path.decode("utf-8", "surrogateescape")
+            violations.extend(
+                Violation(occurrence.commit, object_id, occurrence.path, reason)
+                for reason in path_violations(policy_path)
+            )
 
-    for object_id, paths in object_paths.items():
+    for object_id in sorted(objects):
         object_type, size = object_metadata[object_id]
         if object_type != "blob":
             continue
-        path = min(paths) if paths else "<unknown>"
         reasons = _scan_blob(root, object_id, size)
         if not reasons:
             continue
-        commit = _locate_object(root, object_id, path)
-        violations.extend(Violation(commit, object_id, path, reason) for reason in reasons)
+        blob_occurrences = occurrences.get(object_id)
+        if blob_occurrences:
+            violations.extend(
+                Violation(occurrence.commit, object_id, occurrence.path, reason)
+                for occurrence in blob_occurrences
+                for reason in reasons
+            )
+        else:
+            violations.extend(
+                Violation("<direct>", object_id, None, reason) for reason in reasons
+            )
 
-    violations.extend(_license_content_violations(root))
+    violations.extend(_license_content_violations(root, occurrences))
 
-    return sorted(set(violations))
+    return sorted(set(violations), key=_violation_sort_key)
 
 
-def _license_content_violations(root: Path) -> list[Violation]:
+def _license_content_violations(
+    root: Path,
+    occurrences: dict[str, tuple[Occurrence, ...]],
+) -> list[Violation]:
     violations = []
     for path, expected_sha256 in EXACT_LICENSE_SHA256.items():
-        for commit, object_id in _blob_versions_for_path(root, path).values():
+        path_bytes = path.encode("utf-8")
+        matching = {
+            object_id: tuple(
+                occurrence
+                for occurrence in blob_occurrences
+                if occurrence.path == path_bytes
+            )
+            for object_id, blob_occurrences in occurrences.items()
+            if any(occurrence.path == path_bytes for occurrence in blob_occurrences)
+        }
+        for object_id, blob_occurrences in matching.items():
             content = subprocess.run(
                 ["git", "-C", str(root), "cat-file", "blob", object_id],
                 stdout=subprocess.PIPE,
@@ -84,41 +113,27 @@ def _license_content_violations(root: Path) -> list[Violation]:
                 check=True,
             ).stdout
             if hashlib.sha256(content).hexdigest() != expected_sha256:
-                violations.append(
-                    Violation(commit, object_id, path, "unapproved license or notice content")
+                violations.extend(
+                    Violation(
+                        occurrence.commit,
+                        object_id,
+                        occurrence.path,
+                        "unapproved license or notice content",
+                    )
+                    for occurrence in blob_occurrences
                 )
     return violations
 
 
-def _blob_versions_for_path(root: Path, path: str) -> dict[str, tuple[str, str]]:
-    commits = _git(root, "log", "--all", "--format=%H", "--", path).stdout.splitlines()
-    versions = {}
-    for commit in commits:
-        tree = _git(root, "ls-tree", commit, "--", path)
-        if not tree.stdout:
-            continue
-        metadata, _, _ = tree.stdout.partition("\t")
-        _mode, object_type, object_id = metadata.split()
-        if object_type == "blob":
-            versions.setdefault(object_id, (commit, object_id))
-    return versions
+def _reachable_objects(root: Path) -> set[str]:
+    result = _git_bytes(root, "rev-list", "--objects", "--no-object-names", "--all")
+    return {line.decode("ascii") for line in result.stdout.splitlines() if line}
 
 
-def _reachable_objects(root: Path) -> dict[str, set[str]]:
-    result = _git(root, "rev-list", "--objects", "--all")
-    objects: dict[str, set[str]] = {}
-    for line in result.stdout.splitlines():
-        object_id, separator, path = line.partition(" ")
-        objects.setdefault(object_id, set())
-        if separator and path:
-            objects[object_id].add(path)
-    return objects
-
-
-def _object_metadata(root: Path, objects: dict[str, set[str]]) -> dict[str, tuple[str, int]]:
+def _object_metadata(root: Path, objects: set[str]) -> dict[str, tuple[str, int]]:
     process = subprocess.run(
         ["git", "-C", str(root), "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
-        input="".join(f"{object_id}\n" for object_id in objects),
+        input="".join(f"{object_id}\n" for object_id in sorted(objects)),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -131,44 +146,33 @@ def _object_metadata(root: Path, objects: dict[str, set[str]]) -> dict[str, tupl
     return metadata
 
 
-def _historical_paths(
+def _committed_blob_occurrences(
     root: Path,
-    object_paths: dict[str, set[str]],
     object_metadata: dict[str, tuple[str, int]],
-) -> list[str]:
-    paths = {
-        path
-        for object_id, values in object_paths.items()
-        if object_metadata[object_id][0] == "blob"
-        for path in values
+) -> dict[str, tuple[Occurrence, ...]]:
+    occurrences: dict[str, set[Occurrence]] = {}
+    commits = sorted(
+        object_id
+        for object_id, (object_type, _size) in object_metadata.items()
+        if object_type == "commit"
+    )
+    for commit in commits:
+        tree = _git_bytes(root, "ls-tree", "-r", "-z", "--full-tree", commit).stdout
+        for record in tree.split(b"\x00"):
+            if not record:
+                continue
+            metadata, separator, path = record.partition(b"\t")
+            if not separator:
+                raise RuntimeError(f"malformed ls-tree record in commit {commit}")
+            _mode, object_type, object_id_bytes = metadata.split(b" ")
+            if object_type != b"blob":
+                continue
+            object_id = object_id_bytes.decode("ascii")
+            occurrences.setdefault(object_id, set()).add(Occurrence(commit, path))
+    return {
+        object_id: tuple(sorted(blob_occurrences))
+        for object_id, blob_occurrences in occurrences.items()
     }
-    result = _git(root, "log", "--all", "--format=", "--name-only", "--no-renames")
-    paths.update(line for line in result.stdout.splitlines() if line.strip())
-    return sorted(paths)
-
-
-def _locate_path(root: Path, path: str) -> tuple[str, str]:
-    result = _git(root, "log", "--all", "--format=%H", "--diff-filter=AM", "--", path)
-    for commit in reversed(result.stdout.splitlines()):
-        tree = _git(root, "ls-tree", commit, "--", path)
-        if not tree.stdout:
-            continue
-        metadata, _, _ = tree.stdout.partition("\t")
-        _mode, object_type, object_id = metadata.split()
-        if object_type == "blob":
-            return commit, object_id
-    raise RuntimeError(f"could not locate reachable path {path!r}")
-
-
-def _locate_object(root: Path, object_id: str, path: str) -> str:
-    arguments = ["log", "--all", "--format=%H", f"--find-object={object_id}"]
-    if path != "<unknown>":
-        arguments.extend(["--", path])
-    result = _git(root, *arguments)
-    commits = result.stdout.splitlines()
-    if not commits:
-        raise RuntimeError(f"could not locate reachable blob {object_id}")
-    return commits[-1]
 
 
 def _scan_blob(root: Path, object_id: str, size: int) -> list[str]:
@@ -212,10 +216,38 @@ def _scan_blob(root: Path, object_id: str, size: int) -> list[str]:
     return reasons
 
 
-def _git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def _display_path(path: bytes | None) -> str:
+    if path is None:
+        return "<unknown>"
+    rendered = []
+    for value in path:
+        if value == 0x5C:
+            rendered.append("\\\\")
+        elif value == 0x0A:
+            rendered.append("\\n")
+        elif value == 0x0D:
+            rendered.append("\\r")
+        elif value == 0x09:
+            rendered.append("\\t")
+        elif 0x20 <= value <= 0x7E:
+            rendered.append(chr(value))
+        else:
+            rendered.append(f"\\x{value:02x}")
+    return "".join(rendered)
+
+
+def _violation_sort_key(violation: Violation) -> tuple[str, str, bytes, str]:
+    return (
+        violation.commit,
+        violation.object_id,
+        violation.path if violation.path is not None else b"",
+        violation.reason,
+    )
+
+
+def _git_bytes(root: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(root), *arguments],
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=True,

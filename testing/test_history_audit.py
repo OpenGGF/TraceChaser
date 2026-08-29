@@ -56,6 +56,59 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self.assertIn("path=scratch/movie.bk2", result.stdout)
         self.assertIn("reason=forbidden suffix .bk2", result.stdout)
 
+    def test_control_and_non_utf8_path_bytes_are_lossless(self):
+        paths = (
+            b"safe\nmovie.bk2",
+            b"safe\tmovie.gen",
+            b"safe-\xff-movie.bk2",
+        )
+        for path in paths:
+            self._write_raw_path(path, b"ordinary non-magic content")
+        commit = self._commit("add Git-valid unusual path bytes")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(f"commit={commit}", result.stdout)
+        self.assertIn(r"path=safe\nmovie.bk2", result.stdout)
+        self.assertIn(r"path=safe\tmovie.gen", result.stdout)
+        self.assertIn(r"path=safe-\xff-movie.bk2", result.stdout)
+
+    def test_reused_prohibited_blob_reports_every_committed_path(self):
+        machine_path = b"/" + b"home" + b"/example/private"
+        content = b"root = '" + machine_path + b"'\n"
+        self._write("alpha/safe.txt", content)
+        self._write("beta/safe.txt", content)
+        commit = self._commit("reuse prohibited blob")
+        object_id = self._git("rev-parse", "HEAD:alpha/safe.txt").stdout.strip()
+
+        result = self._audit()
+
+        matching = [
+            line
+            for line in result.stdout.splitlines()
+            if f"object={object_id}" in line and "reason=machine-local absolute path" in line
+        ]
+        self.assertEqual(2, len(matching), result.stdout)
+        self.assertTrue(all(f"commit={commit}" in line for line in matching))
+        self.assertTrue(any("path=alpha/safe.txt" in line for line in matching))
+        self.assertTrue(any("path=beta/safe.txt" in line for line in matching))
+
+    def test_pathless_rev_list_annotation_uses_committed_tree_occurrence(self):
+        machine_path = b"C:" + b"\\" + b"Users" + b"\\example\\private"
+        self._write("tree/safe.txt", b"root = r'" + machine_path + b"'\n")
+        commit = self._commit("add prohibited committed blob")
+        object_id = self._git("rev-parse", "HEAD:tree/safe.txt").stdout.strip()
+        self._git("update-ref", "refs/test/direct-blob", object_id)
+
+        result = self._audit()
+
+        matching = [line for line in result.stdout.splitlines() if f"object={object_id}" in line]
+        self.assertEqual(1, len(matching), result.stdout)
+        self.assertIn(f"commit={commit}", matching[0])
+        self.assertIn("path=tree/safe.txt", matching[0])
+        self.assertNotIn("path=<unknown>", result.stdout)
+
     def test_modified_exact_notice_is_rejected(self):
         notice = "bizhawk-headless/native/gpgx-audio-observer/notices/zstd-LICENSE"
         self._write(notice, b"substituted notice\n")
@@ -134,6 +187,18 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         path = self.repository / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
+
+    def _write_raw_path(self, relative_path, content):
+        repository = os.fsencode(self.repository)
+        path = os.path.join(repository, relative_path)
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(descriptor, content)
+        finally:
+            os.close(descriptor)
 
     def _commit(self, message):
         self._git("add", ".")
