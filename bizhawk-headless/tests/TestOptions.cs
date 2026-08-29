@@ -47,6 +47,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         public string Filter { get; private set; }
+        public string NamePrefix { get; private set; }
+        public string NameExact { get; private set; }
 
         public string Game { get; private set; }
 
@@ -63,6 +65,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         public string TimingsPath { get; private set; }
 
         public bool ShowHelp { get; private set; }
+        public bool FailOnSkip { get; private set; }
+        public string ResultReport { get; private set; }
 
         /// <summary>
         /// Requested slowest-report size, or -1 when the flag was absent.
@@ -100,6 +104,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 usage.AppendLine(
                     "  --filter <substr>   Case-insensitive substring of"
                     + " the test name.");
+                usage.AppendLine("  --name-prefix <s>  Case-sensitive test-name prefix.");
+                usage.AppendLine("  --name-exact <s>   Exact case-sensitive test name.");
                 usage.AppendLine(
                     "  --game s1|s2|s3k    Tests tagged with that game."
                     + " Untagged tests are EXCLUDED.");
@@ -129,6 +135,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 usage.AppendLine(
                     "  --update-timings    Rewrite the timings file from"
                     + " this run's passing tests.");
+                usage.AppendLine("  --fail-on-skip     Return failure when a selected test skips.");
+                usage.AppendLine("  --result-report <path>  Write a machine-readable JSON result.");
                 usage.AppendLine(
                     "  --help              Print this text.");
                 usage.AppendLine();
@@ -183,6 +191,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     case "--update-timings":
                         parsed.UpdateTimings = true;
                         continue;
+                    case "--fail-on-skip":
+                        parsed.FailOnSkip = true;
+                        continue;
                 }
 
                 if (i + 1 >= args.Length)
@@ -196,6 +207,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 {
                     case "--filter":
                         parsed.Filter = value;
+                        break;
+                    case "--name-prefix":
+                        parsed.NamePrefix = value;
+                        break;
+                    case "--name-exact":
+                        parsed.NameExact = value;
+                        break;
+                    case "--result-report":
+                        parsed.ResultReport = value;
                         break;
                     case "--game":
                         if (!IsKnownGame(value))
@@ -245,6 +265,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     + " exclusive.";
                 return false;
             }
+            int nameSelectors = (parsed.Filter == null ? 0 : 1)
+                + (parsed.NamePrefix == null ? 0 : 1)
+                + (parsed.NameExact == null ? 0 : 1);
+            if (nameSelectors > 1)
+            {
+                error = "--filter, --name-prefix and --name-exact are mutually exclusive.";
+                return false;
+            }
 
             options = parsed;
             return true;
@@ -261,6 +289,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
             if (Filter != null
                 && test.Name.IndexOf(
                     Filter, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+            if (NamePrefix != null
+                && !test.Name.StartsWith(NamePrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            if (NameExact != null
+                && !string.Equals(test.Name, NameExact, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -305,6 +343,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
             if (Filter != null)
             {
                 parts.Add("--filter " + Filter);
+            }
+            if (NamePrefix != null)
+            {
+                parts.Add("--name-prefix " + NamePrefix);
+            }
+            if (NameExact != null)
+            {
+                parts.Add("--name-exact " + NameExact);
             }
 
             if (Game != null)

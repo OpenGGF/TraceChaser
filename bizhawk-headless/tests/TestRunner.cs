@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Threading;
+using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless.Tests
 {
@@ -130,7 +131,57 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 SaveTimings(timingsPath, recorded, results);
             }
 
-            return failed == 0 && !incomplete ? 0 : 1;
+            if (options.ResultReport != null)
+            {
+                WriteResultReport(options.ResultReport, selected, results);
+            }
+
+            return failed == 0 && !incomplete
+                && (!options.FailOnSkip || skipped == 0) ? 0 : 1;
+        }
+
+        private static void WriteResultReport(
+            string path,
+            List<TestMain.TestCase> selected,
+            List<TestResult> results)
+        {
+            var byName = new Dictionary<string, TestResult>(StringComparer.Ordinal);
+            foreach (TestResult result in results)
+            {
+                if (byName.ContainsKey(result.Name))
+                {
+                    throw new InvalidOperationException("duplicate native test result: " + result.Name);
+                }
+                byName.Add(result.Name, result);
+            }
+            var entries = new JArray();
+            int passed = 0;
+            int failed = 0;
+            int skipped = 0;
+            foreach (TestMain.TestCase test in selected)
+            {
+                TestResult result;
+                if (!byName.TryGetValue(test.Name, out result))
+                {
+                    continue;
+                }
+                string status = result.Status.ToString().ToLowerInvariant();
+                if (result.Status == Status.Pass) passed++;
+                else if (result.Status == Status.Fail) failed++;
+                else skipped++;
+                entries.Add(new JObject {
+                    ["name"] = result.Name,
+                    ["status"] = status
+                });
+            }
+            var report = new JObject {
+                ["selected"] = selected.Count,
+                ["passed"] = passed,
+                ["failed"] = failed,
+                ["skipped"] = skipped,
+                ["tests"] = entries
+            };
+            File.WriteAllText(path, report.ToString(Newtonsoft.Json.Formatting.None) + "\n");
         }
 
         /// <summary>

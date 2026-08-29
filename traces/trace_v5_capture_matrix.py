@@ -232,8 +232,9 @@ def _run_clean_native_build_tests(
     repository_root: Path,
     source_commit: str,
     bizhawk_home: Path,
-    native_test_filters: tuple[str, ...],
+    native_test_inventory: tuple[dict[str, Any], ...],
     fixture_root: Path,
+    roms: dict[str, Path],
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="tracechaser-extraction-build-") as temporary:
         temporary_root = Path(temporary)
@@ -254,6 +255,8 @@ def _run_clean_native_build_tests(
             environment["MONO_PATH"] = str(bizhawk_home / "dll")
             environment["LD_LIBRARY_PATH"] = str(bizhawk_home / "dll")
             environment["TRACECHASER_TEST_FIXTURE_ROOT"] = str(fixture_root)
+            for game, variable in (("s1", "S1_ROM_PATH"), ("s2", "S2_ROM_PATH"), ("s3k", "S3K_ROM_PATH")):
+                environment[variable] = str(roms[game])
             build_result = subprocess.run(
                 [str(checkout / "bizhawk-headless/build.sh")],
                 cwd=checkout,
@@ -262,14 +265,23 @@ def _run_clean_native_build_tests(
             if build_result.returncode != 0:
                 return {"exit_code": build_result.returncode, "artifacts": {}}
             test_executable = checkout / "bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.Tests.exe"
-            for test_filter in native_test_filters:
+            reports: list[dict[str, Any]] = []
+            for index, selector in enumerate(native_test_inventory):
+                report_path = temporary_root / ("native-result-%02d.json" % index)
+                selector_args = ["--" + selector["mode"], selector["value"]]
                 result = subprocess.run(
-                    ["/usr/bin/mono", str(test_executable), "--filter", test_filter, "--jobs", "1"],
+                    ["/usr/bin/mono", str(test_executable), *selector_args, "--jobs", "1",
+                     "--fail-on-skip", "--result-report", str(report_path)],
                     cwd=checkout,
                     env=environment,
                 )
                 if result.returncode != 0:
                     return {"exit_code": result.returncode, "artifacts": {}}
+                try:
+                    reports.append(json.loads(report_path.read_text(encoding="utf-8")))
+                except (OSError, json.JSONDecodeError) as error:
+                    raise ValueError("native test result report is unavailable") from error
+            distinct_names = _validate_native_test_reports(native_test_inventory, reports)
             release = checkout / "bizhawk-headless/bin/Release"
             artifacts: dict[str, dict[str, Any]] = {}
             for name in (
@@ -280,7 +292,8 @@ def _run_clean_native_build_tests(
             ):
                 path = release / name
                 artifacts[name] = {"size": path.stat().st_size, "sha256": sha256_file(path)}
-            return {"exit_code": 0, "artifacts": artifacts}
+            return {"exit_code": 0, "artifacts": artifacts,
+                    "native_results": {"selected": len(distinct_names), "names": sorted(distinct_names)}}
         except (OSError, subprocess.CalledProcessError, tarfile.TarError) as error:
             raise ValueError("extraction clean native build/test setup failed") from error
 
@@ -468,7 +481,8 @@ def verify_extraction_freeze(
     *,
     bizhawk_home: Path | None = None,
     fixture_root: Path | None = None,
-    build_test_runner: Callable[[Path, str, Path, tuple[str, ...], Path], Any] = _run_clean_native_build_tests,
+    roms: dict[str, Path] | None = None,
+    build_test_runner: Callable[..., Any] = _run_clean_native_build_tests,
 ) -> None:
     if fixture_root is None or not fixture_root.is_absolute():
         raise ValueError("external fixture root must be an explicit absolute directory")
@@ -479,6 +493,8 @@ def verify_extraction_freeze(
     repository_root = repository_root.resolve()
     if fixture_root == repository_root or fixture_root.is_relative_to(repository_root):
         raise ValueError("external fixture root must remain outside TraceChaser")
+    if roms is None or set(roms) != set(ROMS):
+        raise ValueError("verified explicit ROM mapping is required for native freeze")
     freeze = document["freeze"]
     build = freeze.get("tracechaser_build")
     if not isinstance(build, dict):
@@ -517,12 +533,10 @@ def verify_extraction_freeze(
     if _command_first_line(["/usr/bin/mono", str(roslyn_csc), "-version"]) != toolchain["roslyn_csc_version"]:
         raise ValueError("extraction Roslyn compiler version mismatch")
 
-    configured_filters = build.get("native_test_filters")
-    if not isinstance(configured_filters, list) or not configured_filters or any(
-        not isinstance(test_filter, str) or not test_filter for test_filter in configured_filters
-    ):
-        raise ValueError("extraction native test filters are missing")
-    native_test_filters = tuple(configured_filters)
+    configured_inventory = build.get("native_test_inventory")
+    if not isinstance(configured_inventory, list) or not configured_inventory:
+        raise ValueError("extraction native test inventory is missing")
+    native_test_inventory = tuple(configured_inventory)
 
     if bizhawk_home is None:
         configured = os.environ.get("BIZHAWK_HOME")
@@ -542,7 +556,7 @@ def verify_extraction_freeze(
     if not isinstance(expected_artifacts, dict) or set(expected_artifacts) != required_artifacts:
         raise ValueError("extraction deterministic native artifact lock is missing")
     build_evidence = build_test_runner(
-        repository_root, source_commit, bizhawk_home, native_test_filters, fixture_root
+        repository_root, source_commit, bizhawk_home, native_test_inventory, fixture_root, roms
     )
     if isinstance(build_evidence, int):
         if build_evidence != 0:
@@ -556,6 +570,50 @@ def verify_extraction_freeze(
     for name in sorted(required_artifacts):
         if actual_artifacts.get(name) != expected_artifacts[name]:
             raise ValueError(f"deterministic native artifact identity mismatch: {name}")
+    native_results = build_evidence.get("native_results")
+    if not isinstance(native_results, dict) or native_results.get("selected") != 155:
+        raise ValueError("native test inventory did not prove exactly 155 distinct tests")
+
+
+def _validate_native_test_reports(
+    inventory: tuple[dict[str, Any], ...],
+    reports: list[dict[str, Any]],
+) -> set[str]:
+    if len(inventory) != len(reports):
+        raise ValueError("native test result report count mismatch")
+    all_names: set[str] = set()
+    for selector, report in zip(inventory, reports):
+        mode = selector.get("mode")
+        value = selector.get("value")
+        expected_count = selector.get("expected_count")
+        expected_hash = selector.get("expected_names_sha256")
+        if mode not in ("name-prefix", "name-exact") or not isinstance(value, str):
+            raise ValueError("native test selector is unsupported")
+        tests = report.get("tests")
+        if not isinstance(tests, list):
+            raise ValueError("native test result report is malformed")
+        names = [item.get("name") for item in tests if isinstance(item, dict)]
+        statuses = [item.get("status") for item in tests if isinstance(item, dict)]
+        if (len(names) != len(tests) or len(set(names)) != len(names)
+                or report.get("selected") != expected_count
+                or report.get("passed") != expected_count
+                or report.get("failed") != 0 or report.get("skipped") != 0
+                or any(status != "pass" for status in statuses)):
+            raise ValueError("native test result contains missing, extra, failed, or skipped tests")
+        if mode == "name-prefix" and any(not name.startswith(value) for name in names):
+            raise ValueError("native test result violates prefix selector")
+        if mode == "name-exact" and names != [value]:
+            raise ValueError("native test result violates exact selector")
+        digest = hashlib.sha256(("\n".join(names) + "\n").encode("utf-8")).hexdigest()
+        if digest != expected_hash:
+            raise ValueError("native test result identity mismatch")
+        overlap = all_names.intersection(names)
+        if overlap:
+            raise ValueError("native test inventory contains duplicate identities")
+        all_names.update(names)
+    if len(all_names) != 155:
+        raise ValueError("native test inventory did not prove exactly 155 distinct tests")
+    return all_names
 
 
 def verify_roms(document: dict[str, Any], roms: dict[str, Path]) -> dict[str, Path]:
@@ -616,13 +674,14 @@ def preflight(
     require_external_scratch(tracechaser_root, input_repository_root, batch_root, candidate_root)
     if candidate_root.exists():
         raise ValueError(f"candidate root must be absent: {candidate_root}")
+    verified_roms = verify_roms(document, roms)
     verify_extraction_freeze(
         tracechaser_root,
         document,
         bizhawk_home=bizhawk_home,
         fixture_root=fixture_root,
+        roms=verified_roms,
     )
-    verify_roms(document, roms)
     verify_movies(movie_root, document)
     from traces.trace_fixture_inventory import load_inventory, verify_inventory
     verify_inventory(fixture_root, load_inventory(fixture_inventory))

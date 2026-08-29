@@ -25,6 +25,7 @@ from traces.trace_v5_capture_matrix import (
     verify_roms,
     verify_extraction_freeze,
     _validate_runtime_archive_lock,
+    _validate_native_test_reports,
 )
 
 
@@ -190,13 +191,14 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
 
     def test_extraction_freeze_verifies_synthetic_source_toolchain_and_artifacts(self) -> None:
         repository, bizhawk_home, document = self._freeze_document()
-        received: list[tuple[tuple[str, ...], Path]] = []
+        received = []
 
-        def build_runner(_repository, _source_commit, _bizhawk_home, filters, fixture_root):
-            received.append((filters, fixture_root))
+        def build_runner(_repository, _source_commit, _bizhawk_home, inventory, fixture_root, roms):
+            received.append((inventory, fixture_root, roms))
             return {
                 "exit_code": 0,
                 "artifacts": copy.deepcopy(document["freeze"]["native_artifacts"]),
+                "native_results": {"selected": 155, "names": []},
             }
 
         with patch(
@@ -208,10 +210,12 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 document,
                 bizhawk_home=bizhawk_home,
                 fixture_root=self.fixture_root,
+                roms=self.roms,
                 build_test_runner=build_runner,
             )
 
-        self.assertEqual([(("TraceCli",), self.fixture_root.resolve())], received)
+        self.assertEqual(self.fixture_root.resolve(), received[0][1])
+        self.assertEqual(self.roms, received[0][2])
 
     def test_extraction_freeze_rejects_missing_or_source_owned_fixture_root(self) -> None:
         repository, bizhawk_home, document = self._freeze_document()
@@ -235,6 +239,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                     document,
                     bizhawk_home=bizhawk_home,
                     fixture_root=fixture_root,
+                    roms=self.roms,
                     build_test_runner=lambda *_: self.fail("invalid fixture root reached native tests"),
                 )
 
@@ -258,7 +263,8 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                         changed,
                         bizhawk_home=bizhawk_home,
                         fixture_root=self.fixture_root,
-                        build_test_runner=lambda *_: 0,
+                        roms=self.roms,
+                        build_test_runner=lambda *_: {"exit_code": 0, "artifacts": changed["freeze"]["native_artifacts"], "native_results": {"selected": 155}},
                     )
 
         with patch(
@@ -270,6 +276,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 document,
                 bizhawk_home=bizhawk_home,
                 fixture_root=self.fixture_root,
+                roms=self.roms,
                 build_test_runner=lambda *_: 1,
             )
 
@@ -284,6 +291,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 document,
                 bizhawk_home=bizhawk_home,
                 fixture_root=self.fixture_root,
+                roms=self.roms,
                 build_test_runner=lambda *_: {"exit_code": 0, "artifacts": wrong_artifacts},
             )
 
@@ -326,11 +334,46 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                     changed,
                     bizhawk_home=bizhawk_home,
                     fixture_root=self.fixture_root,
+                    roms=self.roms,
                     build_test_runner=lambda *_: {
                         "exit_code": 0,
                         "artifacts": copy.deepcopy(changed["freeze"]["native_artifacts"]),
+                        "native_results": {"selected": 155, "names": []},
                     },
                 )
+
+    def test_native_result_reports_reject_skips_overlap_and_identity_drift(self) -> None:
+        selector = ({
+            "mode": "name-prefix",
+            "value": "Fleet",
+            "expected_count": 1,
+            "expected_names_sha256": hashlib.sha256(b"Fleet one\n").hexdigest(),
+        },)
+        base = {"selected": 1, "passed": 1, "failed": 0, "skipped": 0,
+                "tests": [{"name": "Fleet one", "status": "pass"}]}
+        for name, changed, message in (
+            ("skip", {**base, "passed": 0, "skipped": 1,
+                      "tests": [{"name": "Fleet one", "status": "skip"}]}, "failed, or skipped"),
+            ("missing", {**base, "selected": 0, "passed": 0, "tests": []}, "missing, extra"),
+            ("extra", {**base, "selected": 2, "passed": 2,
+                        "tests": [{"name": "Fleet one", "status": "pass"},
+                                  {"name": "Fleet two", "status": "pass"}]}, "missing, extra"),
+        ):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):
+                _validate_native_test_reports(selector, [changed])
+        duplicate_inventory = selector + selector
+        with self.assertRaisesRegex(ValueError, "duplicate identities"):
+            _validate_native_test_reports(duplicate_inventory, [base, base])
+
+    def test_native_freeze_requires_complete_explicit_rom_mapping(self) -> None:
+        repository, bizhawk_home, document = self._freeze_document()
+        incomplete = dict(self.roms)
+        incomplete.pop("s2")
+        with self.assertRaisesRegex(ValueError, "verified explicit ROM mapping"):
+            verify_extraction_freeze(
+                repository, document, bizhawk_home=bizhawk_home,
+                fixture_root=self.fixture_root, roms=incomplete,
+                build_test_runner=lambda *_: self.fail("incomplete ROMs reached runner"))
 
     def _freeze_document(self) -> tuple[Path, Path, dict]:
         repository = self.root / "synthetic source repository"
@@ -431,7 +474,12 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                     "source_commit": source_commit,
                     "source_diff_base_commit": base_commit,
                     "source_diff_sha256": hashlib.sha256(source_diff).hexdigest(),
-                    "native_test_filters": ["TraceCli"],
+                    "native_test_inventory": [{
+                        "mode": "name-prefix",
+                        "value": "TraceCli",
+                        "expected_count": 155,
+                        "expected_names_sha256": "0" * 64,
+                    }],
                 },
                 "native_artifacts": {
                     name: copy.deepcopy(artifact)

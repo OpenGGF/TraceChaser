@@ -164,6 +164,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             S1PlcHardwareTimingObserverTests.Register(tests);
             S2DynamicArtObserverTests.Register(tests);
             GpgxHostTests.Register(tests);
+            PreflightRunnerContractTests.Register(tests);
             GpgxAudioObserverSourceLockTests.Register(tests);
             GpgxAudioObserverBuildTests.Register(tests);
             RegisterSerial(tests, GpgxAudioTraceNativeTests.Register);

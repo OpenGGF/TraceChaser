@@ -21,8 +21,6 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string romPath = Environment.GetEnvironmentVariable("S1_ROM_PATH");
             if (string.IsNullOrEmpty(romPath) || !File.Exists(romPath))
             {
-                Console.WriteLine(
-                    "SKIP GpgxHost advances ten frames: S1_ROM_PATH not set");
                 return;
             }
 
