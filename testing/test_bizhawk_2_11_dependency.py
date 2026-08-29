@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -10,12 +11,14 @@ from pathlib import Path
 
 from bizhawk.bizhawk_2_11 import (
     DependencyError,
+    _publish_directory_noreplace,
     acquire_archive,
     load_runtime_lock,
+    parse_lua_metadata,
     preflight_installation,
     verify_archive,
 )
-from testing.test_probe_contract import strip_lua_comments_and_strings
+from bizhawk.lua_source import collect_lua_api_references
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,18 +37,7 @@ RECORDER_PATHS = tuple(
         "s3k_complete_run_recorder.lua",
     )
 )
-PROBE_PATHS = tuple(sorted((ROOT / "bizhawk" / "probes").glob("*.lua")))
-LUA_API_REFERENCE_PATTERN = (
-    r"\b(client|emu|event|mainmemory|memory|movie|joypad)\."
-    r"([A-Za-z_][A-Za-z0-9_]*)\b"
-)
-NON_API_EVENT_FIELDS = {
-    "event.begin_pc",
-    "event.completion_pc",
-    "event.kind",
-    "event.raw_chip_events",
-    "event.source_cpu",
-}
+PROBE_ROOT = ROOT / "bizhawk" / "probes"
 
 
 def _synthetic_lock(archive_sha256: str = "0" * 64) -> dict:
@@ -75,16 +67,18 @@ def _synthetic_lock(archive_sha256: str = "0" * 64) -> dict:
             {
                 "api": "client.invisibleemulation",
                 "assembly": "dll/BizHawk.Client.Common.dll",
-                "library_marker": "ClientLuaLibrary",
-                "method_marker": "invisibleemulation",
+                "library_class": "BizHawk.Client.Common.ClientLuaLibrary",
+                "managed_method": "InvisibleEmulation",
+                "registered_name": "invisibleemulation",
                 "example_path": "Lua/GBA/SonicAdvance_CamHack.lua",
                 "example_marker": "client.invisibleemulation",
             },
             {
                 "api": "emu.frameadvance",
                 "assembly": "dll/BizHawk.Client.Common.dll",
-                "library_marker": "EmulationLuaLibrary",
-                "method_marker": "frameadvance",
+                "library_class": "BizHawk.Client.Common.EmulationLuaLibrary",
+                "managed_method": "FrameAdvance",
+                "registered_name": "frameadvance",
             },
         ],
     }
@@ -96,25 +90,35 @@ def _write_install(home: Path, lock: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"synthetic")
     client = home / "dll" / "BizHawk.Client.Common.dll"
-    client.write_bytes(
-        b"\0".join(
-            marker.encode("utf-8")
-            for capability in lock["lua_capabilities"]
-            for marker in (
-                capability["library_marker"],
-                capability["method_marker"],
-            )
-        )
-    )
+    client.write_bytes(b"synthetic managed assembly")
     for capability in lock["lua_capabilities"]:
         if "example_path" in capability:
             (home / capability["example_path"]).write_text(
-                capability["example_marker"], encoding="utf-8"
+                f"{capability['example_marker']}(true)\n", encoding="utf-8"
             )
 
 
 def _version_probe(raw: str):
     return lambda _path: raw
+
+
+METHOD_METADATA = """Method Table (1..2)
+########## BizHawk.Client.Common.ClientLuaLibrary
+1: instance default void InvisibleEmulation (bool invisible)  (param: 1 impl_flags: cil managed )
+########## BizHawk.Client.Common.EmulationLuaLibrary
+2: instance default void FrameAdvance ()  (param: 2 impl_flags: cil managed )
+"""
+ATTRIBUTE_METADATA = """Custom Attributes Table (1..2)
+1: MethodDef: 1: instance void class BizHawk.Client.Common.LuaMethodAttribute::'.ctor'(string, string) ["invisibleemulation\u0003cap", "cap"]
+2: MethodDef: 2: instance void class BizHawk.Client.Common.LuaMethodAttribute::'.ctor'(string, string) ["frameadvance\u0003cap", "cap"]
+"""
+
+
+def _metadata_probe(
+    method_output: str = METHOD_METADATA,
+    attribute_output: str = ATTRIBUTE_METADATA,
+):
+    return lambda _path: parse_lua_metadata(method_output, attribute_output)
 
 
 class RuntimeArchiveLockTests(unittest.TestCase):
@@ -141,20 +145,16 @@ class RuntimeArchiveLockTests(unittest.TestCase):
         )
         self.assertEqual("Lua/GBA/SonicAdvance_CamHack.lua", invisible["example_path"])
         self.assertEqual("client.invisibleemulation", invisible["example_marker"])
+        for capability in lock["lua_capabilities"]:
+            self.assertNotIn("library_marker", capability)
+            self.assertNotIn("method_marker", capability)
+            self.assertTrue(capability["library_class"].endswith("LuaLibrary"))
+            self.assertEqual(
+                capability["api"].split(".", 1)[1], capability["registered_name"]
+            )
 
     def test_lock_capabilities_exactly_cover_recorder_and_probe_lua_calls(self) -> None:
-        import re
-
-        required = set()
-        for path in (*RECORDER_PATHS, *PROBE_PATHS):
-            executable = strip_lua_comments_and_strings(path.read_text(encoding="utf-8"))
-            required.update(
-                f"{namespace}.{method}"
-                for namespace, method in re.findall(
-                    LUA_API_REFERENCE_PATTERN, executable
-                )
-            )
-        required.difference_update(NON_API_EVENT_FIELDS)
+        required = collect_lua_api_references(RECORDER_PATHS, PROBE_ROOT)
         locked = {
             capability["api"]
             for capability in load_runtime_lock(LOCK_PATH)["lua_capabilities"]
@@ -162,8 +162,57 @@ class RuntimeArchiveLockTests(unittest.TestCase):
 
         self.assertEqual(required, locked)
 
+    def test_nested_probe_unique_api_is_included_without_comment_or_string_decoys(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            nested = root / "examples" / "nested.lua"
+            nested.parent.mkdir()
+            nested.write_text(
+                """-- client.comment_decoy()
+local text = 'emu.string_decoy()'
+memory.unique_nested_api()
+""",
+                encoding="utf-8",
+            )
+
+            required = collect_lua_api_references((), root)
+
+        self.assertEqual({"memory.unique_nested_api"}, required)
+
 
 class PreflightTests(unittest.TestCase):
+    def test_metadata_parser_preserves_registration_with_quoted_description(self) -> None:
+        methods = """########## BizHawk.Client.Common.MovieLuaLibrary
+44: instance default string Mode ()  (param: 1 impl_flags: cil managed )
+"""
+        description = (
+            'Returns the mode of the current movie. Possible modes: '
+            '"PLAY", "RECORD", "FINISHED", "INACTIVE"'
+        )
+        attributes = (
+            "44: MethodDef: 44: instance void class "
+            "BizHawk.Client.Common.LuaMethodAttribute::'.ctor'(string, string) "
+            f'["mode{chr(len(description))}{description}", "{description}"]\n'
+        )
+
+        registrations = parse_lua_metadata(methods, attributes)
+
+        self.assertIn(
+            (
+                "BizHawk.Client.Common.MovieLuaLibrary",
+                "Mode",
+                "mode",
+            ),
+            {
+                (
+                    registration.library_class,
+                    registration.managed_method,
+                    registration.registered_name,
+                )
+                for registration in registrations
+            },
+        )
+
     def test_exact_211_managed_version_and_all_capabilities_are_accepted(self) -> None:
         lock = _synthetic_lock()
         with tempfile.TemporaryDirectory() as temporary:
@@ -174,6 +223,7 @@ class PreflightTests(unittest.TestCase):
                 home,
                 lock,
                 version_probe=_version_probe("Version: 2.11.0.0"),
+                metadata_probe=_metadata_probe(),
             )
 
         self.assertEqual("2.11", report.version)
@@ -201,45 +251,89 @@ class PreflightTests(unittest.TestCase):
                 self.assertIn(f"detected raw={raw!r}", diagnostic)
                 self.assertIn("expected raw='Version: 2.11.0.0'", diagnostic)
 
-    def test_missing_capability_reports_detected_and_expected_marker(self) -> None:
+    @unittest.skipUnless(shutil.which("monodis"), "monodis is unavailable")
+    def test_real_monodis_failure_reports_raw_detected_and_locked_expected(self) -> None:
         lock = _synthetic_lock()
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "explicit-user-install"
             _write_install(home, lock)
-            client = home / "dll" / "BizHawk.Client.Common.dll"
-            client.write_bytes(client.read_bytes().replace(b"invisibleemulation", b"removed"))
+
+            with self.assertRaises(DependencyError) as raised:
+                preflight_installation(home, lock)
+
+        diagnostic = str(raised.exception)
+        self.assertIn("managed-version probe failed", diagnostic)
+        self.assertIn("detected raw=", diagnostic)
+        self.assertIn("expected raw='Version: 2.11.0.0'", diagnostic)
+
+    def test_cross_library_method_pairing_is_rejected(self) -> None:
+        lock = _synthetic_lock()
+        lock["lua_capabilities"][1]["library_class"] = (
+            "BizHawk.Client.Common.ClientLuaLibrary"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "explicit-user-install"
+            _write_install(home, lock)
 
             with self.assertRaises(DependencyError) as raised:
                 preflight_installation(
                     home,
                     lock,
                     version_probe=_version_probe("Version: 2.11.0.0"),
+                    metadata_probe=_metadata_probe(),
                 )
 
         diagnostic = str(raised.exception)
-        self.assertIn("client.invisibleemulation", diagnostic)
+        self.assertIn("emu.frameadvance", diagnostic)
+        self.assertIn("ClientLuaLibrary.FrameAdvance", diagnostic)
         self.assertIn("detected raw='missing'", diagnostic)
-        self.assertIn("expected raw='invisibleemulation'", diagnostic)
 
-    def test_missing_shipped_invisibleemulation_example_is_rejected(self) -> None:
+    def test_method_without_lua_registration_is_rejected(self) -> None:
         lock = _synthetic_lock()
+        attributes = ATTRIBUTE_METADATA.splitlines()[0:2]
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "explicit-user-install"
             _write_install(home, lock)
-            example = home / "Lua" / "GBA" / "SonicAdvance_CamHack.lua"
-            example.write_text("example capability removed\n", encoding="utf-8")
 
             with self.assertRaises(DependencyError) as raised:
                 preflight_installation(
                     home,
                     lock,
                     version_probe=_version_probe("Version: 2.11.0.0"),
+                    metadata_probe=_metadata_probe(
+                        attribute_output="\n".join(attributes)
+                    ),
                 )
 
         diagnostic = str(raised.exception)
-        self.assertIn("client.invisibleemulation", diagnostic)
-        self.assertIn("detected raw='missing'", diagnostic)
-        self.assertIn("expected raw='client.invisibleemulation'", diagnostic)
+        self.assertIn("emu.frameadvance", diagnostic)
+        self.assertIn("LuaMethod('frameadvance')", diagnostic)
+
+    def test_comment_and_string_example_decoys_are_rejected(self) -> None:
+        lock = _synthetic_lock()
+        decoys = (
+            "-- client.invisibleemulation(true)\nreturn true\n",
+            "local note = 'client.invisibleemulation(true)'\nreturn note\n",
+            "--[=[ client.invisibleemulation(true) ]=]\nreturn true\n",
+        )
+        for source in decoys:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary) / "explicit-user-install"
+                _write_install(home, lock)
+                example = home / "Lua" / "GBA" / "SonicAdvance_CamHack.lua"
+                example.write_text(source, encoding="utf-8")
+
+                with self.assertRaises(DependencyError) as raised:
+                    preflight_installation(
+                        home,
+                        lock,
+                        version_probe=_version_probe("Version: 2.11.0.0"),
+                        metadata_probe=_metadata_probe(),
+                    )
+                diagnostic = str(raised.exception)
+                self.assertIn("client.invisibleemulation", diagnostic)
+                self.assertIn("detected raw='missing'", diagnostic)
+                self.assertIn("expected raw='client.invisibleemulation'", diagnostic)
 
     def test_lua_launcher_rejects_wrong_version_before_emulator_start(self) -> None:
         lock = load_runtime_lock(LOCK_PATH)
@@ -342,6 +436,24 @@ class PreflightTests(unittest.TestCase):
 
 
 class AcquisitionTests(unittest.TestCase):
+    def test_atomic_publication_rejects_destination_that_appears_at_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staged = root / "staged"
+            destination = root / "destination"
+            staged.mkdir()
+            (staged / "payload").write_text("candidate", encoding="utf-8")
+            destination.mkdir()
+            existing = destination / "existing"
+            existing.write_text("keep", encoding="utf-8")
+
+            with self.assertRaises(DependencyError) as raised:
+                _publish_directory_noreplace(staged, destination)
+
+            self.assertEqual("keep", existing.read_text(encoding="utf-8"))
+            self.assertTrue((staged / "payload").is_file())
+        self.assertIn("appeared and was left untouched", str(raised.exception))
+
     def test_wrong_archive_hash_is_rejected_before_extraction(self) -> None:
         lock = _synthetic_lock("f" * 64)
         extracted = []
@@ -358,6 +470,70 @@ class AcquisitionTests(unittest.TestCase):
             f"detected raw='{hashlib.sha256(b'wrong archive').hexdigest()}'", diagnostic
         )
         self.assertIn(f"expected raw='{'f' * 64}'", diagnostic)
+
+    def test_parent_traversal_archive_is_rejected_without_escape_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "TraceChaser"
+            root.mkdir()
+            escaped = Path(temporary) / "escaped-by-traversal"
+            payload = io.BytesIO()
+            with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+                member = tarfile.TarInfo("../../escaped-by-traversal")
+                content = b"must not escape"
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+            archive_path = Path(temporary) / "traversal.tar.gz"
+            archive_path.write_bytes(payload.getvalue())
+            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+
+            with self.assertRaises(DependencyError):
+                acquire_archive(root, lock, archive_path=archive_path)
+
+            self.assertFalse(escaped.exists())
+
+    def test_escaping_symlink_archive_is_rejected_without_escape_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "TraceChaser"
+            root.mkdir()
+            escaped = Path(temporary) / "escaped-symlink-target"
+            payload = io.BytesIO()
+            with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+                member = tarfile.TarInfo(
+                    "BizHawk-2.11-linux-x64/escaping-link"
+                )
+                member.type = tarfile.SYMTYPE
+                member.linkname = "../../../escaped-symlink-target"
+                archive.addfile(member)
+            archive_path = Path(temporary) / "symlink.tar.gz"
+            archive_path.write_bytes(payload.getvalue())
+            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+
+            with self.assertRaises(DependencyError):
+                acquire_archive(root, lock, archive_path=archive_path)
+
+            self.assertFalse(escaped.exists())
+
+    def test_special_device_archive_is_rejected_without_device_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "TraceChaser"
+            root.mkdir()
+            payload = io.BytesIO()
+            with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+                member = tarfile.TarInfo("BizHawk-2.11-linux-x64/device")
+                member.type = tarfile.CHRTYPE
+                member.devmajor = 1
+                member.devminor = 3
+                archive.addfile(member)
+            archive_path = Path(temporary) / "device.tar.gz"
+            archive_path.write_bytes(payload.getvalue())
+            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+
+            with self.assertRaises(DependencyError):
+                acquire_archive(root, lock, archive_path=archive_path)
+
+            self.assertFalse(
+                (root / ".dependencies" / "BizHawk-2.11-linux-x64" / "device").exists()
+            )
 
     def test_offline_archive_is_verified_staged_and_published_only_under_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -392,6 +568,7 @@ class AcquisitionTests(unittest.TestCase):
                 lock,
                 archive_path=archive_path,
                 version_probe=_version_probe("Version: 2.11.0.0"),
+                metadata_probe=_metadata_probe(),
             )
 
             self.assertEqual(

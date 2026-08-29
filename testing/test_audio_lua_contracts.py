@@ -7,6 +7,11 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
+if __package__:
+    from testing.bizhawk_runtime_fixture import write_install, write_monodis
+else:
+    from bizhawk_runtime_fixture import write_install, write_monodis
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORTED_LUA_VERSION = "Lua 5.4"
@@ -240,24 +245,7 @@ class S1AudioParityProbeContractTests(unittest.TestCase):
                     / "bizhawk-2.11-linux-x64.lock.json"
                 ).read_text(encoding="utf-8")
             )
-            for relative in lock["required_files"]:
-                path = home / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b"fixture")
-            (home / "dll" / "BizHawk.Client.Common.dll").write_bytes(
-                b"\0".join(
-                    marker.encode("utf-8")
-                    for capability in lock["lua_capabilities"]
-                    for marker in (
-                        capability["library_marker"], capability["method_marker"]
-                    )
-                )
-            )
-            for capability in lock["lua_capabilities"]:
-                if "example_path" in capability:
-                    (home / capability["example_path"]).write_text(
-                        capability["example_marker"], encoding="utf-8"
-                    )
+            write_install(home, lock)
             lua = root / "probe.lua"
             lua.write_text("return true\n", encoding="utf-8")
             movie = root / "movie.bk2"
@@ -273,10 +261,7 @@ class S1AudioParityProbeContractTests(unittest.TestCase):
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
             fake_monodis = fake_bin / "monodis"
-            fake_monodis.write_text(
-                "#!/bin/sh\nprintf 'Version: 2.11.0.0\\n'\n", encoding="utf-8"
-            )
-            fake_monodis.chmod(0o700)
+            write_monodis(fake_monodis, lock)
             work = root / "work"
             work.mkdir()
             environment = os.environ.copy()

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -17,6 +19,11 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+if __package__:
+    from bizhawk.lua_source import strip_lua_comments_and_strings
+else:
+    from lua_source import strip_lua_comments_and_strings
 
 
 TRACECHASER_ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +43,13 @@ class PreflightReport:
     detected_version_raw: str
     expected_version_raw: str
     lua_capabilities: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LuaRegistration:
+    library_class: str
+    managed_method: str
+    registered_name: str
 
 
 def load_runtime_lock(path: Path = DEFAULT_LOCK_PATH) -> dict:
@@ -70,7 +84,7 @@ def _default_version_probe(assembly: Path) -> str:
     executable = shutil.which("monodis")
     if executable is None:
         raise DependencyError(
-            "managed-version probe is unavailable: install Mono's monodis"
+            "managed-version probe is unavailable: detected raw='monodis unavailable'"
         )
     process = subprocess.run(
         [executable, "--assembly", str(assembly)],
@@ -93,11 +107,97 @@ def _version_evidence(raw: str) -> tuple[str | None, str]:
     return match.group(1), match.group(0).strip()
 
 
+def _serialized_string_prefix_width(length: int) -> int:
+    if length <= 0x7F:
+        return 1
+    if length <= 0x3FFF:
+        return 2
+    return 4
+
+
+def parse_lua_metadata(
+    method_output: str, custom_attribute_output: str
+) -> frozenset[LuaRegistration]:
+    """Bind LuaMethod registrations to their declaring managed methods."""
+    methods: dict[int, tuple[str, str]] = {}
+    library_class: str | None = None
+    for line in method_output.split("\n"):
+        heading = re.fullmatch(r"#{10} (\S+)", line.strip())
+        if heading is not None:
+            library_class = heading.group(1)
+            continue
+        method = re.match(
+            r"^\s*(\d+):.*\s([A-Za-z_][A-Za-z0-9_]*)\s*\(", line
+        )
+        if method is not None and library_class is not None:
+            methods[int(method.group(1))] = (library_class, method.group(2))
+
+    registrations: set[LuaRegistration] = set()
+    attribute_pattern = re.compile(
+        r"MethodDef:\s*(\d+):.*LuaMethodAttribute::'\.ctor'"
+        r"\(string, string\) \[\"(.*)\"\]\s*$"
+    )
+    # monodis writes the serialized next-string length as a raw control byte;
+    # str.splitlines() would incorrectly treat values such as 0x1D as rows.
+    for line in custom_attribute_output.split("\n"):
+        attribute = attribute_pattern.search(line)
+        if attribute is None:
+            continue
+        method_id = int(attribute.group(1))
+        method = methods.get(method_id)
+        if method is None:
+            continue
+        payload = attribute.group(2)
+        pair: tuple[str, str] | None = None
+        for divider in re.finditer(r'", "', payload):
+            first = payload[: divider.start()]
+            second = payload[divider.end() :]
+            if first.endswith(second):
+                pair = (first, second)
+                break
+        if pair is None:
+            continue
+        encoded_name_and_description, description = pair
+        prefix = encoded_name_and_description[: -len(description)]
+        width = _serialized_string_prefix_width(len(description.encode("utf-8")))
+        if len(prefix) <= width:
+            continue
+        registered_name = prefix[:-width]
+        registrations.add(LuaRegistration(method[0], method[1], registered_name))
+    return frozenset(registrations)
+
+
+def _default_lua_metadata_probe(assembly: Path) -> frozenset[LuaRegistration]:
+    executable = shutil.which("monodis")
+    if executable is None:
+        raise DependencyError("managed-metadata probe is unavailable: install Mono's monodis")
+    outputs: list[str] = []
+    for table in ("--method", "--customattr"):
+        process = subprocess.run(
+            [executable, table, str(assembly)],
+            capture_output=True,
+            check=False,
+        )
+        raw = (process.stdout + process.stderr).decode(
+            "utf-8", errors="replace"
+        ).strip()
+        if process.returncode != 0:
+            raise DependencyError(
+                f"managed-metadata probe failed for {assembly} ({table}): "
+                f"detected raw={raw!r}"
+            )
+        outputs.append(raw)
+    return parse_lua_metadata(outputs[0], outputs[1])
+
+
 def preflight_installation(
     home: Path,
     lock: dict | None = None,
     *,
     version_probe: Callable[[Path], str] = _default_version_probe,
+    metadata_probe: Callable[[Path], frozenset[LuaRegistration]] = (
+        _default_lua_metadata_probe
+    ),
 ) -> PreflightReport:
     """Validate one explicit BizHawk home without modifying it."""
     runtime_lock = load_runtime_lock() if lock is None else lock
@@ -127,7 +227,12 @@ def preflight_installation(
     first_detected_raw = ""
     for relative in versioned_files:
         assembly = resolved_home / relative
-        raw_output = version_probe(assembly)
+        try:
+            raw_output = version_probe(assembly)
+        except DependencyError as error:
+            raise DependencyError(
+                f"{error}; expected raw={expected_raw!r}"
+            ) from error
         detected_version, detected_raw = _version_evidence(raw_output)
         if not first_detected_raw:
             first_detected_raw = detected_raw
@@ -142,31 +247,43 @@ def preflight_installation(
         raise DependencyError("Lua capability contract is missing")
     verified_capabilities: list[str] = []
     seen_capabilities: set[str] = set()
-    assembly_cache: dict[str, bytes] = {}
+    assembly_cache: dict[str, frozenset[LuaRegistration]] = {}
     for capability in capabilities:
         if not isinstance(capability, dict):
             raise DependencyError("Lua capability contract is malformed")
         api = capability.get("api")
         relative = capability.get("assembly")
-        library_marker = capability.get("library_marker")
-        method_marker = capability.get("method_marker")
+        library_class = capability.get("library_class")
+        managed_method = capability.get("managed_method")
+        registered_name = capability.get("registered_name")
         if not all(
             isinstance(value, str) and value
-            for value in (api, relative, library_marker, method_marker)
+            for value in (
+                api,
+                relative,
+                library_class,
+                managed_method,
+                registered_name,
+            )
         ):
             raise DependencyError("Lua capability contract is malformed")
         if api in seen_capabilities:
             raise DependencyError(f"Lua capability is duplicated: {api}")
         seen_capabilities.add(api)
         if relative not in assembly_cache:
-            assembly_cache[relative] = (resolved_home / relative).read_bytes()
-        content = assembly_cache[relative]
-        for marker in (library_marker, method_marker):
-            if marker.encode("utf-8") not in content:
-                raise DependencyError(
-                    f"required Lua capability is unavailable: {api}: "
-                    f"detected raw='missing'; expected raw={marker!r}"
-                )
+            assembly_cache[relative] = metadata_probe(resolved_home / relative)
+        expected_registration = LuaRegistration(
+            library_class, managed_method, registered_name
+        )
+        if expected_registration not in assembly_cache[relative]:
+            expected = (
+                f"{library_class}.{managed_method} "
+                f"[LuaMethod({registered_name!r})]"
+            )
+            raise DependencyError(
+                f"required Lua capability is unavailable: {api}: "
+                f"detected raw='missing'; expected raw={expected!r}"
+            )
         example_path = capability.get("example_path")
         example_marker = capability.get("example_marker")
         if (example_path is None) != (example_marker is None):
@@ -174,8 +291,9 @@ def preflight_installation(
         if example_path is not None:
             if not isinstance(example_path, str) or not isinstance(example_marker, str):
                 raise DependencyError(f"Lua capability example contract is malformed: {api}")
-            example_content = (resolved_home / example_path).read_bytes()
-            if example_marker.encode("utf-8") not in example_content:
+            example_source = (resolved_home / example_path).read_text(encoding="utf-8")
+            executable_example = strip_lua_comments_and_strings(example_source)
+            if example_marker not in executable_example:
                 raise DependencyError(
                     f"required Lua capability example is unavailable: {api}: "
                     f"detected raw='missing'; expected raw={example_marker!r}"
@@ -237,12 +355,64 @@ def _download_archive(url: str, destination: Path) -> None:
         raise DependencyError(f"official BizHawk download failed: {url}") from error
 
 
+def _publish_directory_noreplace(staged: Path, destination: Path) -> None:
+    """Atomically publish one Linux directory, failing if the name exists."""
+    if sys.platform != "linux":
+        raise DependencyError(
+            "atomic BizHawk publication is unavailable: renameat2 requires Linux"
+        )
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        renameat2 = libc.renameat2
+    except AttributeError as error:
+        raise DependencyError(
+            "atomic BizHawk publication is unavailable: libc renameat2 is missing"
+        ) from error
+    renameat2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    at_fdcwd = -100
+    rename_noreplace = 1
+    result = renameat2(
+        at_fdcwd,
+        os.fsencode(staged),
+        at_fdcwd,
+        os.fsencode(destination),
+        rename_noreplace,
+    )
+    if result == 0:
+        return
+    detected_errno = ctypes.get_errno()
+    if detected_errno in (errno.EEXIST, errno.ENOTEMPTY):
+        raise DependencyError(
+            f"BizHawk destination appeared and was left untouched: {destination}"
+        )
+    if detected_errno in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
+        raise DependencyError(
+            "atomic BizHawk publication is unavailable: "
+            f"renameat2 detected errno={detected_errno} "
+            f"({os.strerror(detected_errno)})"
+        )
+    raise DependencyError(
+        "atomic BizHawk publication failed: "
+        f"detected errno={detected_errno} ({os.strerror(detected_errno)})"
+    )
+
+
 def acquire_archive(
     repository_root: Path,
     lock: dict | None = None,
     *,
     archive_path: Path | None = None,
     version_probe: Callable[[Path], str] = _default_version_probe,
+    metadata_probe: Callable[[Path], frozenset[LuaRegistration]] = (
+        _default_lua_metadata_probe
+    ),
 ) -> Path:
     """Install a verified runtime below the checkout-local .dependencies only."""
     runtime_lock = load_runtime_lock() if lock is None else lock
@@ -282,13 +452,12 @@ def acquire_archive(
                 f"expected raw={release['install_directory']!r}; detected raw='missing'"
             )
         preflight_installation(
-            staged_install, runtime_lock, version_probe=version_probe
+            staged_install,
+            runtime_lock,
+            version_probe=version_probe,
+            metadata_probe=metadata_probe,
         )
-        if destination.exists() or destination.is_symlink():
-            raise DependencyError(
-                f"BizHawk destination appeared and was left untouched: {destination}"
-            )
-        os.rename(staged_install, destination)
+        _publish_directory_noreplace(staged_install, destination)
         return destination
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)

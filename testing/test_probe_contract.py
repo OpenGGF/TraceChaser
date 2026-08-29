@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from bizhawk.lua_source import strip_lua_comments_and_strings
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE_ROOT = ROOT / "bizhawk" / "probes"
@@ -28,82 +30,6 @@ FORBIDDEN_PROBE_OPERATIONS = (
     "savestate.",
     "emu.setregister",
 )
-
-
-def _long_bracket_close(source: str, start: int) -> str | None:
-    if start >= len(source) or source[start] != "[":
-        return None
-    cursor = start + 1
-    while cursor < len(source) and source[cursor] == "=":
-        cursor += 1
-    if cursor >= len(source) or source[cursor] != "[":
-        return None
-    return "]" + "=" * (cursor - start - 1) + "]"
-
-
-def strip_lua_comments_and_strings(source: str) -> str:
-    """Blank Lua comments and string literals while preserving positions/newlines."""
-    executable: list[str] = []
-    line_comment = False
-    long_close: str | None = None
-    quote: str | None = None
-    escaped = False
-    index = 0
-    while index < len(source):
-        current = source[index]
-        if line_comment:
-            if current == "\n":
-                line_comment = False
-                executable.append("\n")
-            else:
-                executable.append(" ")
-            index += 1
-            continue
-        if long_close is not None:
-            if source.startswith(long_close, index):
-                executable.append(" " * len(long_close))
-                index += len(long_close)
-                long_close = None
-            else:
-                executable.append("\n" if current == "\n" else " ")
-                index += 1
-            continue
-        if quote is not None:
-            executable.append("\n" if current == "\n" else " ")
-            if escaped:
-                escaped = False
-            elif current == "\\":
-                escaped = True
-            elif current == quote:
-                quote = None
-            index += 1
-            continue
-        if source.startswith("--", index):
-            close = _long_bracket_close(source, index + 2)
-            if close is not None:
-                opener_length = len(close) + 2
-                executable.append(" " * opener_length)
-                index += opener_length
-                long_close = close
-            else:
-                executable.append("  ")
-                index += 2
-                line_comment = True
-            continue
-        close = _long_bracket_close(source, index)
-        if close is not None:
-            executable.append(" " * len(close))
-            index += len(close)
-            long_close = close
-            continue
-        if current in ("'", '"'):
-            executable.append(" ")
-            quote = current
-            index += 1
-            continue
-        executable.append(current)
-        index += 1
-    return "".join(executable)
 
 
 def declares_stage_gate(executable: str) -> bool:

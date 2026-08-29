@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from testing.bizhawk_runtime_fixture import write_install, write_monodis
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -191,31 +193,14 @@ class CheckoutPortabilityTests(unittest.TestCase):
                 / "bizhawk-2.11-linux-x64.lock.json"
             ).read_text(encoding="utf-8")
         )
-        for relative in lock["required_files"]:
-            path = dependency / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"fixture")
-        (dependency / "dll" / "BizHawk.Client.Common.dll").write_bytes(
-            b"\0".join(
-                marker.encode("utf-8")
-                for capability in lock["lua_capabilities"]
-                for marker in (
-                    capability["library_marker"], capability["method_marker"]
-                )
-            )
-        )
-        for capability in lock["lua_capabilities"]:
-            if "example_path" in capability:
-                (dependency / capability["example_path"]).write_text(
-                    capability["example_marker"], encoding="utf-8"
-                )
+        write_install(dependency, lock)
         fake_bin = self.root / "fake tool bin"
         fake_bin.mkdir()
-        for command in ("mono", "xbuild", "monodis"):
+        for command in ("mono", "xbuild"):
             path = fake_bin / command
-            body = "printf 'Version: 2.11.0.0\\n'" if command == "monodis" else "exit 0"
-            path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
+            path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
             path.chmod(0o755)
+        write_monodis(fake_bin / "monodis", lock)
         environment = os.environ.copy()
         environment.pop("BIZHAWK_HOME", None)
         environment["PATH"] = f"{fake_bin}:{environment['PATH']}"

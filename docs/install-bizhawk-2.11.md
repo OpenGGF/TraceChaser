@@ -38,8 +38,10 @@ default install: .dependencies/BizHawk-2.11-linux-x64
 No reviewed Windows archive hash is part of this lock. Do not infer one from
 the Linux asset or describe an arbitrary Windows distribution as lock-verified.
 
-Python 3 and Mono's `monodis` must be available on `PATH`. Native-headless work
-also requires the Mono/xbuild toolchain documented in
+Python 3 and Mono's `monodis` must be available on `PATH`. Publication uses
+Linux libc `renameat2(RENAME_NOREPLACE)` and fails closed when that atomic
+no-replace primitive is unavailable. Native-headless work also requires the
+Mono/xbuild toolchain documented in
 [`bizhawk-headless/README.md`](../bizhawk-headless/README.md).
 
 ## Acquire into `.dependencies`
@@ -54,7 +56,8 @@ The installer downloads only the locked official URL. All downloaded and
 extracted bytes are staged below this checkout's ignored `.dependencies/`
 directory. It hashes the complete archive before extraction, checks the staged
 layout, exact managed versions, and Lua capabilities, and only then publishes
-the absent final directory. It never replaces an existing destination.
+the absent final directory with one atomic no-replace operation. A destination
+that appears during installation is left untouched.
 
 For an archive already downloaded by the user, use the offline path:
 
@@ -93,17 +96,18 @@ The version diagnostic preserves both values, for example:
 unsupported BizHawk managed version in EmuHawk.exe: detected raw='Version: 2.11.1.0'; expected raw='Version: 2.11.0.0'
 ```
 
-An unparseable version reports the unmodified detected text and the same raw
-expected value. A missing Lua registration reports the API plus its raw missing
-and expected marker values.
+An unparseable version, including a nonzero `monodis` probe, reports the
+unmodified detected text and the same raw expected value. A missing Lua
+registration reports the API plus its raw missing evidence and expected managed
+class, method, and registration identity.
 
 ## Lua capability boundary
 
 The runtime lock covers every BizHawk Lua API referenced by the six retained
-recorders and the shared/namespaced probe path. The source-only suite derives
-that inventory from executable Lua (comments and strings are excluded), so a
-new API reference requires an explicit reviewed lock update. The current 30
-APIs cover:
+recorders and every Lua file recursively below the namespaced probe path. The
+source-only suite derives that inventory from executable Lua (comments and
+strings are excluded), so a new API reference in a top-level or nested probe
+requires an explicit reviewed lock update. The current 30 APIs cover:
 
 - client lifecycle, sound, speed, pause, and `client.invisibleemulation`;
 - emulator frame, lag, register, and frame-rate functions;
@@ -113,8 +117,13 @@ APIs cover:
 - movie identity, input, load, length, and mode functions.
 
 This is static installation preflight, not a capture. It reads the exact managed
-assembly versions and Lua registration markers without starting EmuHawk, loading
-a ROM, requiring a display, or creating capture output.
+assembly versions and parses `monodis` method/custom-attribute metadata. Each
+locked API must bind its registration name to the exact managed method on the
+locked Lua library class; a matching method on another library or an
+unregistered method is rejected. The lifted `client.invisibleemulation` shipped
+example is scanned as executable Lua, so comments and strings cannot satisfy
+the witness. Preflight does not start EmuHawk, load a ROM, require a display, or
+create capture output.
 
 ## Updating a lock
 

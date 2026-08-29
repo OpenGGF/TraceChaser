@@ -60,9 +60,10 @@ below `.dependencies/` and are
 ignored by Git.
 
 It verifies the complete archive before extraction, then checks exact managed
-version `2.11.0.0`, the required layout, and every Lua API referenced by the six
-recorders and shared/namespaced probe path before publishing the install. See
-[`../docs/install-bizhawk-2.11.md`](../docs/install-bizhawk-2.11.md) for offline
+version `2.11.0.0`, the required layout, and managed registration metadata for
+every Lua API referenced by the six recorders and all recursively discovered
+namespaced probes before atomically publishing the install without replacement.
+See [`../docs/install-bizhawk-2.11.md`](../docs/install-bizhawk-2.11.md) for offline
 archive use, explicit user installations, and the distinct runtime-archive and
 native GPGX source locks.
 
