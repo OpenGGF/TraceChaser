@@ -67,7 +67,8 @@ namespace BizHawk.Headless.Gpgx
             long compressThresholdBytes,
             int? creditsTarget = null,
             string creditsRawObservationsPath = null,
-            string creditsRawObservationId = null)
+            string creditsRawObservationId = null,
+            string fixtureRoot = null)
         {
             Mode = mode;
             RomPath = romPath;
@@ -85,6 +86,7 @@ namespace BizHawk.Headless.Gpgx
             CreditsTarget = creditsTarget;
             CreditsRawObservationsPath = creditsRawObservationsPath;
             CreditsRawObservationId = creditsRawObservationId;
+            FixtureRoot = fixtureRoot;
         }
 
         public CaptureMode Mode { get; private set; }
@@ -159,6 +161,7 @@ namespace BizHawk.Headless.Gpgx
         public int? CreditsTarget { get; private set; }
         public string CreditsRawObservationsPath { get; private set; }
         public string CreditsRawObservationId { get; private set; }
+        public string FixtureRoot { get; private set; }
 
         /// <summary>
         /// The compressor for this invocation, or null under --no-compress.
@@ -172,7 +175,7 @@ namespace BizHawk.Headless.Gpgx
                 : null;
         }
 
-        public static CommandLineOptions Parse(string[] args)
+        public static CommandLineOptions Parse(string[] args, string fixtureRoot = null)
         {
             if (args == null)
             {
@@ -234,7 +237,8 @@ namespace BizHawk.Headless.Gpgx
                     values,
                     romPath,
                     traceMoviePath,
-                    outputDirectory);
+                    outputDirectory,
+                    fixtureRoot);
             }
             string moviePath = Required(values, "--movie");
             if (mode == CaptureMode.LoadTime)
@@ -351,7 +355,8 @@ namespace BizHawk.Headless.Gpgx
             IDictionary<string, string> values,
             string romPath,
             string moviePath,
-            string outputDirectory)
+            string outputDirectory,
+            string fixtureRoot)
         {
             RejectInTraceMode(values, "--bk2-frame-offset");
             RejectInTraceMode(values, "--max-frames");
@@ -526,6 +531,12 @@ namespace BizHawk.Headless.Gpgx
                 Path.GetFullPath(outputDirectory);
             if (credits)
             {
+                if (string.IsNullOrEmpty(fixtureRoot))
+                {
+                    throw new ArgumentException(
+                        "credits_demo requires an explicit external fixture root.");
+                }
+                fixtureRoot = LinuxPathEntry.ResolveProposedPath(fixtureRoot);
                 if (values.ContainsKey("--no-compress")
                     || values.ContainsKey("--compress-threshold"))
                 {
@@ -544,14 +555,14 @@ namespace BizHawk.Headless.Gpgx
                 if (rawPath != null)
                 {
                     CreditsRawObservationPathPolicy.Validate(
-                        fullOutputDirectory, rawPath,
-                        Program.FindInstalledTraceRoot());
+                        fullOutputDirectory, rawPath, fixtureRoot);
                 }
                 return new CommandLineOptions(
                     CaptureMode.Trace, Path.GetFullPath(romPath), null,
                     fullOutputDirectory, 0, 0, traceProfile, null, null, 0,
                     false, true, 0, creditsTarget, rawPath,
-                    hasRawId ? values["--credits-raw-observation-id"] : null);
+                    hasRawId ? values["--credits-raw-observation-id"] : null,
+                    fixtureRoot);
             }
             if (audioReference)
             {
@@ -788,32 +799,46 @@ namespace BizHawk.Headless.Gpgx
     {
         public static int Main(string[] args)
         {
-            return Run(args, Console.Out, Console.Error);
-        }
-
-        internal static int Run(
-            string[] args,
-            TextWriter stdout,
-            TextWriter stderr)
-        {
-            return Run(
-                args,
-                stdout,
-                stderr,
-                (romPath, syncSettings) =>
-                    GpgxHost.Open(romPath, syncSettings));
+            try
+            {
+                string tracechaserRoot, inputRoot, fixtureRoot;
+                args = ExtractBoundaryArguments(args, out tracechaserRoot,
+                    out inputRoot, out fixtureRoot);
+                ValidateProducerBoundary(args, tracechaserRoot, inputRoot, fixtureRoot);
+                return Run(args, Console.Out, Console.Error, fixtureRoot);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 1;
+            }
         }
 
         internal static int Run(
             string[] args,
             TextWriter stdout,
             TextWriter stderr,
-            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost)
+            string fixtureRoot = null)
+        {
+            return Run(
+                args,
+                stdout,
+                stderr,
+                (romPath, syncSettings) =>
+                    GpgxHost.Open(romPath, syncSettings), fixtureRoot);
+        }
+
+        internal static int Run(
+            string[] args,
+            TextWriter stdout,
+            TextWriter stderr,
+            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost,
+            string fixtureRoot = null)
         {
             try
             {
                 CommandLineOptions options =
-                    CommandLineOptions.Parse(args);
+                    CommandLineOptions.Parse(args, fixtureRoot);
                 BizHawkInstallation installation =
                     BizHawkInstallation.Validate(
                         Environment.GetEnvironmentVariable("BIZHAWK_HOME"));
@@ -1268,7 +1293,7 @@ namespace BizHawk.Headless.Gpgx
             S1CreditsRawHostEvidenceCollector rawEvidence = null;
             try
             {
-                if (!IsCreditsCandidatePathSafe(options.OutputDirectory))
+                if (!IsCreditsCandidatePathSafe(options.OutputDirectory, options.FixtureRoot))
                 {
                     throw new ArgumentException(
                         "credits_demo candidate output must not be a canonical fixture path.");
@@ -1409,11 +1434,11 @@ namespace BizHawk.Headless.Gpgx
             }
         }
 
-        internal static bool IsCreditsCandidatePathSafe(string outputDirectory)
+        internal static bool IsCreditsCandidatePathSafe(string outputDirectory, string fixtureRoot)
         {
-            if (string.IsNullOrEmpty(outputDirectory)) return false;
+            if (string.IsNullOrEmpty(outputDirectory) || string.IsNullOrEmpty(fixtureRoot)) return false;
             string canonical = LinuxPathEntry.ResolveExistingAncestor(
-                FindInstalledTraceRoot());
+                fixtureRoot);
             string candidateAncestor = LinuxPathEntry.ResolveExistingAncestor(
                 outputDirectory);
             string canonicalPrefix = canonical.TrimEnd(Path.DirectorySeparatorChar)
@@ -1425,31 +1450,48 @@ namespace BizHawk.Headless.Gpgx
                     canonicalPrefix, StringComparison.Ordinal);
         }
 
-        internal static string FindInstalledTraceRoot()
+        private static string[] ExtractBoundaryArguments(string[] args,
+            out string tracechaserRoot, out string inputRoot, out string fixtureRoot)
         {
-            string found = FindInstalledTraceRootFrom(
-                AppDomain.CurrentDomain.BaseDirectory);
-            if (found != null) return found;
-            found = FindInstalledTraceRootFrom(Directory.GetCurrentDirectory());
-            if (found != null) return found;
-            throw new InvalidOperationException(
-                "Unable to locate the installed trace fixture root from the executable or current directory.");
+            tracechaserRoot = inputRoot = fixtureRoot = null;
+            var retained = new List<string>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                string name = args[i];
+                if (name != "--tracechaser-root" && name != "--input-repository-root"
+                    && name != "--fixture-root") { retained.Add(name); continue; }
+                if (++i >= args.Length) throw new ArgumentException(name + " requires a value.");
+                if (name == "--tracechaser-root") tracechaserRoot = args[i];
+                else if (name == "--input-repository-root") inputRoot = args[i];
+                else fixtureRoot = args[i];
+            }
+            return retained.ToArray();
         }
 
-        private static string FindInstalledTraceRootFrom(string start)
+        internal static void ValidateProducerBoundary(string[] args, string tracechaserRoot,
+            string inputRoot, string fixtureRoot)
         {
-            string root = Path.GetFullPath(start);
-            while (!Directory.Exists(Path.Combine(
-                root, "src", "test", "resources", "traces")))
+            if (string.IsNullOrEmpty(tracechaserRoot) || string.IsNullOrEmpty(inputRoot)
+                || string.IsNullOrEmpty(fixtureRoot))
+                throw new ArgumentException("explicit --tracechaser-root, --input-repository-root, and --fixture-root are required.");
+            if (!Path.IsPathRooted(tracechaserRoot) || !Path.IsPathRooted(inputRoot)
+                || !Path.IsPathRooted(fixtureRoot))
+                throw new ArgumentException("producer, consumer, and fixture roots must be explicit absolute paths.");
+            string output = null;
+            for (int i = 0; i + 1 < args.Length; i++) if (args[i] == "--output") output = args[i + 1];
+            if (string.IsNullOrEmpty(output) || !Path.IsPathRooted(output))
+                throw new ArgumentException("an explicit absolute --output is required.");
+            string candidate = LinuxPathEntry.ResolveProposedPath(output);
+            foreach (string root in new[] { tracechaserRoot, inputRoot })
             {
-                string parent = Path.GetDirectoryName(root);
-                if (string.IsNullOrEmpty(parent) || parent == root)
-                {
-                    return null;
-                }
-                root = parent;
+                string canonical = LinuxPathEntry.ResolveProposedPath(root).TrimEnd(Path.DirectorySeparatorChar);
+                if (candidate == canonical || candidate.StartsWith(canonical + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    throw new ArgumentException("output must remain outside both source trees.");
             }
-            return Path.Combine(root, "src", "test", "resources", "traces");
+            string consumer = LinuxPathEntry.ResolveProposedPath(inputRoot).TrimEnd(Path.DirectorySeparatorChar);
+            string fixture = LinuxPathEntry.ResolveProposedPath(fixtureRoot);
+            if (fixture != consumer && !fixture.StartsWith(consumer + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                throw new ArgumentException("fixture root must belong to the explicit consumer checkout.");
         }
 
         /// <summary>

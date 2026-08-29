@@ -41,6 +41,17 @@ REM can be supplied with BIZHAWK_EXTRA_ARGS.
 
 setlocal
 
+if not "%OGGF_TRACE_OUTPUT_DIR%"=="" (
+    if "%OGGF_INPUT_REPOSITORY_ROOT%"=="" (
+        echo ERROR: OGGF_INPUT_REPOSITORY_ROOT is required with OGGF_TRACE_OUTPUT_DIR.
+        exit /b 2
+    )
+    for %%I in ("%~dp0..") do set "OGGF_TRACECHASER_ROOT=%%~fI"
+    for /f "usebackq delims=" %%I in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0assert_external_output.ps1" -TraceChaserRoot "%OGGF_TRACECHASER_ROOT%" -InputRepositoryRoot "%OGGF_INPUT_REPOSITORY_ROOT%" -OutputRoot "%OGGF_TRACE_OUTPUT_DIR%"`) do set "OGGF_TRACE_OUTPUT_DIR=%%I"
+    if errorlevel 1 exit /b %ERRORLEVEL%
+    set "OGGF_OUTPUT_BOUNDARY_VALIDATED=tracechaser-output-policy-v1:%OGGF_TRACE_OUTPUT_DIR%"
+)
+
 if "%~1"=="" goto :usage
 if "%~2"=="" goto :usage
 if "%~3"=="" goto :usage

@@ -71,6 +71,15 @@ class DocumentationPolicyIntegrationTest(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("reason=active former-root command", result.stdout)
 
+    def test_historical_nested_heading_and_fence_cannot_hide_later_active_command(self):
+        self._write("README.md", "# Guide\n\n## Pre-v5 historical evidence\n"
+                    "### Nested\n```bash\npython3 tools/traces/old.py\n```\n"
+                    "## Current\n```bash\npython3 tools/traces/current.py\n```\n")
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
     def test_tracechaser_active_guidance_chain_is_valid(self):
         result = subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(REPOSITORY_ROOT)],

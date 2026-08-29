@@ -37,6 +37,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TraceCli credits candidates cannot resolve into canonical fixtures",
                 CreditsCandidatePathIsCanonicalSafe));
             tests.Add(new TestMain.TestCase(
+                "TraceCli producer boundary rejects canonical proc-root aliases",
+                ProducerBoundaryRejectsProcRootAliases));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli trace mode refuses each existing final output",
                 TraceModeRefusesEachExistingFinalOutput));
             tests.Add(new TestMain.TestCase(
@@ -140,11 +143,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void CreditsDemoSelectorsAreStrict()
         {
             string root = TestScratch.CreateRootPath("credits-cli");
+            string fixtureRoot = TestScratch.CreateRootPath("credits-fixtures");
+            Directory.CreateDirectory(fixtureRoot);
             CommandLineOptions options = CommandLineOptions.Parse(new[]
             {
                 "--mode", "trace", "--rom", "s1.gen", "--output", root,
                 "--trace-profile", "credits_demo", "--credits-target", "7"
-            });
+            }, fixtureRoot);
             AssertEx.Equal(null, options.MoviePath);
             AssertEx.Equal(7, options.CreditsTarget.Value);
             AssertEx.Equal(0L, options.CompressThresholdBytes);
@@ -156,7 +161,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "--trace-profile", "credits_demo", "--credits-target", "all",
                 "--credits-raw-observations", sidecar,
                 "--credits-raw-observation-id", "task9-credits-a"
-            });
+            }, fixtureRoot);
             AssertEx.Equal(Path.GetFullPath(sidecar),
                 audited.CreditsRawObservationsPath);
             AssertEx.Equal("task9-credits-a", audited.CreditsRawObservationId);
@@ -166,19 +171,19 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "--mode", "trace", "--rom", "s1.gen", "--movie", "x.bk2",
                     "--output", root + "-movie", "--trace-profile", "credits_demo",
                     "--credits-target", "all"
-                }), "--movie is forbidden");
+                }, fixtureRoot), "--movie is forbidden");
             AssertEx.Throws<ArgumentOutOfRangeException>(
                 () => CommandLineOptions.Parse(new[]
                 {
                     "--mode", "trace", "--rom", "s1.gen", "--output", root + "-bad",
                     "--trace-profile", "credits_demo", "--credits-target", "8"
-                }), "all or 0 through 7");
+                }, fixtureRoot), "all or 0 through 7");
             AssertEx.Throws<ArgumentException>(
                 () => CommandLineOptions.Parse(new[]
                 {
                     "--mode", "trace", "--rom", "s1.gen", "--movie", "x.bk2",
                     "--output", root + "-other", "--credits-target", "0"
-                }), "requires --trace-profile credits_demo");
+                }, fixtureRoot), "requires --trace-profile credits_demo");
 
             AssertEx.Throws<ArgumentException>(
                 () => CommandLineOptions.Parse(new[]
@@ -186,7 +191,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "--mode", "trace", "--rom", "s1.gen", "--output", root + "-missing-id",
                     "--trace-profile", "credits_demo", "--credits-target", "all",
                     "--credits-raw-observations", root + "-missing-id.jsonl"
-                }), "must be supplied together");
+                }, fixtureRoot), "must be supplied together");
             AssertEx.Throws<ArgumentException>(
                 () => CommandLineOptions.Parse(new[]
                 {
@@ -194,7 +199,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "--trace-profile", "credits_demo", "--credits-target", "7",
                     "--credits-raw-observations", root + "-single.jsonl",
                     "--credits-raw-observation-id", "single"
-                }), "credits-target all");
+                }, fixtureRoot), "credits-target all");
 
             foreach (string identity in new[] { ".", "..", "has/slash", "has\\slash", "line\nbreak", "\u007f" })
             {
@@ -205,17 +210,32 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         "--trace-profile", "credits_demo", "--credits-target", "all",
                         "--credits-raw-observations", root + "-identity.jsonl",
                         "--credits-raw-observation-id", identity
-                    }), "printable ASCII");
+                    }, fixtureRoot), "printable ASCII");
             }
+        }
+
+        private static void ProducerBoundaryRejectsProcRootAliases()
+        {
+            string consumer = TestScratch.CreateRootPath("producer-consumer");
+            string fixture = Path.Combine(consumer, "fixtures");
+            Directory.CreateDirectory(fixture);
+            string aliasOutput = "/proc/self/root" + Path.Combine(consumer, "capture");
+            AssertEx.Throws<ArgumentException>(() => Program.ValidateProducerBoundary(
+                new[] { "--output", aliasOutput },
+                EndToEndTests.RepositoryRoot, consumer, fixture),
+                "outside both source trees");
+            AssertEx.Throws<ArgumentException>(() => Program.ValidateProducerBoundary(
+                new[] { "--output", Path.Combine(Path.GetTempPath(), "capture") },
+                null, consumer, fixture), "explicit --tracechaser-root");
         }
 
         private static void CreditsCandidatePathIsCanonicalSafe()
         {
-            string canonical = Path.Combine(EndToEndTests.RepositoryRoot,
-                "src", "test", "resources", "traces");
-            AssertEx.Equal(false, Program.IsCreditsCandidatePathSafe(canonical));
+            string canonical = TestScratch.CreateRootPath("explicit-fixtures");
+            Directory.CreateDirectory(canonical);
+            AssertEx.Equal(false, Program.IsCreditsCandidatePathSafe(canonical, canonical));
             AssertEx.Equal(false, Program.IsCreditsCandidatePathSafe(
-                Path.Combine(canonical, "s1", "..", "s1", "candidate")));
+                Path.Combine(canonical, "s1", "..", "s1", "candidate"), canonical));
             string scratch = TestScratch.CreateRootPath("credits-path");
             Directory.CreateDirectory(scratch);
             try
@@ -226,9 +246,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     throw new InvalidOperationException("Unable to create test symlink.");
                 }
                 AssertEx.Equal(false, Program.IsCreditsCandidatePathSafe(
-                    Path.Combine(alias, "candidate")));
+                    Path.Combine(alias, "candidate"), canonical));
                 AssertEx.Equal(true, Program.IsCreditsCandidatePathSafe(
-                    Path.Combine(scratch, "candidate")));
+                    Path.Combine(scratch, "candidate"), canonical));
 
                 string candidate = Path.Combine(scratch, "candidate");
                 string raw = Path.Combine(scratch, "evidence", "raw.jsonl");
@@ -263,21 +283,6 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         candidate, raw, canonical),
                     "already exists");
 
-                string originalDirectory = Directory.GetCurrentDirectory();
-                string unrelated = Path.Combine(Path.GetTempPath(),
-                    "openggf-credits-path-cwd-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(unrelated);
-                try
-                {
-                    Directory.SetCurrentDirectory(unrelated);
-                    AssertEx.Equal(Path.GetFullPath(canonical),
-                        Path.GetFullPath(Program.FindInstalledTraceRoot()));
-                }
-                finally
-                {
-                    Directory.SetCurrentDirectory(originalDirectory);
-                    Directory.Delete(unrelated, true);
-                }
                 File.Delete(alias);
             }
             finally

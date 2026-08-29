@@ -46,7 +46,7 @@ def find_violations(root: Path) -> list[str]:
                 )
         if OBSOLETE_IGNORE_PATTERN.search(active_content):
             violations.append(f"path={path} reason=obsolete broad-ignore guidance")
-        for block in _fenced_code_blocks(active_content):
+        for block in _active_fenced_code_blocks(content):
             if FORMER_ROOT_COMMAND_PATTERN.search(block):
                 violations.append(f"path={path} reason=active former-root command")
     return sorted(set(violations))
@@ -83,6 +83,37 @@ def _fenced_code_blocks(content: str) -> list[str]:
                 current = None
         elif current is not None:
             current.append(line)
+    return blocks
+
+
+def _active_fenced_code_blocks(content: str) -> list[str]:
+    """Extract active fences while retaining fence state through history."""
+    blocks: list[str] = []
+    current: list[str] | None = None
+    historical_level: int | None = None
+    active_fence = False
+    for line in content.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            if current is None:
+                active_fence = historical_level is None
+                current = []
+            else:
+                if active_fence:
+                    blocks.append("".join(current))
+                current = None
+                active_fence = False
+            continue
+        if current is not None:
+            current.append(line)
+            continue
+        stripped = line.rstrip("\r\n")
+        historical = HISTORICAL_BOUNDARY_PATTERN.match(stripped)
+        if historical:
+            historical_level = len(historical.group(1))
+            continue
+        heading = HEADING_PATTERN.match(stripped)
+        if historical_level is not None and heading and len(heading.group(1)) <= historical_level:
+            historical_level = None
     return blocks
 
 

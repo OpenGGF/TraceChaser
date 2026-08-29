@@ -62,8 +62,30 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
             validate_document(reordered)
 
     def test_full_reviewed_matrix_retains_all_36_rows(self) -> None:
-        self.assertEqual(36, len(ROWS))
-        self.assertEqual(36, len({row["id"] for row in ROWS}))
+        expected = (
+            's1-ghz1 s1-mz1 s1-complete s1-maze-run s1-emeralds-run '
+            's1-credits-a s1-credits-b s2-ehz1 s2-arz-0 s2-arz-1 s2-cnz-0 '
+            's2-cnz-1 s2-cpz-0 s2-cpz-1 s2-htz-0 s2-htz-1 s2-mcz-0 '
+            's2-mcz-1 s2-ooz-0 s2-ooz-1 s2-mtz-0 s2-mtz-1 s2-mtz-2 '
+            's2-dez s2-scz s2-wfz s2-special-stage s2-halfpipe-run '
+            's2-emeralds-run s3k-aiz s3k-cnz s3k-mgz s3k-complete '
+            's3k-multibonus-c s3k-multibonus-b s3k-knuckles-superemeralds'
+        ).split()
+        ids = [row["id"] for row in ROWS]
+        self.assertEqual(expected, ids)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(['s1-credits-a', 's1-credits-b'],
+                         [row['id'] for row in ROWS if row['id'].startswith('s1-credits-')])
+        for row in ROWS:
+            selector_names = row['selectors'][::2]
+            self.assertFalse(any('schema' in value.lower() or 'version' in value.lower()
+                                 for value in selector_names), row['id'])
+
+    def test_deterministic_build_smoke_guard_keeps_its_exact_filter_boundary(self) -> None:
+        script = (TRACECHASER_ROOT / 'bizhawk-headless/verify-deterministic-build.sh').read_text()
+        self.assertIn('--filter TracePayloadCompressor --jobs 1', script)
+        self.assertNotIn('--filter Bk2Reader', script)
+        self.assertNotIn('--filter S2AudioObserverProfile', script)
 
     def test_rom_and_movie_checks_require_every_explicit_verified_input(self) -> None:
         verify_roms(self.document, self.roms)
@@ -88,12 +110,16 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
             self.batch_root,
             self.document,
             self.roms,
+            self.input_repository_root,
+            self.fixture_root,
         )
 
         self.assertEqual(6, len(commands))
         for row, argv in zip(self.document["rows"], commands):
             self.assertIsInstance(argv, list)
             self.assertEqual(str(TRACECHASER_ROOT / "bizhawk-headless" / "run.sh"), argv[0])
+            self.assertEqual(str(self.input_repository_root.resolve()), argv[argv.index("--input-repository-root") + 1])
+            self.assertEqual(str(self.fixture_root.resolve()), argv[argv.index("--fixture-root") + 1])
             self.assertEqual(str(self.roms[row["game"]]), argv[argv.index("--rom") + 1])
             self.assertEqual(str(self.movie_root / row["movie"]), argv[argv.index("--movie") + 1])
             self.assertEqual(

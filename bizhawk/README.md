@@ -855,12 +855,19 @@ the native headless complete-run path. Its only envelope is `trace_schema: 5`,
 desired route as a BK2, then capture into a new scratch candidate directory:
 
 ```bash
-BIZHAWK_HOME=/abs/path/to/docs/BizHawk-2.11-linux-x64 \
-tools/bizhawk-headless/run.sh \
+TRACECHASER_ROOT=/abs/path/to/TraceChaser
+INPUT_REPOSITORY_ROOT=/abs/path/to/OpenGGF
+FIXTURE_ROOT="$INPUT_REPOSITORY_ROOT/src/test/resources/traces"
+OUTPUT_ROOT=/abs/path/to/external-captures/s3k-roundtrip-v5-scratch
+BIZHAWK_HOME="$TRACECHASER_ROOT/.dependencies/BizHawk-2.11-linux-x64" \
+"$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
+  --tracechaser-root "$TRACECHASER_ROOT" \
+  --input-repository-root "$INPUT_REPOSITORY_ROOT" \
+  --fixture-root "$FIXTURE_ROOT" \
   --mode trace \
   --rom "$S3K_ROM_PATH" \
-  --movie /abs/path/to/s3k-roundtrip.bk2 \
-  --output "$PWD/target/s3k-roundtrip-v5-scratch" \
+  --movie /abs/path/to/external-movies/s3k-roundtrip.bk2 \
+  --output "$OUTPUT_ROOT" \
   --run-id s3k-roundtrip-candidate
 ```
 
@@ -869,8 +876,7 @@ installed fixture tree. Validate the entire scratch fleet before replay or
 review:
 
 ```bash
-python3 tools/traces/validate_trace_v5.py \
-  "$PWD/target/s3k-roundtrip-v5-scratch"
+python3 "$TRACECHASER_ROOT/traces/validate_trace_v5.py" "$OUTPUT_ROOT"
 ```
 
 Then run candidate-root replay and the native ROM-backed gates, produce the

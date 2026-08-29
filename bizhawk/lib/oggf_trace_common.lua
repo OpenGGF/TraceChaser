@@ -38,20 +38,12 @@ end
 function M.require_external_output_dir()
     local output = assert(os.getenv("OGGF_TRACE_OUTPUT_DIR"),
         "OGGF_TRACE_OUTPUT_DIR must name an explicit absolute external output root")
-    local tracechaser = assert(os.getenv("OGGF_TRACECHASER_ROOT"),
-        "OGGF_TRACECHASER_ROOT must be supplied by the launcher for output safety")
-    local input = assert(os.getenv("OGGF_INPUT_REPOSITORY_ROOT"),
-        "OGGF_INPUT_REPOSITORY_ROOT must name the explicit consumer checkout")
-    if not is_absolute(output) or not is_absolute(tracechaser) or not is_absolute(input) then
-        error("output and protected roots must be explicit absolute paths")
-    end
-    output, tracechaser, input = normalize_path(output), normalize_path(tracechaser), normalize_path(input)
-    local function beneath(root)
-        local left, right = output:lower(), root:lower()
-        return left == right or left:sub(1, #right + 1) == right .. "/"
-    end
-    if beneath(tracechaser) or beneath(input) then
-        error("output root must remain outside both source trees")
+    local validated = assert(os.getenv("OGGF_OUTPUT_BOUNDARY_VALIDATED"),
+        "direct recorder use is forbidden; use a launcher that validates the output boundary")
+    if not is_absolute(output) then error("output root must be an explicit absolute path") end
+    output = normalize_path(output)
+    if validated ~= "tracechaser-output-policy-v1:" .. output then
+        error("output boundary sentinel does not match the launcher-validated canonical output")
     end
     if output:sub(-1) ~= "/" then output = output .. "/" end
     return output

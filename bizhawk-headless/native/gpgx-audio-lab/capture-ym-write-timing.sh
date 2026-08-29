@@ -11,18 +11,21 @@ game=
 sound_id=
 fm_channel=
 output=
+input_repository_root=
 while (($#)); do
   case "$1" in
     --game) game=${2-}; shift 2 ;;
     --sound-id) sound_id=${2-}; shift 2 ;;
     --fm-channel) fm_channel=${2-}; shift 2 ;;
     --output) output=${2-}; shift 2 ;;
+    --input-repository-root) input_repository_root=${2-}; shift 2 ;;
     *) fail "unknown argument: $1" ;;
   esac
 done
 [[ "$game" == s1 || "$game" == s2 || "$game" == s3k ]] \
   || fail '--game must be s1, s2, or s3k'
 [[ -n "$output" ]] || fail '--output is required'
+[[ -n "$input_repository_root" ]] || fail '--input-repository-root is required'
 if [[ "$game" == s1 || "$game" == s2 ]]; then
   [[ "$sound_id" == 0xB5 && "$fm_channel" == 4 ]] \
     || fail 'S1/S2 audits require --sound-id 0xB5 --fm-channel 4'
@@ -30,7 +33,9 @@ elif [[ -n "$sound_id" || -n "$fm_channel" ]]; then
   fail 'S3K capture does not accept --sound-id or --fm-channel'
 fi
 [[ "$output" = /* ]] || fail '--output must be absolute'
-case "$output" in "$repo_root"|"$repo_root"/*) fail '--output must be outside the TraceChaser source tree' ;; esac
+output=$(python3 "$repo_root/traces/output_policy.py" --tracechaser-root "$repo_root" \
+  --input-repository-root "$input_repository_root" --output-root "$output") \
+  || fail '--output must remain outside both source trees'
 [[ ! -e "$output" && ! -L "$output" ]] || fail "output already exists: $output"
 instructions_output=${output%.json}.native-instructions.tsv
 [[ ! -e "$instructions_output" && ! -L "$instructions_output" ]] \

@@ -27,5 +27,6 @@ OUTPUT_DIR=$(python3 "$TRACECHASER_ROOT/traces/output_policy.py" \
 export OGGF_TRACECHASER_ROOT=$TRACECHASER_ROOT
 export OGGF_INPUT_REPOSITORY_ROOT=$(realpath "$1")
 export OGGF_TRACE_OUTPUT_DIR=$OUTPUT_DIR
+export OGGF_OUTPUT_BOUNDARY_VALIDATED="tracechaser-output-policy-v1:$OUTPUT_DIR"
 export OGGF_WORKDIR=$OUTPUT_DIR
 exec "$HERE/run_bizhawk_lua.sh" "$HERE/s1_trace_recorder.lua" "$3" "$2"

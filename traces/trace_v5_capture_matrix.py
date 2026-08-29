@@ -526,15 +526,22 @@ def expand_commands(
     batch_root: Path,
     document: dict[str, Any],
     roms: dict[str, Path],
+    input_repository_root: Path | None = None,
+    fixture_root: Path | None = None,
 ) -> list[list[str]]:
     tracechaser_root = tracechaser_root.resolve()
     movie_root = movie_root.resolve()
     batch_root = batch_root.resolve()
     runner = tracechaser_root / "bizhawk-headless" / "run.sh"
+    if input_repository_root is None or fixture_root is None:
+        raise ValueError("explicit consumer and fixture roots are required")
     commands: list[list[str]] = []
     for row in document["rows"]:
         output = batch_root / document["capture"]["output_template"].format(id=row["id"])
-        args = [str(runner), "--mode", document["capture"]["mode"], "--rom", str(roms[row["game"]])]
+        args = [str(runner), "--tracechaser-root", str(tracechaser_root),
+                "--input-repository-root", str(input_repository_root.resolve()),
+                "--fixture-root", str(fixture_root.resolve()),
+                "--mode", document["capture"]["mode"], "--rom", str(roms[row["game"]])]
         if row["movie"] is not None:
             args.extend(["--movie", str(movie_root / row["movie"])])
         args.extend(["--output", str(output)])
@@ -642,7 +649,9 @@ def main(argv: list[str] | None = None) -> int:
             if any(path is None for path in roms.values()):
                 raise ValueError("--s1-rom, --s2-rom, and --s3k-rom are required for expand")
             require_external_scratch(TRACECHASER_ROOT, args.input_repository_root, args.batch_root)
-            argv_rows = expand_commands(TRACECHASER_ROOT, args.movie_root, args.batch_root, document, roms)  # type: ignore[arg-type]
+            argv_rows = expand_commands(TRACECHASER_ROOT, args.movie_root, args.batch_root,
+                                        document, roms, args.input_repository_root,
+                                        args.fixture_root)  # type: ignore[arg-type]
             content = ("\n".join(" ".join(shlex.quote(argument) for argument in row) for row in argv_rows) + "\n").encode()
             if args.output:
                 from traces.no_replace_output import write_bytes_no_replace

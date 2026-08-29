@@ -60,17 +60,25 @@ class OutputPolicyTests(unittest.TestCase):
             "if ok then os.exit(0) else io.stderr:write(err..'\\n'); os.exit(7) end"
         )
         environment = os.environ.copy()
-        environment.update({
-            "OGGF_TRACE_OUTPUT_DIR": str(self.tracechaser / "out"),
-            "OGGF_TRACECHASER_ROOT": str(self.tracechaser),
-            "OGGF_INPUT_REPOSITORY_ROOT": str(self.consumer),
-        })
+        environment.update({"OGGF_TRACE_OUTPUT_DIR":
+                            "/proc/self/root" + str(ROOT / "out")})
         result = subprocess.run(
             ["lua", "-e", harness, str(ROOT / "bizhawk/lib/oggf_trace_common.lua")],
             env=environment, text=True, capture_output=True, check=False,
         )
         self.assertEqual(7, result.returncode)
-        self.assertIn("outside", result.stderr)
+        self.assertIn("direct recorder use is forbidden", result.stderr)
+
+        canonical = str(self.external.resolve())
+        environment.update({
+            "OGGF_TRACE_OUTPUT_DIR": canonical,
+            "OGGF_OUTPUT_BOUNDARY_VALIDATED": "tracechaser-output-policy-v1:" + canonical,
+        })
+        result = subprocess.run(
+            ["lua", "-e", harness, str(ROOT / "bizhawk/lib/oggf_trace_common.lua")],
+            env=environment, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_retro_entry_points_require_explicit_external_output_before_dependencies(self) -> None:
         for script in ("s1_trace_recorder.py", "s1_credits_trace_recorder.py"):
@@ -131,6 +139,39 @@ class OutputPolicyTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("outside", result.stdout + result.stderr)
         self.assertNotIn("BizHawk", result.stdout)
+
+    def test_native_and_audio_launchers_reject_proc_root_consumer_aliases(self) -> None:
+        proc_alias = Path("/proc/self/root" + str(self.consumer / "capture"))
+        fixture = self.consumer / "fixtures"
+        fixture.mkdir()
+        native = subprocess.run([
+            str(ROOT / "bizhawk-headless/run.sh"),
+            "--tracechaser-root", str(ROOT), "--input-repository-root", str(self.consumer),
+            "--fixture-root", str(fixture), "--mode", "trace", "--rom", "/missing.rom",
+            "--movie", "/missing.bk2", "--output", str(proc_alias),
+        ], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, native.returncode)
+        self.assertIn("outside", native.stdout + native.stderr)
+        self.assertNotIn("BIZHAWK_HOME", native.stdout + native.stderr)
+
+        source_map = self.external / "map.tsv"
+        input_file = self.external / "input.tsv"
+        source_map.write_text("header\n")
+        input_file.write_text("header\n")
+        ledger = subprocess.run(["bash",
+            str(ROOT / "bizhawk-headless/native/gpgx-audio-lab/build-representative-ledger.sh"),
+            "s1", str(source_map), str(input_file), str(self.consumer), str(proc_alias),
+        ], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, ledger.returncode)
+        self.assertIn("outside", ledger.stdout + ledger.stderr)
+
+        capture = subprocess.run(["bash",
+            str(ROOT / "bizhawk-headless/native/gpgx-audio-lab/capture-ym-write-timing.sh"),
+            "--game", "s1", "--sound-id", "0xB5", "--fm-channel", "4",
+            "--input-repository-root", str(self.consumer), "--output", str(proc_alias),
+        ], text=True, capture_output=True, check=False)
+        self.assertNotEqual(0, capture.returncode)
+        self.assertIn("outside", capture.stdout + capture.stderr)
 
 
 if __name__ == "__main__":

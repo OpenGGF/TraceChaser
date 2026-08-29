@@ -26,8 +26,10 @@ if "%OGGF_INPUT_REPOSITORY_ROOT%"=="" (
 for %%I in ("%OGGF_TRACE_OUTPUT_DIR%") do set "OUTPUT_DIR=%%~fI"
 for %%I in ("%~dp0..") do set "OGGF_TRACECHASER_ROOT=%%~fI"
 set "OUTPUT_GUARD=%~dp0assert_external_output.ps1"
-%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%OUTPUT_GUARD%" -TraceChaserRoot "%OGGF_TRACECHASER_ROOT%" -InputRepositoryRoot "%OGGF_INPUT_REPOSITORY_ROOT%" -OutputRoot "%OUTPUT_DIR%" >NUL
+for /f "usebackq delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%OUTPUT_GUARD%" -TraceChaserRoot "%OGGF_TRACECHASER_ROOT%" -InputRepositoryRoot "%OGGF_INPUT_REPOSITORY_ROOT%" -OutputRoot "%OUTPUT_DIR%"`) do set "OUTPUT_DIR=%%I"
 if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
+set "OGGF_TRACE_OUTPUT_DIR=%OUTPUT_DIR%"
+set "OGGF_OUTPUT_BOUNDARY_VALIDATED=tracechaser-output-policy-v1:%OUTPUT_DIR%"
 set "COMPRESS_SCRIPT=%~dp0..\traces\compress-traces.ps1"
 
 if "%~1"=="" (
