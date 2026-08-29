@@ -124,6 +124,8 @@ class Validation:
             self.reject(path, "run_id must be a non-empty string")
         if not isinstance(manifest.get("segments"), list):
             self.reject(path, "segments must be an array")
+        elif not manifest["segments"]:
+            self.reject(path, "segments must contain at least one member")
         if not isinstance(manifest.get("transitions"), list):
             self.reject(path, "transitions must be an array")
         transitions = manifest.get("dynamic_art_gap_transitions")
@@ -422,11 +424,24 @@ class Validation:
     def read_text(self, path: Path) -> str | None:
         try:
             if path.name.endswith(".gz"):
-                with gzip.open(path, "rt", encoding="utf-8", newline="") as source:
-                    return source.read()
+                content = path.read_bytes()
+                if len(content) < 10 or content[:3] != b"\x1f\x8b\x08":
+                    self.reject(path, "malformed gzip payload")
+                    return None
+                if content[3] != 0 or content[4:8] != b"\x00\x00\x00\x00":
+                    self.reject(path, "gzip header is not deterministic")
+                    return None
+                try:
+                    return gzip.decompress(content).decode("utf-8")
+                except (OSError, EOFError):
+                    self.reject(path, "malformed gzip payload")
+                    return None
             return path.read_text(encoding="utf-8", newline="")
-        except (OSError, UnicodeDecodeError) as error:
+        except UnicodeDecodeError as error:
             self.reject(path, f"cannot read UTF-8 payload: {error}")
+            return None
+        except OSError as error:
+            self.reject(path, f"cannot read payload: {error}")
             return None
 
 

@@ -6,8 +6,10 @@ no ROM bytes, BK2 movie data, or copied canonical OpenGGF traces.
 `manifest.json` pins every member's stored SHA-256 and byte length. Deterministic
 gzip members additionally pin logical SHA-256 and length. Every case names the
 TraceChaser producer entry, the real OpenGGF Java consumer entry for the Task 10
-copy, and either normalized accepted semantics or exact producer and consumer
-diagnostics. Array order in normalized semantics is significant.
+copy, and normalized accepted semantics or structured, source-pinned consumer
+diagnostics. Array order in normalized semantics is significant. Neutral JSON
+containers carry deliberately malformed or nondeterministic gzip bytes; each
+case declares the exact logical parser target that Task 10 must materialize.
 
 Run `python3 traces/validate_v5_conformance.py` from the repository root. The
 validator checks identities, rejects unmanifested members, runs every case

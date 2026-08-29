@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -214,6 +215,34 @@ class ValidateTraceV5Tests(unittest.TestCase):
             result.stderr,
         )
 
+    def test_rejects_malformed_and_nondeterministic_gzip_with_stable_diagnostics(self) -> None:
+        for label, content, diagnostic in (
+            ("malformed", b"not a gzip stream\n", "malformed gzip payload"),
+            ("nondeterministic", gzip.compress(b"frame,x\n0,0\n", mtime=1),
+             "gzip header is not deterministic"),
+        ):
+            with self.subTest(label=label):
+                fixture = self.write_fixture("s2", "complete_run", name=label)
+                (fixture / "physics.csv").unlink()
+                (fixture / "physics.csv.gz").write_bytes(content)
+
+                result = self.validate(fixture)
+
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(
+                    f"{fixture / 'physics.csv.gz'}: {diagnostic}", result.stderr)
+
+    def test_rejects_empty_run_manifest_segments_before_member_validation(self) -> None:
+        self.write_manifest({"segments": []})
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "run_manifest.json: segments must contain at least one member",
+            result.stderr,
+        )
+
     def test_rejects_run_manifest_members_that_do_not_preserve_declared_order(self) -> None:
         self.write_fixture("s2", "complete_run", name="seg0")
         self.write_fixture("s2", "complete_run", name="seg1")
@@ -357,8 +386,11 @@ class ValidateTraceV5Tests(unittest.TestCase):
     @staticmethod
     def write_payload(path: Path, content: str, compressed: bool) -> None:
         if compressed:
-            with gzip.open(path.with_suffix(path.suffix + ".gz"), "wt", encoding="utf-8") as output:
-                output.write(content)
+            payload = io.BytesIO()
+            with gzip.GzipFile(
+                    fileobj=payload, mode="wb", filename="", mtime=0) as output:
+                output.write(content.encode("utf-8"))
+            path.with_suffix(path.suffix + ".gz").write_bytes(payload.getvalue())
         else:
             path.write_text(content)
 

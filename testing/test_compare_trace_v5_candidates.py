@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -215,8 +216,11 @@ class CompareTraceV5CandidatesTests(unittest.TestCase):
         (fixture / "metadata.json").write_text(json.dumps(metadata) + "\n")
         csv_text = ",".join(header) + "\n" + "\n".join(",".join(row) for row in rows) + "\n"
         if compressed:
-            with gzip.GzipFile(fixture / "physics.csv.gz", "wb", mtime=0) as output:
+            compressed_payload = io.BytesIO()
+            with gzip.GzipFile(
+                    fileobj=compressed_payload, mode="wb", filename="", mtime=0) as output:
                 output.write(csv_text.encode())
+            (fixture / "physics.csv.gz").write_bytes(compressed_payload.getvalue())
         else:
             (fixture / "physics.csv").write_text(csv_text)
         return fixture
@@ -224,7 +228,9 @@ class CompareTraceV5CandidatesTests(unittest.TestCase):
     @staticmethod
     def manifest(run_id: str) -> str:
         return json.dumps({"game": "s1", "run_id": run_id, "recorder": "native-bizhawk-headless",
-                           "recorder_version": "3.0", "trace_schema": 5, "segments": [],
+                           "recorder_version": "3.0", "trace_schema": 5,
+                           "segments": [{"dir": "s1/credits_00_ghz1",
+                                         "bk2_frame_offset": 0}],
                            "transitions": [], "dynamic_art_gap_transitions": []}) + "\n"
 
     @staticmethod
@@ -276,8 +282,11 @@ class CreditsRawHostEvidencePipelineTests(unittest.TestCase):
             candidate_row = ["0000"] * 42
             candidate_row[HEADER_42.index("gameplay_frame_counter")] = "0001"
             payload = ",".join(HEADER_42) + "\n" + ",".join(candidate_row) + "\n"
-            with gzip.GzipFile(fixture / "physics.csv.gz", "wb", mtime=0) as output:
+            compressed_payload = io.BytesIO()
+            with gzip.GzipFile(
+                    fileobj=compressed_payload, mode="wb", filename="", mtime=0) as output:
                 output.write(payload.encode())
+            (fixture / "physics.csv.gz").write_bytes(compressed_payload.getvalue())
             (fixture / "metadata.json").write_text(json.dumps({
                 "game": "s1", "trace_profile": "credits_demo", "trace_type": "credits_demo",
                 "trace_frame_count": 1, "recorder": "native-bizhawk-headless",

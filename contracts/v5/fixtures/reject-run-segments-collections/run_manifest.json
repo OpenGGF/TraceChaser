@@ -3,8 +3,10 @@
   "game": "s2",
   "recorder": "native-bizhawk-headless",
   "recorder_version": "3.0",
-  "run_id": "bad-collections",
-  "segments": {},
+  "rom_checksum": "synthetic-no-rom",
+  "run_id": "empty-segments",
+  "segments": [],
+  "source_bk2": "synthetic-input.bk2",
   "trace_schema": 5,
   "transitions": []
 }
