@@ -871,7 +871,11 @@ namespace BizHawk.Headless.Gpgx
                         throw new FileNotFoundException(
                             "BK2 movie does not exist.", options.MoviePath);
                     }
-                    movie = Bk2Reader.Read(options.MoviePath);
+                    movie = options.FixtureRoot == null
+                        ? Bk2Reader.Read(options.MoviePath)
+                        : Bk2Reader.Read(
+                            options.MoviePath,
+                            options.FixtureRoot);
                 }
                 if (options.Mode != CaptureMode.Smoke)
                 {

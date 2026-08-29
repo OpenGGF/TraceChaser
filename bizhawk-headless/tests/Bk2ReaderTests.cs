@@ -198,7 +198,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "s1",
                 "ghz1_fullrun",
                 "ghz1_fullrun.bk2");
-            Bk2Movie movie = Bk2Reader.Read(path);
+            Bk2Movie movie = Bk2Reader.Read(
+                path,
+                ResolveCanonicalFixtureRoot(
+                    Environment.GetEnvironmentVariable("TRACECHASER_TEST_FIXTURE_ROOT")));
             AssertEx.Equal(4806, movie.FrameCount);
             AssertEx.Equal(
                 4806,
@@ -266,17 +269,18 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void RequiresAbsoluteExternalCanonicalFixtureRoot()
         {
-            AssertEx.Throws<InvalidOperationException>(
-                () => ResolveCanonicalFixtureRoot(null),
-                "TRACECHASER_TEST_FIXTURE_ROOT must be an explicit absolute directory");
-            AssertEx.Throws<InvalidOperationException>(
-                () => ResolveCanonicalFixtureRoot("relative-fixtures"),
-                "TRACECHASER_TEST_FIXTURE_ROOT must be an explicit absolute directory");
-            AssertEx.Throws<InvalidOperationException>(
-                () => ResolveCanonicalFixtureRoot(Path.Combine(
-                    Path.GetTempPath(),
-                    "tracechaser-fixture-root-that-does-not-exist")),
-                "TRACECHASER_TEST_FIXTURE_ROOT is unavailable");
+            string missing = Path.Combine(
+                Path.GetTempPath(),
+                "tracechaser-fixture-root-that-does-not-exist");
+            AssertEx.Throws<ArgumentException>(
+                () => Bk2Reader.Read("movie.bk2", null),
+                "canonical fixture root must be an explicit absolute directory");
+            AssertEx.Throws<ArgumentException>(
+                () => Bk2Reader.Read("movie.bk2", "relative-fixtures"),
+                "canonical fixture root must be an explicit absolute directory");
+            AssertEx.Throws<DirectoryNotFoundException>(
+                () => Bk2Reader.Read("movie.bk2", missing),
+                "canonical fixture root is unavailable");
         }
 
         private static string ResolveCanonicalFixtureRoot(string configured)
@@ -367,7 +371,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void OnlyHashesCanonicalArchiveIdentity()
         {
             string directory = CreateTempDirectory();
-            string path = Path.Combine(
+            string fixtureRoot = Path.Combine(directory, "fixtures");
+            string canonicalPath = Path.Combine(
+                fixtureRoot,
+                "s1",
+                "ghz1_fullrun",
+                "ghz1_fullrun.bk2");
+            string lookalikePath = Path.Combine(
                 directory,
                 "copy",
                 "src",
@@ -379,15 +389,28 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "ghz1_fullrun.bk2");
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                Directory.CreateDirectory(Path.GetDirectoryName(canonicalPath));
                 WriteMovie(
-                    path,
+                    canonicalPath,
+                    Entries(
+                        Fixture("ghz1-header.txt"),
+                        Fixture("ghz1-sync-settings.json"),
+                        Fixture("ghz1-input-prefix.txt")));
+                AssertEx.Throws<InvalidDataException>(
+                    () => Bk2Reader.Read(canonicalPath, fixtureRoot),
+                    "Canonical GHZ1 BK2 SHA-256");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(lookalikePath));
+                WriteMovie(
+                    lookalikePath,
                     Entries(
                         Fixture("ghz1-header.txt"),
                         Fixture("ghz1-sync-settings.json"),
                         Fixture("ghz1-input-prefix.txt")));
 
-                AssertEx.Equal(3, Bk2Reader.Read(path).FrameCount);
+                AssertEx.Equal(
+                    3,
+                    Bk2Reader.Read(lookalikePath, fixtureRoot).FrameCount);
             }
             finally
             {

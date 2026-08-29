@@ -17,7 +17,7 @@ namespace OpenGGF.BizHawk.Headless
         private const string SyncEntryName = "SyncSettings.json";
         private const string InputEntryName = "Input Log.txt";
         private const string CanonicalMovieRelativePath =
-            "src/test/resources/traces/s1/ghz1_fullrun/ghz1_fullrun.bk2";
+            "s1/ghz1_fullrun/ghz1_fullrun.bk2";
         private const string CanonicalMovieSha256 =
             "dced61b2d3a3346b2ecd62254140497ef2827374c1de8597780f91e39ca0dcea";
         private const string SyncSettingsType =
@@ -30,15 +30,6 @@ namespace OpenGGF.BizHawk.Headless
             SyncEntryName,
             InputEntryName
         };
-
-        private static readonly string CanonicalMoviePath = Path.GetFullPath(
-            Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "..",
-                "..",
-                "..",
-                "..",
-                CanonicalMovieRelativePath));
 
         private static readonly string[] ExpectedSyncFields =
         {
@@ -96,13 +87,46 @@ namespace OpenGGF.BizHawk.Headless
 
         public static Bk2Movie Read(string path)
         {
+            return ReadCore(path, null);
+        }
+
+        public static Bk2Movie Read(string path, string canonicalFixtureRoot)
+        {
+            if (string.IsNullOrWhiteSpace(canonicalFixtureRoot)
+                || !Path.IsPathRooted(canonicalFixtureRoot))
+            {
+                throw new ArgumentException(
+                    "The canonical fixture root must be an explicit absolute directory.",
+                    "canonicalFixtureRoot");
+            }
+
+            string fixtureRoot = Path.GetFullPath(canonicalFixtureRoot);
+            if (!Directory.Exists(fixtureRoot))
+            {
+                throw new DirectoryNotFoundException(
+                    "The canonical fixture root is unavailable: "
+                    + fixtureRoot + ".");
+            }
+            string resolvedFixtureRoot =
+                LinuxPathEntry.ResolveProposedPath(fixtureRoot);
+            string canonicalMoviePath = LinuxPathEntry.ResolveProposedPath(
+                Path.Combine(
+                    resolvedFixtureRoot,
+                    CanonicalMovieRelativePath));
+            return ReadCore(path, canonicalMoviePath);
+        }
+
+        private static Bk2Movie ReadCore(
+            string path,
+            string canonicalMoviePath)
+        {
             if (string.IsNullOrEmpty(path))
             {
                 throw new ArgumentException("A BK2 path is required.", "path");
             }
 
             string fullPath = Path.GetFullPath(path);
-            VerifyCanonicalMovieHash(fullPath);
+            VerifyCanonicalMovieHash(fullPath, canonicalMoviePath);
 
             Dictionary<string, string> headers;
             GPGX.GPGXSyncSettings syncSettings;
@@ -868,12 +892,15 @@ namespace OpenGGF.BizHawk.Headless
             return state[index] != '.';
         }
 
-        private static void VerifyCanonicalMovieHash(string path)
+        private static void VerifyCanonicalMovieHash(
+            string path,
+            string canonicalMoviePath)
         {
-            if (!string.Equals(
-                path,
-                CanonicalMoviePath,
-                StringComparison.Ordinal))
+            if (canonicalMoviePath == null
+                || !string.Equals(
+                    LinuxPathEntry.ResolveProposedPath(path),
+                    canonicalMoviePath,
+                    StringComparison.Ordinal))
             {
                 return;
             }
