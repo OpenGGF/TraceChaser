@@ -33,6 +33,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "Bk2Reader reads the canonical S3K fixture movies",
                 ReadsCanonicalS3kFixtureMovies));
             tests.Add(new TestMain.TestCase(
+                "Bk2Reader requires an absolute external canonical fixture root",
+                RequiresAbsoluteExternalCanonicalFixtureRoot));
+            tests.Add(new TestMain.TestCase(
                 "Bk2Reader maps every supported P1 input bit",
                 MapsEverySupportedP1InputBit));
             tests.Add(new TestMain.TestCase(
@@ -189,19 +192,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void ValidatesCanonicalGhz1Archive()
         {
-            string path = Path.GetFullPath(Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "..",
-                "..",
-                "..",
-                "..",
-                "src",
-                "test",
-                "resources",
-                "traces",
+            string path = Path.Combine(
+                ResolveCanonicalFixtureRoot(
+                    Environment.GetEnvironmentVariable("TRACECHASER_TEST_FIXTURE_ROOT")),
                 "s1",
                 "ghz1_fullrun",
-                "ghz1_fullrun.bk2"));
+                "ghz1_fullrun.bk2");
             Bk2Movie movie = Bk2Reader.Read(path);
             AssertEx.Equal(4806, movie.FrameCount);
             AssertEx.Equal(
@@ -246,19 +242,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             };
             foreach (var expected in movies)
             {
-                string path = Path.GetFullPath(Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "..",
-                    "..",
-                    "..",
-                    "..",
-                    "src",
-                    "test",
-                    "resources",
-                    "traces",
+                string path = Path.Combine(
+                    ResolveCanonicalFixtureRoot(
+                        Environment.GetEnvironmentVariable("TRACECHASER_TEST_FIXTURE_ROOT")),
                     "s3k",
                     expected.Dir,
-                    expected.File));
+                    expected.File);
                 Bk2Movie movie = Bk2Reader.Read(path);
                 AssertEx.Equal("Genplus-gx", movie.Core);
                 AssertEx.Equal("GEN", movie.Platform);
@@ -273,6 +262,38 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     expected.Frames,
                     movie.OpenFrameStream().Count());
             }
+        }
+
+        private static void RequiresAbsoluteExternalCanonicalFixtureRoot()
+        {
+            AssertEx.Throws<InvalidOperationException>(
+                () => ResolveCanonicalFixtureRoot(null),
+                "TRACECHASER_TEST_FIXTURE_ROOT must be an explicit absolute directory");
+            AssertEx.Throws<InvalidOperationException>(
+                () => ResolveCanonicalFixtureRoot("relative-fixtures"),
+                "TRACECHASER_TEST_FIXTURE_ROOT must be an explicit absolute directory");
+            AssertEx.Throws<InvalidOperationException>(
+                () => ResolveCanonicalFixtureRoot(Path.Combine(
+                    Path.GetTempPath(),
+                    "tracechaser-fixture-root-that-does-not-exist")),
+                "TRACECHASER_TEST_FIXTURE_ROOT is unavailable");
+        }
+
+        private static string ResolveCanonicalFixtureRoot(string configured)
+        {
+            if (string.IsNullOrWhiteSpace(configured) || !Path.IsPathRooted(configured))
+            {
+                throw new InvalidOperationException(
+                    "TRACECHASER_TEST_FIXTURE_ROOT must be an explicit absolute directory.");
+            }
+
+            string resolved = Path.GetFullPath(configured);
+            if (!Directory.Exists(resolved))
+            {
+                throw new InvalidOperationException(
+                    "TRACECHASER_TEST_FIXTURE_ROOT is unavailable: " + resolved);
+            }
+            return resolved;
         }
 
         private static void MapsPowerAndResetIndependently()

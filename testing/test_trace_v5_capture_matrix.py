@@ -189,10 +189,10 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
 
     def test_extraction_freeze_verifies_synthetic_source_toolchain_and_artifacts(self) -> None:
         repository, bizhawk_home, document = self._freeze_document()
-        received: list[tuple[str, ...]] = []
+        received: list[tuple[tuple[str, ...], Path]] = []
 
-        def build_runner(_repository, _source_commit, _bizhawk_home, filters):
-            received.append(filters)
+        def build_runner(_repository, _source_commit, _bizhawk_home, filters, fixture_root):
+            received.append((filters, fixture_root))
             return {
                 "exit_code": 0,
                 "artifacts": copy.deepcopy(document["freeze"]["native_artifacts"]),
@@ -206,10 +206,36 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 repository,
                 document,
                 bizhawk_home=bizhawk_home,
+                fixture_root=self.fixture_root,
                 build_test_runner=build_runner,
             )
 
-        self.assertEqual([("TraceCli",)], received)
+        self.assertEqual([(("TraceCli",), self.fixture_root.resolve())], received)
+
+    def test_extraction_freeze_rejects_missing_or_source_owned_fixture_root(self) -> None:
+        repository, bizhawk_home, document = self._freeze_document()
+        missing = self.root / "missing external fixtures"
+        source_owned = repository / "source owned fixtures"
+        source_owned.mkdir()
+        alias = self.root / "external-looking fixture alias"
+        alias.symlink_to(source_owned, target_is_directory=True)
+
+        for fixture_root, message in (
+            (missing, "external fixture root is unavailable"),
+            (source_owned, "external fixture root must remain outside TraceChaser"),
+            (alias, "external fixture root must remain outside TraceChaser"),
+        ):
+            with self.subTest(fixture_root=fixture_root), patch(
+                "traces.trace_v5_capture_matrix._command_first_line",
+                side_effect=("synthetic mono", "synthetic xbuild", "synthetic roslyn"),
+            ), self.assertRaisesRegex(ValueError, message):
+                verify_extraction_freeze(
+                    repository,
+                    document,
+                    bizhawk_home=bizhawk_home,
+                    fixture_root=fixture_root,
+                    build_test_runner=lambda *_: self.fail("invalid fixture root reached native tests"),
+                )
 
     def test_extraction_freeze_rejects_source_toolchain_build_and_artifact_drift(self) -> None:
         repository, bizhawk_home, document = self._freeze_document()
@@ -230,6 +256,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                         repository,
                         changed,
                         bizhawk_home=bizhawk_home,
+                        fixture_root=self.fixture_root,
                         build_test_runner=lambda *_: 0,
                     )
 
@@ -241,6 +268,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 repository,
                 document,
                 bizhawk_home=bizhawk_home,
+                fixture_root=self.fixture_root,
                 build_test_runner=lambda *_: 1,
             )
 
@@ -254,6 +282,7 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 repository,
                 document,
                 bizhawk_home=bizhawk_home,
+                fixture_root=self.fixture_root,
                 build_test_runner=lambda *_: {"exit_code": 0, "artifacts": wrong_artifacts},
             )
 

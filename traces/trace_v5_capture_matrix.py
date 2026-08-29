@@ -233,6 +233,7 @@ def _run_clean_native_build_tests(
     source_commit: str,
     bizhawk_home: Path,
     native_test_filters: tuple[str, ...],
+    fixture_root: Path,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="tracechaser-extraction-build-") as temporary:
         temporary_root = Path(temporary)
@@ -252,6 +253,7 @@ def _run_clean_native_build_tests(
             environment["BIZHAWK_HOME"] = str(bizhawk_home)
             environment["MONO_PATH"] = str(bizhawk_home / "dll")
             environment["LD_LIBRARY_PATH"] = str(bizhawk_home / "dll")
+            environment["TRACECHASER_TEST_FIXTURE_ROOT"] = str(fixture_root)
             build_result = subprocess.run(
                 [str(checkout / "bizhawk-headless/build.sh")],
                 cwd=checkout,
@@ -362,8 +364,18 @@ def verify_extraction_freeze(
     document: dict[str, Any],
     *,
     bizhawk_home: Path | None = None,
-    build_test_runner: Callable[[Path, str, Path, tuple[str, ...]], Any] = _run_clean_native_build_tests,
+    fixture_root: Path | None = None,
+    build_test_runner: Callable[[Path, str, Path, tuple[str, ...], Path], Any] = _run_clean_native_build_tests,
 ) -> None:
+    if fixture_root is None or not fixture_root.is_absolute():
+        raise ValueError("external fixture root must be an explicit absolute directory")
+    try:
+        fixture_root = fixture_root.resolve(strict=True)
+    except OSError as error:
+        raise ValueError(f"external fixture root is unavailable: {fixture_root}") from error
+    repository_root = repository_root.resolve()
+    if fixture_root == repository_root or fixture_root.is_relative_to(repository_root):
+        raise ValueError("external fixture root must remain outside TraceChaser")
     freeze = document["freeze"]
     build = freeze.get("tracechaser_build")
     if not isinstance(build, dict):
@@ -426,7 +438,9 @@ def verify_extraction_freeze(
     }
     if not isinstance(expected_artifacts, dict) or set(expected_artifacts) != required_artifacts:
         raise ValueError("extraction deterministic native artifact lock is missing")
-    build_evidence = build_test_runner(repository_root, source_commit, bizhawk_home, native_test_filters)
+    build_evidence = build_test_runner(
+        repository_root, source_commit, bizhawk_home, native_test_filters, fixture_root
+    )
     if isinstance(build_evidence, int):
         if build_evidence != 0:
             raise ValueError("extraction native build/tests failed")
@@ -491,14 +505,20 @@ def preflight(
 ) -> dict[str, Any]:
     tracechaser_root = tracechaser_root.resolve()
     input_repository_root = input_repository_root.resolve()
-    fixture_root = fixture_root.resolve()
-    movie_root = movie_root.resolve()
+    from traces.output_policy import require_consumer_fixture_root
+    fixture_root = require_consumer_fixture_root(fixture_root, input_repository_root)
+    movie_root = require_consumer_fixture_root(movie_root, input_repository_root)
     batch_root = batch_root.resolve()
     candidate_root = candidate_root.resolve()
     require_external_scratch(tracechaser_root, input_repository_root, batch_root, candidate_root)
     if candidate_root.exists():
         raise ValueError(f"candidate root must be absent: {candidate_root}")
-    verify_extraction_freeze(tracechaser_root, document, bizhawk_home=bizhawk_home)
+    verify_extraction_freeze(
+        tracechaser_root,
+        document,
+        bizhawk_home=bizhawk_home,
+        fixture_root=fixture_root,
+    )
     verify_roms(document, roms)
     verify_movies(movie_root, document)
     from traces.trace_fixture_inventory import load_inventory, verify_inventory
