@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 import argparse
 from dataclasses import dataclass
-import hashlib
 from pathlib import Path
 import subprocess
 import sys
 
 try:
     from artifact_policy import (
-        ARCHIVE_PREFIXES,
-        EXECUTABLE_PREFIXES,
-        EXACT_LICENSE_SHA256,
+        blob_content_violations,
+        display_path,
+        EXACT_LICENSE_PATHS,
+        license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
         path_violations,
     )
 except ModuleNotFoundError:
     from testing.artifact_policy import (
-        ARCHIVE_PREFIXES,
-        EXECUTABLE_PREFIXES,
-        EXACT_LICENSE_SHA256,
+        blob_content_violations,
+        display_path,
+        EXACT_LICENSE_PATHS,
+        license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
         path_violations,
@@ -46,7 +47,7 @@ class Violation:
     def render(self) -> str:
         return (
             f"commit={self.commit} object={self.object_id} "
-            f"path={_display_path(self.path)} reason={self.reason}"
+            f"path={display_path(self.path)} reason={self.reason}"
         )
 
 
@@ -94,7 +95,7 @@ def _license_content_violations(
     occurrences: dict[str, tuple[Occurrence, ...]],
 ) -> list[Violation]:
     violations = []
-    for path, expected_sha256 in EXACT_LICENSE_SHA256.items():
+    for path in EXACT_LICENSE_PATHS:
         path_bytes = path.encode("utf-8")
         matching = {
             object_id: tuple(
@@ -112,15 +113,17 @@ def _license_content_violations(
                 stderr=subprocess.PIPE,
                 check=True,
             ).stdout
-            if hashlib.sha256(content).hexdigest() != expected_sha256:
+            reasons = license_content_violations(path, content)
+            if reasons:
                 violations.extend(
                     Violation(
                         occurrence.commit,
                         object_id,
                         occurrence.path,
-                        "unapproved license or notice content",
+                        reason,
                     )
                     for occurrence in blob_occurrences
+                    for reason in reasons
                 )
     return violations
 
@@ -203,37 +206,7 @@ def _scan_blob(root: Path, object_id: str, size: int) -> list[str]:
     if return_code:
         raise RuntimeError(f"git cat-file failed for {object_id}: {stderr!r}")
 
-    reasons = []
-    prefix_bytes = bytes(prefix)
-    if prefix_bytes.startswith(ARCHIVE_PREFIXES) or prefix_bytes[257:262] == b"ustar":
-        reasons.append("archive or BK2 magic")
-    if prefix_bytes.startswith(EXECUTABLE_PREFIXES):
-        reasons.append("executable binary magic")
-    if prefix_bytes[0x100:0x104] == b"SEGA":
-        reasons.append("Mega Drive ROM magic")
-    if found_machine_path:
-        reasons.append("machine-local absolute path")
-    return reasons
-
-
-def _display_path(path: bytes | None) -> str:
-    if path is None:
-        return "<unknown>"
-    rendered = []
-    for value in path:
-        if value == 0x5C:
-            rendered.append("\\\\")
-        elif value == 0x0A:
-            rendered.append("\\n")
-        elif value == 0x0D:
-            rendered.append("\\r")
-        elif value == 0x09:
-            rendered.append("\\t")
-        elif 0x20 <= value <= 0x7E:
-            rendered.append(chr(value))
-        else:
-            rendered.append(f"\\x{value:02x}")
-    return "".join(rendered)
+    return blob_content_violations(size, bytes(prefix), found_machine_path)
 
 
 def _violation_sort_key(violation: Violation) -> tuple[str, str, bytes, str]:

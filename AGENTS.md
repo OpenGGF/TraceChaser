@@ -1,13 +1,41 @@
-# CLAUDE.md — native headless GPGX trace harness
+# Guidance for AI agents — TraceChaser
 
-Scoped guidance for `tools/bizhawk-headless/`. The repo-root `CLAUDE.md` still
-applies; this covers what is specific to, and expensive to rediscover in, this
-directory. [`README.md`](README.md) explains what the harness is and how to use
-it — read that first if you are new here.
+This guidance has a byte-identical root mirror. Keep `AGENTS.md` and
+`CLAUDE.md` in sync.
+
+## Project scope and repository safety
+
+TraceChaser owns OpenGGF's emulator-facing trace producers and analysis tools.
+It does not own OpenGGF's Java replay consumers or canonical trace fixture
+corpus. Read [README.md](README.md) for the repository boundary and workflow
+documentation status.
+
+1. Never commit ROMs, BK2 movies, BizHawk distributions, copied upstream source
+   trees, generated builds, caches, raw traces, scratch captures, generic logs,
+   or uncurated output.
+2. ROMs, movies, emulator installations, OpenGGF inputs, and output roots must
+   be supplied explicitly. Do not discover them by reaching into an OpenGGF
+   checkout or by embedding a machine-local absolute path.
+3. Write capture output to durable scratch storage outside both repositories.
+   Never write directly into OpenGGF's canonical fixtures. Installing or
+   replacing a canonical fixture requires explicit user approval.
+4. Run both policy scanners before committing. `testing/repository_policy.py`
+   checks the Git index; `testing/history_audit.py` checks every reachable Git
+   object. Do not weaken their shared predicates or the exact root-license and
+   Zstandard-notice content exceptions.
+5. Keep this file and `CLAUDE.md` byte-identical. Repository-wide guidance lives
+   only at the root; do not add nested agent-policy copies.
+
+## Native headless GPGX trace harness
+
+The remaining guidance covers what is specific to, and expensive to rediscover
+in, `bizhawk-headless/`. Read
+[`bizhawk-headless/README.md`](bizhawk-headless/README.md) before changing the
+harness.
 
 ## What this code is for
 
-It reproduces the Lua trace recorders in `../bizhawk/` byte-for-byte so traces can
+It reproduces the Lua trace recorders in `bizhawk/` byte-for-byte so traces can
 be captured headlessly on Linux. Every capability is locked by a differential gate
 that replays a real movie against a committed fixture.
 
@@ -29,10 +57,11 @@ hook-driven debugging (see below).
 
 ## Hard rules
 
-1. **Never modify anything under `src/test/resources/traces/`.** Those fixtures
-   are read-only ground truth. A failing gate means production code is wrong. Do
-   not relax a comparison, widen a normalization, or regenerate a fixture to make
-   a gate pass. Regenerating canonical fixtures is a **user decision** — ask.
+1. **Never modify OpenGGF's `src/test/resources/traces/`.** Those external
+   fixtures are read-only ground truth. A failing gate means production code is
+   wrong. Do not relax a comparison, widen a normalization, or regenerate a
+   fixture to make a gate pass. Regenerating canonical fixtures is a **user
+   decision** — ask.
 2. **Never make a native recorder certify its own correctness.** Establish its
    semantic contract from the ROM/disassembly, behavioral/unit tests, available
    cross-implementation vectors, and independent code review before publication.
@@ -43,21 +72,23 @@ hook-driven debugging (see below).
    the installed files must be the exact gated native output with no hand edits.
 3. **C# 7.x only.** Mono 6.12 + `xbuild`, non-SDK `.csproj`. Newer syntax will
    not compile.
-4. **Every new `.cs` file must be hand-added to BOTH `BizHawk.Headless.Gpgx.csproj`
-   and `BizHawk.Headless.Gpgx.Tests.csproj`.** There is no globbing.
+4. **Every new `.cs` file must be hand-added to BOTH
+   `bizhawk-headless/BizHawk.Headless.Gpgx.csproj` and
+   `bizhawk-headless/BizHawk.Headless.Gpgx.Tests.csproj`.** There is no globbing.
 5. **Every new test class must be registered in `TestMain.BuildRegistry()`.** The
    runner is a plain registry, not NUnit — an unregistered test silently never
    runs, and the suite still reports green.
-6. **`.gitignore` ignores `tools/*`.** New files here are invisible to
-   `git status` and need `git add -f`. A forgotten `-f` builds and tests green
-   locally while the file is missing from the commit. Verify with
-   `git show --stat HEAD` and `git ls-files tools/bizhawk-headless`.
+6. **Verify new harness files are tracked.** Ignore rules deliberately exclude
+   local dependencies and generated artifacts. A source file placed inside an
+   ignored build or dependency root can build and test locally while remaining
+   absent from the commit. Verify with `git status --short`,
+   `git show --stat HEAD`, and `git ls-files bizhawk-headless`.
 7. **Check for an existing untracked file before creating one.** Writing a "new"
    doc over untracked work has already happened here once.
 
 ## The runner runs tests in parallel
 
-`./test.sh` defaults to `--jobs 8`. What that costs you to know:
+`bizhawk-headless/test.sh` defaults to `--jobs 8`. What that costs you to know:
 
 - **`--jobs 1` is the debugging path** and reproduces the pre-parallel runner
   exactly: registration order, unbuffered writes, no timing report. Any time a
@@ -112,13 +143,15 @@ hook-driven debugging (see below).
   dying. Both exist because the first parallel run here reported 34 of 352 tests
   and exited 0. Do not remove them for being untestable in the ordinary path;
   they are the check that the ordinary path is what happened.
-- Timings live in `tests/test-timings.tsv`, refreshed with `--update-timings`.
+- Timings live in `bizhawk-headless/tests/test-timings.tsv`, refreshed with
+  `--update-timings`.
   They are a scheduling hint: a stale, partial or deleted file changes start
   order and nothing else.
 
 ## Verifying your work
 
-- Run the full suite: `BIZHAWK_HOME=<abs> S1_ROM_PATH=… S2_ROM_PATH=… S3K_ROM_PATH=… ./test.sh`.
+- Run the full suite from the repository root:
+  `BIZHAWK_HOME=<abs> S1_ROM_PATH=… S2_ROM_PATH=… S3K_ROM_PATH=… bizhawk-headless/test.sh`.
   Report the counts you actually observed. `--filter <substr>` while iterating,
   but finish on a full run.
 - `--no-gates` is the sub-minute tier for iterating on unit-level code;
@@ -128,14 +161,14 @@ hook-driven debugging (see below).
 - Gates skip when a ROM or the BizHawk distribution is missing, and fail when one
   is present but wrong. A "green" suite with everything skipped proves nothing —
   check the skip count, not just the failure count.
-- For Java-side trace tests elsewhere in the repo, always use `mvn test`, never
+- For Java-side trace tests in OpenGGF, always use `mvn test`, never
   `mvn surefire:test`: the latter does not compile, and a stale `target/classes`
-  has produced a measured 3-vs-14 failure-count discrepancy in this repo.
+  has produced a measured 3-vs-14 failure-count discrepancy in OpenGGF.
 - Trace report basenames collide across test classes (`s3k_aiz1_report.json` is
   written by both the standard and the completerun AIZ class), and batching
   classes perturbs counts through shared singletons. **Run one class per
-  invocation and clear `target/trace-reports` between runs** when the numbers
-  matter.
+  invocation and clear OpenGGF's `target/trace-reports` between runs** when the
+  numbers matter.
 
 ## Regenerating a fixture (when the user has approved it)
 
@@ -148,8 +181,8 @@ The publication contract, in order:
    optional corroboration; it is neither the authority nor a publication
    prerequisite.
 2. Capture the publication candidate with the native harness into scratch, never
-   directly into `src/test/resources/traces/` or the user's preserved
-   `tools/bizhawk/trace_output/`.
+   directly into OpenGGF's `src/test/resources/traces/` or any preserved
+   capture tree.
 3. Before copying, record and freeze the candidate's SHA-256 digests, byte
    lengths, metadata versions, segment inventories, row/event counts, canonical
    ordering, and range checks. **Categorise every byte-level delta against a named
@@ -163,15 +196,17 @@ The publication contract, in order:
    schema, compression, and reference-closure guards. These are regression
    checks after publication, not the independent authority for Step 1.
 6. Measure the trace-replay frontiers **before and after** and record movement in
-   `docs/status/trace-frontier-log.md`. A fixture correction can unmask a latent
-   engine bug; expect one and investigate it rather than weakening the fixture.
+   OpenGGF's `docs/status/trace-frontier-log.md`. A fixture correction can
+   unmask a latent engine bug; expect one and investigate it rather than
+   weakening the fixture.
 
 ## Diagnostic hooks are deliberately not ported
 
 The S3K Lua recorders carry ~61 `event.onmemoryexecute` / `onmemorywrite` registrations
 each, behind `OGGF_TRACE_ENABLE_DIAGNOSTIC_HOOKS`. This harness implements **none** of
-them, and that is a decision rather than a gap — `docs/s3k-profiles-and-hooks.md` §2.4
-records the reasoning, and `tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
+them, and that is a decision rather than a gap —
+`bizhawk-headless/docs/s3k-profiles-and-hooks.md` §2.4 records the reasoning,
+and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
 Do not "helpfully" add general M68K exec/memory-write callback support. Two
 address-filtered hardware-timing observers are permitted exceptions, and nothing else is.
@@ -223,7 +258,7 @@ is the designed signal to build the callback surface — not something to work a
   on lag frames — not merely that it is non-constant.
 - **The six recorders are copy-paste siblings.** They each carry their own ROM
   address constants, so a fix to one does not propagate. When you find a defect in
-  one, audit all six; see `../bizhawk/SHARED_MODULE_HANDOFF.md`.
+  one, audit all six; see `bizhawk/SHARED_MODULE_HANDOFF.md`.
 - **Stop conditions are evaluated POST-advance**, in the Lua's `on_frame_end`
   source order. Getting this wrong was independently introduced in both the S1 and
   the S2 port.
@@ -237,7 +272,7 @@ is the designed signal to build the callback surface — not something to work a
   gzip by hand: hand compression is where the spurious binary diffs come from —
   different gzip implementations produce different container bytes for identical
   content. `TestTraceFixtureCompressionGuard` (Java, `mvn test`) fails the build
-  if an uncompressed payload appears under `src/test/resources/traces/`
+  if an uncompressed payload appears under OpenGGF's `src/test/resources/traces/`
   regardless of which tool wrote it.
 - **A streamed payload is compressed on the way to disk**, so the uncompressed
   form never exists there. Verify-before-destroy still holds and is the reason

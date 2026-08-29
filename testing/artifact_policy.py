@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import PurePosixPath
 import re
 
@@ -136,6 +137,55 @@ def path_violations(path: str) -> list[str]:
             break
 
     return violations
+
+
+def blob_content_violations(
+    size: int,
+    prefix: bytes,
+    contains_machine_path: bool,
+) -> list[str]:
+    if size > MAX_BLOB_BYTES:
+        return [f"blob exceeds {MAX_BLOB_BYTES} bytes"]
+
+    violations = []
+    if prefix.startswith(ARCHIVE_PREFIXES) or prefix[257:262] == b"ustar":
+        violations.append("archive or BK2 magic")
+    if prefix.startswith(EXECUTABLE_PREFIXES):
+        violations.append("executable binary magic")
+    if prefix[0x100:0x104] == b"SEGA":
+        violations.append("Mega Drive ROM magic")
+    if contains_machine_path:
+        violations.append("machine-local absolute path")
+    return violations
+
+
+def license_content_violations(path: str, content: bytes) -> list[str]:
+    expected_sha256 = EXACT_LICENSE_SHA256.get(path)
+    if expected_sha256 is None:
+        return []
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        return ["unapproved license or notice content"]
+    return []
+
+
+def display_path(path: bytes | None) -> str:
+    if path is None:
+        return "<unknown>"
+    rendered = []
+    for value in path:
+        if value == 0x5C:
+            rendered.append("\\\\")
+        elif value == 0x0A:
+            rendered.append("\\n")
+        elif value == 0x0D:
+            rendered.append("\\r")
+        elif value == 0x09:
+            rendered.append("\\t")
+        elif 0x20 <= value <= 0x7E:
+            rendered.append(chr(value))
+        else:
+            rendered.append(f"\\x{value:02x}")
+    return "".join(rendered)
 
 
 def _looks_like_license_path(path: str) -> bool:

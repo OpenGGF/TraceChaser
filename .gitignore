@@ -1,0 +1,65 @@
+# User-supplied game and movie inputs
+*.gen
+*.smd
+*.rom
+*.32x
+*.bk2
+
+# Emulator downloads and native/build products
+.dependencies/
+BizHawk*/
+**/bin/
+**/obj/
+**/build/
+**/dist/
+**/out/
+**/target/
+**/packages/
+*.exe
+*.dll
+*.pdb
+*.so
+*.dylib
+*.o
+*.class
+*.jar
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tar.xz
+*.tgz
+*.gz
+*.xz
+
+# Language and tool caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.gradle/
+node_modules/
+
+# Capture scratch and generated trace payloads
+.scratch/
+scratch/
+captures/
+trace_output/
+**/physics.csv
+**/aux_state.jsonl
+**/hardware_timing.jsonl
+**/hardware_timing_interstitial.jsonl
+**/run_manifest.json
+
+# Uncurated diagnostic output
+*.log
+*.out
+*_output.txt
+output.txt
+
+# Editor and operating-system metadata
+.DS_Store
+Thumbs.db
+*.swp
+*~
