@@ -10,11 +10,15 @@ TraceChaser commands resolve their own checkout from the entry point's location.
 They do not search a current directory, Git superproject, sibling checkout, or
 machine-specific OpenGGF path. The former OpenGGF paths map as follows:
 
+### Pre-v5 historical evidence: former path map
+
 | Former OpenGGF path | TraceChaser path |
 |---|---|
 | `tools/bizhawk-headless/` | `bizhawk-headless/` |
 | `tools/bizhawk/` | `bizhawk/` |
 | `tools/traces/` | `traces/` |
+
+### Current standalone paths
 
 Python imports use the `traces` package. The canonical capture-matrix module is
 `traces/trace_v5_capture_matrix.py`; `bizhawk-headless/trace_v5_capture_matrix.py`
@@ -44,7 +48,7 @@ optional; they return to the OpenGGF consumer suite in the integration task.
 | `.agents`/`.claude` trace-skill mirrors and their capability text | Keep as OpenGGF agent-document policy tests. |
 | Java replay Javadoc and `TestTraceFixtureRootOverride` implementation text | Keep beside the corresponding OpenGGF Java tests. |
 | OpenGGF BizHawk README and recorder-behavior prose assertions | Replace prose-change detectors with consumer conformance tests where behavior is executable; retain documentation checks in OpenGGF only where policy requires them. |
-| Read-only inventory generation against `src/test/resources/traces` | Run against the explicit OpenGGF fixture root from the consumer suite. |
+| Read-only inventory generation against OpenGGF's canonical trace fixtures | Run against the explicit OpenGGF fixture root from the consumer suite. |
 | Git-index inventory discovery from OpenGGF root and fixture children | Keep as an OpenGGF worktree integration test. |
 | Exact six-movie extraction identities, frozen OpenGGF commits/diffs, extraction argv ledger, and committed fixture publication mappings | Keep in the OpenGGF extraction/integration evidence suite using explicit paths into both checkouts. |
 | Count and placement of OpenGGF BK2 fixtures after assembly | Assert in OpenGGF's consumer publication test; TraceChaser asserts only that the explicitly supplied static inputs are copied byte-for-byte. |
@@ -52,7 +56,7 @@ optional; they return to the OpenGGF consumer suite in the integration task.
 | The legacy full publication matrix has exactly 36 producer rows | Retained as a producer-owned behavioral contract over `ROWS`; the six-row extraction matrix remains a separate, exact-order cutover contract. |
 | The extraction preflight runs every reviewed named native filter | Retained in the explicit `tracechaser_build.native_test_filters` boundary and asserted before the clean build runner receives the filter tuple. |
 | The deterministic-build smoke guard targets only `TracePayloadCompressor` | Retained distinctly in `verify-deterministic-build.sh`; producer tests pin that exact filter and exclude `Bk2Reader` and `S2AudioObserverProfile`. |
-| Lua recorders could silently default to `trace_output/` | Replaced by direct producer enforcement: all six recorders invoke the installed TraceChaser canonical path-policy helper from the common module, require explicit producer/consumer/interpreter inputs, and reject protected aliases even under direct invocation. Launcher preflight is supplementary, not authority. |
+| Lua recorders could silently default to caller-relative output | Replaced by direct producer enforcement: all six recorders derive the installed sibling common module, which invokes the TraceChaser canonical path-policy helper, requires explicit producer/consumer/interpreter inputs, and rejects protected aliases even under direct invocation. Launcher preflight is supplementary, not authority. |
 | Stable-Retro recorders defaulted to caller-relative output | Replaced by required `--input-repository-root` and `--output-dir` arguments and the same canonical external-output policy. |
 | Windows/Bash recorder wrappers only normalized output text | Replaced by behavioral canonical-path rejection, including existing symlink/junction aliases, before emulator startup. |
 | Capture command-ledger output was only no-replace | Retains no-replace publication and additionally rejects output beneath either source checkout. |

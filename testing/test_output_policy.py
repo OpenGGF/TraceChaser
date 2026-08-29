@@ -10,6 +10,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LUA_RECORDERS = (
+    "s1_trace_recorder.lua", "s1_complete_run_recorder.lua",
+    "s2_trace_recorder.lua", "s2_ss_trace_recorder.lua",
+    "s3k_trace_recorder.lua", "s3k_complete_run_recorder.lua",
+)
 
 
 class OutputPolicyTests(unittest.TestCase):
@@ -44,16 +49,54 @@ class OutputPolicyTests(unittest.TestCase):
         )
 
     def test_every_lua_recorder_invokes_behavioral_output_policy(self) -> None:
-        recorders = (
-            "s1_trace_recorder.lua", "s1_complete_run_recorder.lua",
-            "s2_trace_recorder.lua", "s2_ss_trace_recorder.lua",
-            "s3k_trace_recorder.lua", "s3k_complete_run_recorder.lua",
-        )
-        for recorder in recorders:
+        for recorder in LUA_RECORDERS:
             with self.subTest(recorder=recorder):
                 content = (ROOT / "bizhawk" / recorder).read_text(encoding="utf-8")
                 self.assertIn("C.require_external_output_dir()", content)
                 self.assertNotIn('or "trace_output/"', content)
+
+    def test_every_lua_recorder_ignores_caller_selected_common_module(self) -> None:
+        checkout = self._copy_lua_boundary("installed Trace Chaser with spaces")
+        malicious = self.root / "old malicious lib"
+        malicious.mkdir()
+        (malicious / "oggf_trace_common.lua").write_text(
+            "return {require_external_output_dir=function() return '/forged/' end}\n",
+            encoding="utf-8",
+        )
+        for recorder in LUA_RECORDERS:
+            with self.subTest(recorder=recorder):
+                result = self._run_recorder(
+                    checkout, recorder,
+                    extra={"OGGF_BIZHAWK_LIB": str(malicious) + os.sep},
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("outside", result.stderr)
+                self.assertNotIn("forged", result.stderr)
+
+    def test_every_lua_recorder_fails_closed_when_derived_common_module_is_absent(self) -> None:
+        checkout = self._copy_lua_boundary("missing common Trace Chaser", common=False)
+        malicious = self.root / "fallback malicious lib"
+        malicious.mkdir()
+        (malicious / "oggf_trace_common.lua").write_text(
+            "return {require_external_output_dir=function() return '/forged/' end}\n",
+            encoding="utf-8",
+        )
+        for recorder in LUA_RECORDERS:
+            with self.subTest(recorder=recorder):
+                result = self._run_recorder(
+                    checkout, recorder,
+                    extra={"OGGF_BIZHAWK_LIB": str(malicious) + os.sep},
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("bizhawk/lib/oggf_trace_common.lua", result.stderr.replace("\\", "/"))
+
+    def test_launchers_do_not_propagate_a_common_module_override(self) -> None:
+        bash = (ROOT / "bizhawk/run_bizhawk_lua.sh").read_text(encoding="utf-8")
+        batch = (ROOT / "bizhawk/run_bizhawk_lua.bat").read_text(encoding="utf-8")
+        self.assertIn("unset OGGF_BIZHAWK_LIB", bash)
+        self.assertNotIn("export OGGF_BIZHAWK_LIB=", bash)
+        self.assertIn('set "OGGF_BIZHAWK_LIB="', batch)
+        self.assertNotRegex(batch, r'set "OGGF_BIZHAWK_LIB=[^"\r\n]+"')
 
     def test_direct_lua_policy_canonicalizes_literal_safe_and_spaced_paths(self) -> None:
         quoted = self.root / "external 'quoted' output"
@@ -225,6 +268,45 @@ class OutputPolicyTests(unittest.TestCase):
             ["lua", "-e", harness,
              str(module or ROOT / "bizhawk/lib/oggf_trace_common.lua")],
             env=environment, text=True, capture_output=True, check=False,
+        )
+
+    def _copy_lua_boundary(self, name: str, *, common: bool = True) -> Path:
+        checkout = self.root / name
+        bizhawk = checkout / "bizhawk"
+        library = bizhawk / "lib"
+        traces = checkout / "traces"
+        library.mkdir(parents=True)
+        traces.mkdir()
+        for recorder in LUA_RECORDERS:
+            shutil.copyfile(ROOT / "bizhawk" / recorder, bizhawk / recorder)
+        shutil.copyfile(
+            ROOT / "bizhawk/lib/oggf_hardware_timing.lua",
+            library / "oggf_hardware_timing.lua",
+        )
+        shutil.copyfile(ROOT / "traces/output_policy.py", traces / "output_policy.py")
+        if common:
+            shutil.copyfile(
+                ROOT / "bizhawk/lib/oggf_trace_common.lua",
+                library / "oggf_trace_common.lua",
+            )
+        return checkout
+
+    def _run_recorder(
+        self, checkout: Path, recorder: str,
+        *, extra: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        environment = os.environ.copy()
+        environment.update({
+            "OGGF_TRACE_OUTPUT_DIR": str(checkout / "forbidden output"),
+            "OGGF_TRACECHASER_ROOT": str(checkout),
+            "OGGF_INPUT_REPOSITORY_ROOT": str(self.consumer),
+            "OGGF_PYTHON_PATH": sys.executable,
+        })
+        environment.update(extra or {})
+        return subprocess.run(
+            ["lua", str(checkout / "bizhawk" / recorder)],
+            cwd=self.external, env=environment, text=True,
+            capture_output=True, check=False, timeout=5,
         )
 
 

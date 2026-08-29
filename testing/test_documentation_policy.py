@@ -113,10 +113,33 @@ class DocumentationPolicyIntegrationTest(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("reason=active former-root command", result.stdout)
 
+    def test_rejects_active_local_output_fragment_in_prose(self):
+        self._write(
+            "README.md",
+            "# Current\n\nThe current default remains `trace_output/candidate`.\n",
+        )
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
     def test_rejects_active_command_fragments_outside_fenced_blocks(self):
         self._write(
             "README.md",
             "# Current\n\nRun `python3 tools\\traces\\validate_trace_v5.py` now.\n",
+        )
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
+    def test_rejects_normalized_former_root_fragments_anywhere_in_active_prose(self):
+        self._write(
+            "README.md",
+            "# Current\n\n"
+            "Run `tools\\bizhawk\\record_s2_trace.bat` now.\n"
+            "Use `tools/bizhawk/run_bizhawk_lua.sh`.\n"
+            "Invoke `docs\\BizHawk-2.11-win-x64\\EmuHawk.exe`.\n",
         )
         self._git("add", ".")
         result = self._audit()

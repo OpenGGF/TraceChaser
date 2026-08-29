@@ -41,6 +41,7 @@ REM can be supplied with BIZHAWK_EXTRA_ARGS.
 
 setlocal
 
+set "OGGF_BIZHAWK_LIB="
 set "OGGF_PYTHON_PATH="
 for /f "usebackq delims=" %%I in (`powershell.exe -NoProfile -Command "$p=Get-Command python3 -ErrorAction SilentlyContinue; if ($null -eq $p) {$p=Get-Command python -ErrorAction SilentlyContinue}; if ($null -ne $p) {$p.Source}"`) do if not defined OGGF_PYTHON_PATH set "OGGF_PYTHON_PATH=%%I"
 if not defined OGGF_PYTHON_PATH (
@@ -153,11 +154,6 @@ if not "%OGGF_STOP%"=="" echo OGGF_STOP=%OGGF_STOP%
 if not "%OGGF_OUT%"=="" echo OGGF_OUT=%OGGF_OUT%
 echo.
 
-REM Authoritative shared-lib path for the recorders' oggf_lib_dir() loader
-REM (bizhawk/lib/oggf_trace_common.lua). Wins over the debug.getinfo and
-REM CWD fallbacks; child EmuHawk inherits it on both the direct and wrapper
-REM launch routes. Trailing backslash matches the loader's dir .. "file" concat.
-set "OGGF_BIZHAWK_LIB=%~dp0lib\"
 set "OGGF_BIZHAWK_PROBE_RUNTIME=%~dp0probes\probe_runtime.lua"
 
 pushd "%~dp0" >nul

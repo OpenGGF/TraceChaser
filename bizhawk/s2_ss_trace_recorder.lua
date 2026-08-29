@@ -24,20 +24,24 @@
 --- Shared lib ---
 ------------------
 
--- Locate bizhawk/lib/ robustly across the .bat/%TEMP%-wrapper route, the
--- direct --lua= route, and headless launches (see lib/oggf_trace_common.lua and
--- SHARED_MODULE_HANDOFF.md). The launcher-provided env var wins; otherwise fall
--- back to this recorder's own directory, then CWD. Scoped in a do-block so the
--- helper's local slot is freed (these recorders sit near Lua's 200-locals cap).
+-- Load only the shared module installed beside this recorder. Caller-selected
+-- environment and CWD paths are not authority for output validation. Scoped in
+-- a do-block so the helper's local slot is freed (these recorders sit near
+-- Lua's 200-locals cap).
 local C
 do
     local function oggf_lib_dir()
-        local env = os.getenv("OGGF_BIZHAWK_LIB")        -- launcher-provided, most robust
-        if env and #env > 0 then return env end
-        local src = debug.getinfo(1, "S").source         -- "@<abs path to this recorder>"
-        local dir = src:match("^@(.*[/\\])")             -- strip filename
-        if dir then return dir .. "lib/" end
-        return "lib/"                                     -- CWD fallback
+        local src = debug.getinfo(1, "S").source
+        if type(src) ~= "string" or src:sub(1, 1) ~= "@" then
+            error("unable to locate the installed recorder")
+        end
+        local path = src:sub(2):gsub("\\", "/")
+        if not path:match("^/") and not path:match("^[A-Za-z]:/") then
+            error("installed recorder path must be absolute")
+        end
+        local dir = path:match("^(.*)/[^/]+$")
+        if not dir then error("installed recorder path has no parent directory") end
+        return dir .. "/lib/"
     end
     -- assert() so a bad path surfaces as a load error (visible without
     -- --chromeless) instead of silently skipping the whole recorder.

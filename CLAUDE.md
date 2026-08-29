@@ -61,8 +61,8 @@ hook-driven debugging (see below).
 
 ## Hard rules
 
-1. **Never modify OpenGGF's `src/test/resources/traces/`.** Those external
-   fixtures are read-only ground truth. A failing gate means production code is
+1. **Never modify the consumer-owned canonical fixture tree in place.** Those
+   external fixtures are read-only ground truth. A failing gate means production code is
    wrong. Do not relax a comparison, widen a normalization, or regenerate a
    fixture to make a gate pass. Regenerating canonical fixtures is a **user
    decision** — ask.
@@ -185,7 +185,7 @@ The publication contract, in order:
    optional corroboration; it is neither the authority nor a publication
    prerequisite.
 2. Capture the publication candidate with the native harness into scratch, never
-   directly into OpenGGF's `src/test/resources/traces/` or any preserved
+   directly into the explicit consumer fixture root or any preserved
    capture tree.
 3. Before copying, record and freeze the candidate's SHA-256 digests, byte
    lengths, metadata versions, segment inventories, row/event counts, canonical
@@ -276,7 +276,7 @@ is the designed signal to build the callback surface — not something to work a
   gzip by hand: hand compression is where the spurious binary diffs come from —
   different gzip implementations produce different container bytes for identical
   content. `TestTraceFixtureCompressionGuard` (Java, `mvn test`) fails the build
-  if an uncompressed payload appears under OpenGGF's `src/test/resources/traces/`
+  if an uncompressed payload appears under the consumer's canonical fixture root
   regardless of which tool wrote it.
 - **A streamed payload is compressed on the way to disk**, so the uncompressed
   form never exists there. Verify-before-destroy still holds and is the reason

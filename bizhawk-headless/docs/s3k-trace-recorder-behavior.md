@@ -1,7 +1,7 @@
 # S3K Trace Recorder — Byte-Level CORE Specification (RAM map, physics.csv, metadata)
 
 Authoritative byte-level specification for the maintained native S3K
-STANDARD recorder in `tools/bizhawk-headless/`. This document owns the S3K
+STANDARD recorder in `bizhawk-headless/`. This document owns the S3K
 RAM address map, `physics.csv`, metadata shape, hardware-timing stream,
 input-column derivation (including `ADVANCE_ONLY` rows), and file encodings.
 Two sibling documents own the remaining STANDARD surface:

@@ -1,7 +1,7 @@
 # BizHawk Trace Recorder — Shared Module Handoff
 
 This is the durable home for two related pieces of context referenced from
-`tools/bizhawk/lib/oggf_trace_common.lua`'s header comment and from the
+`bizhawk/lib/oggf_trace_common.lua`'s header comment and from the
 commit history of the six per-game BizHawk trace recorders:
 
 1. **What `oggf_trace_common.lua` is and, more importantly, is *not*** —
@@ -20,7 +20,7 @@ commit history of the six per-game BizHawk trace recorders:
 
 ## 1. Why constants stayed per-recorder (root cause)
 
-`tools/bizhawk/` has **six** trace recorders:
+`bizhawk/` has **six** trace recorders:
 
 | # | Recorder | Scope |
 |---|---|---|
@@ -37,8 +37,8 @@ recorders for the *same game* (e.g. both S3K recorders' `Level_frame_counter`,
 `Current_zone`, `RNG_seed`). `fd3a74291` extracted the game-agnostic **leaf
 helpers** (`bk2_input_mask`, `hex`, `angle_to_ground_mode`, `read_speed`,
 `rom_joypad_to_mask`, `write_aux`, `json_escape`, `json_quote`, the `INPUT_*`
-bitmask constants) into `lib/oggf_trace_common.lua`, loaded via a three-tier
-`oggf_lib_dir()` loader — but its scope note is explicit:
+bitmask constants) into `lib/oggf_trace_common.lua`, loaded from the recorder's
+absolute installed sibling path — but its scope note is explicit:
 
 > SCOPE: leaf helpers only. Do NOT move schema writers (`open_files`,
 > `write_metadata`, `write_run_manifest`, `build_slot_dump`, ...),
@@ -71,7 +71,7 @@ no third one.** (A) was fixed in `95c36166c`. (B) was fixed in `f71b5ea44`
 (both S3K Lua recorders, `LUA_SCRIPT_VERSION` -> `6.32-s3k` /
 `6.33-s3k-completerun`), all 39 S3K fixture directories were regenerated on it
 in `eb87d681b`, and the native C# port was re-pinned in `e234a9d6b`
-(`tools/bizhawk-headless/src/Recording/S3KRam.cs:69`). All six recorders now
+(`bizhawk-headless/src/Recording/S3KRam.cs:69`). All six recorders now
 agree on `ADDR_FRAMECOUNT = 0xFE04` and `ADDR_VBLA_WORD = 0xFE0E` (the S2
 special-stage recorder reads neither). §2.3's "other pairs, no defect found"
 conclusions stand unchanged at `e234a9d6b`; nothing from this audit remains
@@ -255,7 +255,7 @@ re-run the §2 diff from scratch rather than trusting this snapshot.
 
 ---
 
-## 4. The original extraction plan (still standing, partially executed)
+# Pre-v5 historical evidence: original shared-module extraction plan
 
 Everything below is the pre-existing feasibility study that proposed
 `lib/oggf_trace_common.lua`. `fd3a74291` executed its phases 0-2 for the **leaf
@@ -272,7 +272,7 @@ by having them `dofile` one shared module. **Not** a rewrite of the schema write
 
 ## Why (the duplication)
 
-Six real recorders live in `tools/bizhawk/`:
+Six real recorders live in `bizhawk/`:
 
 | File | Lines |
 |------|------:|
@@ -334,13 +334,13 @@ stdlib is available: `require`, `package.path`, `dofile`, `loadfile`, `debug`, `
   `dofile` of another Lua file works in this exact runtime.
 - **Relative paths are unreliable.** EmuHawk's CWD is the loaded script's dir on
   the `--lua=` route (`README.md:61-64`), but the `.bat` route runs the `%TEMP%`
-  wrapper with `pushd tools/bizhawk` (`run_bizhawk_lua.bat:117`). Do not rely on
+  wrapper which loads the recorder by its absolute installed path. Do not rely on
   CWD or default `package.path`.
 - `os.getenv` works today (heavy use: `s2:110-122`, `s3k:240+`, `diag_template_fast.lua:25-27`).
 
 ## Proposed design
 
-Create `tools/bizhawk/lib/oggf_trace_common.lua` returning a table `M` with the
+Create `bizhawk/lib/oggf_trace_common.lua` returning a table `M` with the
 byte-copied helper bodies (see list above). Consume via a robust loader at the top
 of each recorder:
 
@@ -381,7 +381,7 @@ bleed); the env var wins for headless `.bat`.
   require **zero diff** before committing.
 - **Silent failure is the dominant risk.** In `--chromeless`, Lua errors are
   invisible (`README.md:69-72`): a bad lib path → `dofile` throws → recorder never
-  runs → no `trace_output/` → looks like a core-init crash. Mitigation: wrap the
+  runs → no recorder output → looks like a core-init crash. Mitigation: wrap the
   load in `assert(loadfile(path))`, keep the three-tier fallback, and first-run
   validate WITHOUT `--chromeless` to surface a load-error dialog.
 - **Do not touch the fast-headless block or schema writers** (see above).

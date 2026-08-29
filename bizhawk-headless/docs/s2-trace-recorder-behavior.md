@@ -885,7 +885,7 @@ used — by `object_state_snapshot` aliases (unlike S1 where they are dead).
 # Standalone special-stage profile
 
 `--trace-profile s2_special_stage` selects the native port of
-`tools/bizhawk/s2_ss_trace_recorder.lua` for the dedicated level-select
+`bizhawk/s2_ss_trace_recorder.lua` for the dedicated level-select
 special-stage movie. This is not a run-mode detour:
 
 - recording starts on and includes the first completed frame whose

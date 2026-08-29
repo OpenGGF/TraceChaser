@@ -37,9 +37,9 @@ Use this folder for the recorder scripts and local BizHawk assets:
   small `oggf_lib_dir()` loader. It holds only pure helpers whose emitted bytes
   are identical to the previously-inlined copies. Predecessor schema writers,
   version constants, and the fast-headless toggle block deliberately stay
-  inline per recorder. `run_bizhawk_lua.bat` exports `OGGF_BIZHAWK_LIB` so the
-  loader finds it on the historical wrapper/headless route; a `debug.getinfo`
-  fallback covers direct `--lua=` diagnostics. These details document
+  inline per recorder. The loader derives the exact sibling module from the
+  recorder's absolute installed path; launchers clear any inherited module
+  override before starting EmuHawk. These details document
   predecessor reproduction only and cannot select native v5 publication
   behavior.
 
@@ -765,7 +765,8 @@ runs or for organizing capture sessions).
 
 `run_bizhawk_lua.sh` is the Linux counterpart to `run_bizhawk_lua.bat`, and
 `record_trace.sh` mirrors `record_trace.bat`. They launch EmuHawk via `mono` and
-export the same `OGGF_BIZHAWK_LIB` contract for the shared-lib loader. Bring-up
+clear inherited common-module overrides; each recorder loads its installed
+sibling library on both platforms. Bring-up
 facts encoded there (BizHawk 2.11.1 `bizhawk-bin` on CachyOS/Wayland):
 
 - BizHawk runs portable and writes config/system dirs beside `EmuHawk.exe`; the
@@ -1177,7 +1178,8 @@ call "%TRACECHASER_ROOT%\bizhawk\run_bizhawk_lua.bat" ^
 
 The `$10` (special-stage) detour is handled automatically by the recorder's state machine — no
 extra flags are needed. The `OGGF_TRACE_RUN_ID` env var ensures a stable `run_id` is recorded in
-the manifest, used for organizing the commit layout under `src/test/resources/traces/s1/runs/<run_id>/`.
+the manifest, used for organizing the consumer commit layout under
+`$FIXTURE_ROOT/s1/runs/<run_id>/`.
 
 **Expected Output:**
 
@@ -1211,7 +1213,7 @@ $FIXTURE_ROOT/s1/runs/s1-ghz-maze-roundtrip/
 ```
 
 Then copy the `ss/` segment (its `metadata.json`, `physics.csv`, and the source bk2) to
-`src/test/resources/traces/s1/special_stage/` to activate `TestS1SpecialStageTraceReplay`.
+`$FIXTURE_ROOT/s1/special_stage/` to activate `TestS1SpecialStageTraceReplay`.
 
 **Commit the bk2 under its TRUTHFUL name** (superseding the earlier rename-to-
 `s1-complete-run.bk2` mandate): the shared `traces/s1/_movies/s1-complete-run.bk2` is a
@@ -1314,7 +1316,7 @@ the `seg1_ehz1/`, `ss/`, `seg2_ehz1/`, and `run_manifest.json` files are still w
 Apply gzip compression yourself before committing, recursing into the segment subdirectories
 (`compress-traces.ps1 <path-to-trace_output> -Recurse -ThresholdBytes 0`).
 
-**PROHIBITION:** do NOT copy the run's `ss/` segment over `src/test/resources/traces/s2/special_stage`
+**PROHIBITION:** do NOT copy the run's `ss/` segment over `$FIXTURE_ROOT/s2/special_stage`
 — the committed interior trace there is produced by `s2_ss_trace_recorder.lua` with the
 RunObjects PC hooks and is governed by the `Assert-SsAuxCoverage` contract; the run's `ss/`
 segment has a reduced aux surface (no `run_objects_end` stream) and is consumed by the run/chain

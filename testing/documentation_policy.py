@@ -22,27 +22,16 @@ FORMER_ROOT_COMMAND_PATTERN = re.compile(
     r"(?:tools/(?:bizhawk(?:-headless)?|traces)(?:/|\b)|"
     r"docs/BizHawk-2\.11-(?:linux|win)-x64(?:/|\b)|"
     r"(?<!/)src/test/resources/(?:traces|audio)(?:/|\b)|"
-    r"(?:--output(?:-root)?(?:=|\s+)|OGGF_(?:TRACE_OUTPUT_DIR|OUT)=)[^\r\n]*"
-    r"(?:\$PWD/target|%CD%/target|trace_output/|bizhawk-headless/\.scratch/)|"
-    r"(?:^|[\s\"'=])(?:\$PWD/target|%CD%/target|trace_output/|"
-    r"bizhawk-headless/\.scratch/))",
+    r"\$PWD/target|%CD%/target|trace_output/|bizhawk-headless/\.scratch/)",
     re.IGNORECASE,
 )
-COMMAND_FRAGMENT_PATTERN = re.compile(
-    r"(?:^|[`;&|]\s*|\b(?:run|use|invoke)\s+`?)"
-    r"(?:python(?:3(?:\.\d+)?)?|pwsh|powershell|bash|sh|lua|mono|dotnet|"
-    r"call|mkdir|cp|mv|set|export|[.]/)(?:\s|$)",
-    re.IGNORECASE,
-)
-
-
 def find_violations(root: Path) -> list[str]:
     root = root.resolve()
     markdown = _tracked_markdown(root)
     tracked_paths = set(markdown)
     violations = []
     for path, content in markdown.items():
-        active_content, active_blocks = _active_markdown(content)
+        active_content, _ = _active_markdown(content)
         for match in AGENT_LINK_PATTERN.finditer(active_content):
             target = match.group(1).strip("<>").split("#", 1)[0]
             if PurePosixPath(target).name not in {"AGENTS.md", "CLAUDE.md"}:
@@ -56,13 +45,8 @@ def find_violations(root: Path) -> list[str]:
                 )
         if OBSOLETE_IGNORE_PATTERN.search(active_content):
             violations.append(f"path={path} reason=obsolete broad-ignore guidance")
-        normalized_blocks = (block.replace("\\", "/") for block in active_blocks)
-        normalized_lines = active_content.replace("\\", "/").splitlines()
-        if any(FORMER_ROOT_COMMAND_PATTERN.search(block) for block in normalized_blocks) or any(
-            FORMER_ROOT_COMMAND_PATTERN.search(line)
-            and COMMAND_FRAGMENT_PATTERN.search(line)
-            for line in normalized_lines
-        ):
+        normalized_content = active_content.replace("\\", "/")
+        if FORMER_ROOT_COMMAND_PATTERN.search(normalized_content):
             violations.append(f"path={path} reason=active former-root command")
     return sorted(set(violations))
 

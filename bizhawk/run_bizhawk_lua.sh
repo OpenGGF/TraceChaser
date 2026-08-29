@@ -3,8 +3,8 @@
 #
 # Launches an EmuHawk Lua/BK2/ROM combination headless via mono, with the same
 # recorder-facing contract as the Windows launcher:
-#   * exports OGGF_BIZHAWK_LIB=<lua dir>/lib so the recorders' oggf_lib_dir()
-#     loader is authoritative for lib/oggf_trace_common.lua on this route;
+#   * clears any inherited common-module override; recorders load their exact
+#     sibling lib/oggf_trace_common.lua from the installed script path;
 #   * runs from a controllable working directory so recorders that write a
 #     CWD-relative trace_output/ (e.g. s1_trace_recorder.lua) land it there;
 #   * passes OGGF_TRACE_OUTPUT_DIR straight through for recorders that honor it.
@@ -44,6 +44,7 @@
 # The launcher keeps the established Mono, display, and GL defaults; validate a
 # first capture against a known trace before using a new host configuration.
 set -euo pipefail
+unset OGGF_BIZHAWK_LIB
 
 if [ "$#" -lt 3 ]; then
 	echo "Usage: $(basename "$0") <lua_script> <bk2_movie> <rom> [extra args...]" >&2
@@ -86,11 +87,6 @@ done
 MOVIE_SHA256_LINE=$(sha256sum -- "$BK2_PATH")
 export OGGF_BIZHAWK_MOVIE_SHA256="${MOVIE_SHA256_LINE%% *}"
 
-# Authoritative shared-lib path for the recorders' oggf_lib_dir() loader —
-# mirrors the OGGF_BIZHAWK_LIB export in run_bizhawk_lua.bat. Trailing slash
-# matches the loader's dir .. "file" concatenation.
-LUA_DIR=$(dirname "$LUA_SCRIPT")
-export OGGF_BIZHAWK_LIB="${OGGF_BIZHAWK_LIB:-$LUA_DIR/lib/}"
 export OGGF_BIZHAWK_PROBE_RUNTIME="${OGGF_BIZHAWK_PROBE_RUNTIME:-$SCRIPT_DIR/probes/probe_runtime.lua}"
 
 # Native deps (EmuHawkMono.sh replicates this per-distro; /usr/lib covers Arch).
@@ -145,7 +141,6 @@ echo "Movie:    $BK2_PATH"
 echo "MovieSHA: $OGGF_BIZHAWK_MOVIE_SHA256"
 echo "ROM:      $ROM_PATH"
 echo "Workdir:  $WORKDIR"
-echo "LibDir:   $OGGF_BIZHAWK_LIB"
 [ -n "${OGGF_TRACE_OUTPUT_DIR:-}" ] && echo "OutDir:   $OGGF_TRACE_OUTPUT_DIR"
 echo
 

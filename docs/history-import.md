@@ -1,4 +1,4 @@
-# History import provenance
+# Pre-v5 historical evidence: history import provenance
 
 TraceChaser was filtered locally from OpenGGF before any TraceChaser public
 remote existed. No GitHub repository was created or contacted during this
