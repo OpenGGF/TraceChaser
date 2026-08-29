@@ -13,7 +13,7 @@ Current profile and hook behavior is resolved against the ROM/disassembly and
 native tests. The detailed Lua migration record below is retained only as
 derivation evidence.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below this heading describes predecessor recorder states. Any
 “current”, “canonical”, “authoritative”, or normative wording is historical

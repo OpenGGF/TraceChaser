@@ -41,6 +41,13 @@ REM can be supplied with BIZHAWK_EXTRA_ARGS.
 
 setlocal
 
+set "OGGF_PYTHON_PATH="
+for /f "usebackq delims=" %%I in (`powershell.exe -NoProfile -Command "$p=Get-Command python3 -ErrorAction SilentlyContinue; if ($null -eq $p) {$p=Get-Command python -ErrorAction SilentlyContinue}; if ($null -ne $p) {$p.Source}"`) do if not defined OGGF_PYTHON_PATH set "OGGF_PYTHON_PATH=%%I"
+if not defined OGGF_PYTHON_PATH (
+    echo ERROR: Python is required for canonical output safety.
+    exit /b 2
+)
+
 if not "%OGGF_TRACE_OUTPUT_DIR%"=="" (
     if "%OGGF_INPUT_REPOSITORY_ROOT%"=="" (
         echo ERROR: OGGF_INPUT_REPOSITORY_ROOT is required with OGGF_TRACE_OUTPUT_DIR.
@@ -49,7 +56,6 @@ if not "%OGGF_TRACE_OUTPUT_DIR%"=="" (
     for %%I in ("%~dp0..") do set "OGGF_TRACECHASER_ROOT=%%~fI"
     for /f "usebackq delims=" %%I in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0assert_external_output.ps1" -TraceChaserRoot "%OGGF_TRACECHASER_ROOT%" -InputRepositoryRoot "%OGGF_INPUT_REPOSITORY_ROOT%" -OutputRoot "%OGGF_TRACE_OUTPUT_DIR%"`) do set "OGGF_TRACE_OUTPUT_DIR=%%I"
     if errorlevel 1 exit /b %ERRORLEVEL%
-    set "OGGF_OUTPUT_BOUNDARY_VALIDATED=tracechaser-output-policy-v1:%OGGF_TRACE_OUTPUT_DIR%"
 )
 
 if "%~1"=="" goto :usage

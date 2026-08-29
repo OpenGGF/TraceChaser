@@ -150,7 +150,11 @@ The standard invocation shape is:
 
 ```bash
 BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
-../bizhawk-headless/run.sh --mode trace --rom /absolute/roms/game.gen \
+../bizhawk-headless/run.sh \
+  --tracechaser-root /absolute/TraceChaser \
+  --input-repository-root /absolute/OpenGGF \
+  --fixture-root /absolute/OpenGGF/src/test/resources/traces \
+  --mode trace --rom /absolute/roms/game.gen \
   --movie /absolute/OpenGGF/movies/movie.bk2 \
   --output /absolute/external/trace-output/scratch-candidate
 ```
@@ -775,7 +779,7 @@ facts encoded there (BizHawk 2.11.1 `bizhawk-bin` on CachyOS/Wayland):
 - **KNOWN BLOCKER (upstream BizHawk 2.11.1 + mono, not the launcher):** loading a
   BK2 via `--movie` hangs inside the movie-load path right after `WaterboxHost
   Sealed`, before the form's `OnShown` — so the recorder's Lua never runs and no
-  `trace_output/` is produced. The hung process maps no X window (not a
+  recorder output is produced. The hung process maps no X window (not a
   dismissible dialog). The same recorder Lua launched *without* `--movie` runs
   fine (Lua loads, frames advance, clean exit), isolating the fault to
   command-line BK2 loading on this build. An end-to-end Linux regen needs a
@@ -1160,11 +1164,15 @@ segment.
 capture; see "Capture Launch Notes" above for where the output lands):
 
 ```bat
+set "TRACECHASER_ROOT=C:\work\TraceChaser"
+set "OGGF_INPUT_REPOSITORY_ROOT=C:\work\OpenGGF"
+set "OGGF_TRACE_OUTPUT_DIR=D:\captures\s1-ghz-maze-roundtrip"
 set OGGF_TRACE_RUN_ID=s1-ghz-maze-roundtrip
 
-docs\BizHawk-2.11-win-x64\EmuHawk.exe --chromeless ^
-  --lua=tools/bizhawk/s1_complete_run_recorder.lua ^
-  --movie=docs/BizHawk-2.11-win-x64/Movies/s1-ghz-maze-roundtrip.bk2 s1.gen
+call "%TRACECHASER_ROOT%\bizhawk\run_bizhawk_lua.bat" ^
+  "%TRACECHASER_ROOT%\bizhawk\s1_complete_run_recorder.lua" ^
+  "D:\movies\s1-ghz-maze-roundtrip.bk2" ^
+  "D:\roms\Sonic-1-World-REV01.gen"
 ```
 
 The `$10` (special-stage) detour is handled automatically by the recorder's state machine — no
@@ -1186,7 +1194,7 @@ The output directory will contain:
 Commit the whole run under test resources:
 
 ```
-src/test/resources/traces/s1/runs/s1-ghz-maze-roundtrip/
+$FIXTURE_ROOT/s1/runs/s1-ghz-maze-roundtrip/
   ├── run_manifest.json
   ├── ghz1/
   │   ├── metadata.json
@@ -1265,11 +1273,14 @@ Run the S2 recorder over your movie file through `record_s2_trace.bat` (not the 
 populates `OGGF_BK2_BASENAME` and `OGGF_BK2_FRAME_COUNT` for you:
 
 ```bat
+set "TRACECHASER_ROOT=C:\work\TraceChaser"
+set "OGGF_INPUT_REPOSITORY_ROOT=C:\work\OpenGGF"
+set "OGGF_TRACE_OUTPUT_DIR=D:\captures\s2-ehz-halfpipe-roundtrip"
 set OGGF_TRACE_RUN_ID=s2-ehz-halfpipe-roundtrip
 
-tools\bizhawk\record_s2_trace.bat ^
-  "s2.gen" ^
-  "s2-ehz-halfpipe-roundtrip.bk2"
+call "%TRACECHASER_ROOT%\bizhawk\record_s2_trace.bat" ^
+  "D:\roms\Sonic-2-World-REV01.gen" ^
+  "D:\movies\s2-ehz-halfpipe-roundtrip.bk2"
 ```
 
 Leave `OGGF_S2_TRACE_PROFILE` unset (do not pass a third argument) — `record_s2_trace.bat`
@@ -1278,15 +1289,14 @@ must carry. Setting `OGGF_TRACE_RUN_ID` puts the recorder into run mode: every n
 run-mode code path is gated on `run_id ~= nil` (`s2_trace_recorder.lua`, `run_id` assignment
 near the top of the run-mode block), so plain-mode recordings are unaffected.
 
-**`OGGF_TRACE_OUTPUT_DIR` does not apply here:** unlike `s1_complete_run_recorder.lua` and
-`s3k_complete_run_recorder.lua`, `s2_trace_recorder.lua`'s `OUTPUT_DIR` is a hardcoded
-`"trace_output/"` local (not read from an env var), so output always lands under
-`tools\bizhawk\trace_output\` relative to the recorder script. Do not set that env var expecting
-it to redirect S2 output.
+`OGGF_TRACE_OUTPUT_DIR` is mandatory. The wrapper canonicalizes it and rejects
+TraceChaser, OpenGGF, and aliases of either checkout before the recorder starts.
+Run-mode segment directories and `run_manifest.json` are created beneath that
+explicit external root.
 
 **Expected Output:**
 
-Run mode writes numbered per-segment subdirectories under `tools\bizhawk\trace_output\`:
+Run mode writes numbered per-segment subdirectories under `%OGGF_TRACE_OUTPUT_DIR%`:
 - `run_manifest.json` — indexed transitions for the EHZ1→halfpipe and halfpipe→EHZ1 boundaries.
 - `seg1_ehz1/` — level segment (EHZ Act 1, frames 0 to star-post entry). Run-mode segment dirs
   are named `seg<N>_<zone><act>`, where `N` counts level arms only (the `ss` segment does not
@@ -1296,7 +1306,7 @@ Run mode writes numbered per-segment subdirectories under `tools\bizhawk\trace_o
 - `seg2_ehz1/` — EHZ Act 1 re-entry segment following the halfpipe return. Step 5 above
   guarantees this segment will be present.
 
-`record_s2_trace.bat`'s own post-processing step checks for a top-level `trace_output\metadata.json`
+`record_s2_trace.bat`'s own post-processing step checks for a top-level `metadata.json`
 before compressing and printing the metadata summary; run mode never writes one (metadata always
 lands inside a per-segment subdir), so the wrapper will print a benign
 `WARNING: No trace output found` and skip its own compression/summary step. This is expected —
@@ -1322,7 +1332,7 @@ future comparator work against interior-recorder `ss` traces.
 Commit the whole run under test resources, with the source bk2 alongside it:
 
 ```
-src/test/resources/traces/s2/runs/s2-ehz-halfpipe-roundtrip/
+$FIXTURE_ROOT/s2/runs/s2-ehz-halfpipe-roundtrip/
   ├── run_manifest.json
   ├── s2-ehz-halfpipe-roundtrip.bk2
   ├── seg1_ehz1/
@@ -1365,7 +1375,7 @@ sync with the tools.
 
 `s2_trace_recorder.lua` v9.13-s2 extends run mode (`OGGF_TRACE_RUN_ID`) from the
 single-detour halfpipe round trip to **complete-game runs**. Design contract:
-`tools/bizhawk-headless/docs/s2-run-mode-behavior.md` §11 (the Lua wins on any
+`../bizhawk-headless/docs/s2-run-mode-behavior.md` §11 (the Lua wins on any
 disagreement).
 
 **Title-card-reload survival:** every in-level reload funnels through
@@ -1404,6 +1414,9 @@ emeralds run`, in `../bizhawk-headless/test.sh`) re-runs one native
 ```bash
 BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
 ../bizhawk-headless/run.sh \
+  --tracechaser-root /absolute/TraceChaser \
+  --input-repository-root /absolute/OpenGGF \
+  --fixture-root /absolute/OpenGGF/src/test/resources/traces \
   --mode trace \
   --rom "$S2_ROM_PATH" \
   --movie "/absolute/OpenGGF/src/test/resources/traces/s2/runs/s2-sonic-tails-complete-emeralds/sonic-2-sonic-tails-complete-emeralds.bk2" \
@@ -1472,6 +1485,7 @@ PowerShell `Start-Process` argument array:
 ```bat
 set OGGF_START=16300
 set OGGF_STOP=16320
+set "TRACECHASER_ROOT=C:\work\TraceChaser"
 set "OGGF_TASK_DIR=D:\captures\htz2-diag"
 if not defined OGGF_TASK_DIR (
   >&2 echo ERROR: set OGGF_TASK_DIR to a disk-backed external directory
@@ -1486,10 +1500,10 @@ if not exist "%OGGF_TASK_DIR%\NUL" (
   exit /b 2
 )
 set "OGGF_OUT=%OGGF_TASK_DIR%\htz2_diag.txt"
-tools\bizhawk\run_bizhawk_lua.bat ^
-  tools\bizhawk\diag_s2_htz2_obj30.lua ^
-  src\test\resources\traces\s2\htz2\s2-lvl-select-HTZ.bk2 ^
-  s2.gen
+call "%TRACECHASER_ROOT%\bizhawk\run_bizhawk_lua.bat" ^
+  "%TRACECHASER_ROOT%\bizhawk\diag_s2_htz2_obj30.lua" ^
+  "D:\movies\s2-lvl-select-HTZ.bk2" ^
+  "D:\roms\Sonic-2-World-REV01.gen"
 ```
 
 `OGGF_TASK_DIR` must be a disk-backed location outside the repository and accessible from

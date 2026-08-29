@@ -38,13 +38,71 @@ end
 function M.require_external_output_dir()
     local output = assert(os.getenv("OGGF_TRACE_OUTPUT_DIR"),
         "OGGF_TRACE_OUTPUT_DIR must name an explicit absolute external output root")
-    local validated = assert(os.getenv("OGGF_OUTPUT_BOUNDARY_VALIDATED"),
-        "direct recorder use is forbidden; use a launcher that validates the output boundary")
-    if not is_absolute(output) then error("output root must be an explicit absolute path") end
-    output = normalize_path(output)
-    if validated ~= "tracechaser-output-policy-v1:" .. output then
-        error("output boundary sentinel does not match the launcher-validated canonical output")
+    local supplied_root = assert(os.getenv("OGGF_TRACECHASER_ROOT"),
+        "OGGF_TRACECHASER_ROOT must name the explicit TraceChaser root")
+    local consumer = assert(os.getenv("OGGF_INPUT_REPOSITORY_ROOT"),
+        "OGGF_INPUT_REPOSITORY_ROOT must name the explicit consumer root")
+    local interpreter = assert(os.getenv("OGGF_PYTHON_PATH"),
+        "OGGF_PYTHON_PATH must name the absolute Python interpreter")
+    if not is_absolute(output) or not is_absolute(supplied_root)
+            or not is_absolute(consumer) or not is_absolute(interpreter) then
+        error("output, TraceChaser root, consumer root, and interpreter must be absolute")
     end
+    local source = debug.getinfo(1, "S").source
+    if type(source) ~= "string" or source:sub(1, 1) ~= "@" then
+        error("unable to locate the path-policy helper from the common Lua module")
+    end
+    local module_path = normalize_path(source:sub(2))
+    if not is_absolute(module_path) then
+        error("common Lua module path must be absolute")
+    end
+    local suffix = "/bizhawk/lib/oggf_trace_common.lua"
+    if module_path:sub(-#suffix):lower() ~= suffix then
+        error("common Lua module is not installed at its production path")
+    end
+    local installed_root = module_path:sub(1, #module_path - #suffix)
+    local helper = installed_root .. "/traces/output_policy.py"
+    local helper_file = io.open(helper, "rb")
+    if not helper_file then error("installed path-policy helper is missing") end
+    helper_file:close()
+    local interpreter_file = io.open(interpreter, "rb")
+    if not interpreter_file then error("Python interpreter is missing") end
+    interpreter_file:close()
+    if type(io.popen) ~= "function" then
+        error("BizHawk Lua does not provide the required subprocess primitive")
+    end
+
+    local function hex(value)
+        return (value:gsub(".", function(byte)
+            return string.format("%02x", string.byte(byte))
+        end))
+    end
+    local function shell_quote(value)
+        if package.config:sub(1, 1) == "\\" then
+            if value:find('["%%!&|<>^]') then
+                error("Python interpreter path contains unsafe Windows shell characters")
+            end
+            return '"' .. value .. '"'
+        end
+        return "'" .. value:gsub("'", "'\\''") .. "'"
+    end
+    local request = hex(output .. "\0" .. supplied_root .. "\0" .. consumer)
+    local python = "import os,runpy,sys;p=os.fsdecode(bytes.fromhex(sys.argv[1]));" ..
+        "sys.argv=[p,'--lua-request-hex',sys.argv[2]];runpy.run_path(p,run_name='__main__')"
+    local command = shell_quote(interpreter) .. " -c " .. shell_quote(python) ..
+        " " .. hex(helper) .. " " .. request .. " 2>&1"
+    local process = io.popen(command, "r")
+    if not process then error("unable to start the installed path-policy helper") end
+    local response = process:read("*a")
+    local ok = process:close()
+    if ok ~= true then
+        error("path-policy helper rejected output: " .. response:gsub("%s+$", ""))
+    end
+    local canonical = response:gsub("[\r\n]+$", "")
+    if canonical == "" or canonical:find("[\r\n]") or not is_absolute(canonical) then
+        error("path-policy helper returned a malformed canonical path")
+    end
+    output = normalize_path(canonical)
     if output:sub(-1) ~= "/" then output = output .. "/" end
     return output
 end

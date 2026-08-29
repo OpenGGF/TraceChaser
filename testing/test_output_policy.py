@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,31 +55,56 @@ class OutputPolicyTests(unittest.TestCase):
                 self.assertIn("C.require_external_output_dir()", content)
                 self.assertNotIn('or "trace_output/"', content)
 
-        harness = (
-            "local C=assert(loadfile(arg[0]))(); "
-            "local ok,err=pcall(C.require_external_output_dir); "
-            "if ok then os.exit(0) else io.stderr:write(err..'\\n'); os.exit(7) end"
+    def test_direct_lua_policy_canonicalizes_literal_safe_and_spaced_paths(self) -> None:
+        quoted = self.root / "external 'quoted' output"
+        quoted.mkdir()
+        for output in (self.external, quoted):
+            with self.subTest(output=output):
+                result = self._run_lua_policy(output)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(str(output.resolve()) + "/\n", result.stdout)
+
+    def test_direct_lua_policy_rejects_protected_literal_proc_alias_and_forged_sentinel(self) -> None:
+        for output in (
+            ROOT / "forbidden",
+            Path("/proc/self/root" + str(ROOT / "forbidden")),
+            self.consumer / "forbidden",
+        ):
+            with self.subTest(output=output):
+                result = self._run_lua_policy(
+                    output,
+                    extra={"OGGF_OUTPUT_BOUNDARY_VALIDATED":
+                           "tracechaser-output-policy-v1:" + str(output)},
+                )
+                self.assertEqual(7, result.returncode)
+                self.assertIn("outside", result.stderr)
+
+    def test_direct_lua_policy_fails_closed_for_missing_interpreter_roots_and_helper(self) -> None:
+        cases = (
+            ({"OGGF_PYTHON_PATH": None}, "interpreter"),
+            ({"OGGF_PYTHON_PATH": "python3"}, "absolute"),
+            ({"OGGF_PYTHON_PATH": "/definitely/missing/python3"}, "missing"),
+            ({"OGGF_TRACECHASER_ROOT": None}, "TraceChaser root"),
+            ({"OGGF_TRACECHASER_ROOT": str(self.tracechaser)}, "does not own"),
+            ({"OGGF_INPUT_REPOSITORY_ROOT": None}, "consumer"),
+            ({"OGGF_INPUT_REPOSITORY_ROOT": str(self.root / "missing consumer")}, "existing"),
         )
-        environment = os.environ.copy()
-        environment.update({"OGGF_TRACE_OUTPUT_DIR":
-                            "/proc/self/root" + str(ROOT / "out")})
-        result = subprocess.run(
-            ["lua", "-e", harness, str(ROOT / "bizhawk/lib/oggf_trace_common.lua")],
-            env=environment, text=True, capture_output=True, check=False,
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                result = self._run_lua_policy(self.external, extra=changes)
+                self.assertEqual(7, result.returncode)
+                self.assertIn(message, result.stderr)
+
+        fake_root = self.root / "helper missing checkout"
+        module = fake_root / "bizhawk/lib/oggf_trace_common.lua"
+        module.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / "bizhawk/lib/oggf_trace_common.lua", module)
+        result = self._run_lua_policy(
+            self.external, module=module,
+            extra={"OGGF_TRACECHASER_ROOT": str(fake_root)},
         )
         self.assertEqual(7, result.returncode)
-        self.assertIn("direct recorder use is forbidden", result.stderr)
-
-        canonical = str(self.external.resolve())
-        environment.update({
-            "OGGF_TRACE_OUTPUT_DIR": canonical,
-            "OGGF_OUTPUT_BOUNDARY_VALIDATED": "tracechaser-output-policy-v1:" + canonical,
-        })
-        result = subprocess.run(
-            ["lua", "-e", harness, str(ROOT / "bizhawk/lib/oggf_trace_common.lua")],
-            env=environment, text=True, capture_output=True, check=False,
-        )
-        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("path-policy helper", result.stderr)
 
     def test_retro_entry_points_require_explicit_external_output_before_dependencies(self) -> None:
         for script in ("s1_trace_recorder.py", "s1_credits_trace_recorder.py"):
@@ -172,6 +198,34 @@ class OutputPolicyTests(unittest.TestCase):
         ], text=True, capture_output=True, check=False)
         self.assertNotEqual(0, capture.returncode)
         self.assertIn("outside", capture.stdout + capture.stderr)
+
+    def _run_lua_policy(
+        self, output: Path, *, module: Path | None = None,
+        extra: dict[str, str | None] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        harness = (
+            "local C=assert(loadfile(arg[0]))(); "
+            "local ok,value=pcall(C.require_external_output_dir); "
+            "if ok then io.write(value..'\\n'); os.exit(0) "
+            "else io.stderr:write(value..'\\n'); os.exit(7) end"
+        )
+        environment = os.environ.copy()
+        environment.update({
+            "OGGF_TRACE_OUTPUT_DIR": str(output),
+            "OGGF_TRACECHASER_ROOT": str(ROOT),
+            "OGGF_INPUT_REPOSITORY_ROOT": str(self.consumer),
+            "OGGF_PYTHON_PATH": sys.executable,
+        })
+        for name, value in (extra or {}).items():
+            if value is None:
+                environment.pop(name, None)
+            else:
+                environment[name] = value
+        return subprocess.run(
+            ["lua", "-e", harness,
+             str(module or ROOT / "bizhawk/lib/oggf_trace_common.lua")],
+            env=environment, text=True, capture_output=True, check=False,
+        )
 
 
 if __name__ == "__main__":

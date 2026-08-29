@@ -14,7 +14,7 @@ Current event behavior is resolved against the ROM/disassembly and native
 tests. The byte-level catalogue below is retained as predecessor derivation
 evidence, not as a compatibility surface.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below this heading describes predecessor Lua output and frozen
 fixtures. Any “current”, “canonical”, “authoritative”, or normative wording is

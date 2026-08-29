@@ -14,7 +14,7 @@ v5 validator, literal comparator, candidate-root replay, native gates, and
 explicit publication review succeed. The maintained workflow is
 `docs/guide/contributing/trace-v5-publication.md`.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below this heading is a record of predecessor publication events
 and byte identities. Any “current”, “maintained”, “canonical”,

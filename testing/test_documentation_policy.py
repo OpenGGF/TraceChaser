@@ -72,9 +72,52 @@ class DocumentationPolicyIntegrationTest(unittest.TestCase):
         self.assertIn("reason=active former-root command", result.stdout)
 
     def test_historical_nested_heading_and_fence_cannot_hide_later_active_command(self):
-        self._write("README.md", "# Guide\n\n## Pre-v5 historical evidence\n"
-                    "### Nested\n```bash\npython3 tools/traces/old.py\n```\n"
-                    "## Current\n```bash\npython3 tools/traces/current.py\n```\n")
+        self._write(
+            "README.md",
+            "# Guide\n\n"
+            "## Pre-v5 historical capture notes: Lua launch\n"
+            "```bat\ncall tools\\bizhawk\\old.bat\n```\n"
+            "### Pre-v5 historical evidence - nested proof\n"
+            "```bash\npython3 tools/traces/old.py\n```\n"
+            "### Still inside the outer historical section\n"
+            "```bat\ncall tools\\bizhawk\\also-old.bat\n```\n"
+            "## Current recording\n"
+            "```bat\nset X=1 & call tools\\bizhawk\\current.bat\n```\n",
+        )
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
+    def test_rejects_active_windows_old_dependency_and_local_output_fragments(self):
+        self._write(
+            "README.md",
+            "# Current\n\n```bat\n"
+            "set OUT=%CD%\\target\\capture & "
+            "docs\\BizHawk-2.11-win-x64\\EmuHawk.exe "
+            "--lua=tools\\bizhawk\\recorder.lua\n"
+            "```\n",
+        )
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
+    def test_rejects_active_default_output_without_a_former_root(self):
+        self._write(
+            "README.md",
+            "# Current\n\n```bash\nmkdir -p trace_output/candidate\n```\n",
+        )
+        self._git("add", ".")
+        result = self._audit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
+    def test_rejects_active_command_fragments_outside_fenced_blocks(self):
+        self._write(
+            "README.md",
+            "# Current\n\nRun `python3 tools\\traces\\validate_trace_v5.py` now.\n",
+        )
         self._git("add", ".")
         result = self._audit()
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)

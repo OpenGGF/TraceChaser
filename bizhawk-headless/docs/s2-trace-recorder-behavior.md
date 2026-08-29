@@ -10,7 +10,7 @@ are absent. They are not accepted aliases and do not select behavior.
 `native_prelude_bootstrap`, not recorder provenance, declares frame-zero
 bootstrap evidence.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below records the predecessor Lua-to-native port and its fixture
 evidence. Its old version literals, exact metadata templates, and byte-parity

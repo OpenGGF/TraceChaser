@@ -58,14 +58,18 @@ ROM_PATH=$(realpath "$1"); shift
 # current directory or a discovered sibling repository.
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 TRACECHASER_ROOT=$(cd "$SCRIPT_DIR/.." && pwd -P)
+PYTHON_BIN=$(command -v python3 || command -v python || true)
+[ -n "$PYTHON_BIN" ] || { echo "Python is required for canonical output safety" >&2; exit 2; }
+PYTHON_BIN=$(realpath "$PYTHON_BIN")
+export OGGF_PYTHON_PATH=$PYTHON_BIN
+export OGGF_TRACECHASER_ROOT=$TRACECHASER_ROOT
 if [ -n "${OGGF_TRACE_OUTPUT_DIR:-}" ]; then
 	: "${OGGF_INPUT_REPOSITORY_ROOT:?set OGGF_INPUT_REPOSITORY_ROOT to the explicit consumer checkout}"
-	OGGF_TRACE_OUTPUT_DIR=$(python3 "$TRACECHASER_ROOT/traces/output_policy.py" \
+	OGGF_TRACE_OUTPUT_DIR=$("$PYTHON_BIN" "$TRACECHASER_ROOT/traces/output_policy.py" \
 		--tracechaser-root "$TRACECHASER_ROOT" \
 		--input-repository-root "$OGGF_INPUT_REPOSITORY_ROOT" \
 		--output-root "$OGGF_TRACE_OUTPUT_DIR")
 	export OGGF_TRACE_OUTPUT_DIR
-	export OGGF_OUTPUT_BOUNDARY_VALIDATED="tracechaser-output-policy-v1:$OGGF_TRACE_OUTPUT_DIR"
 fi
 BIZHAWK_HOME="${BIZHAWK_HOME:-"$TRACECHASER_ROOT/.dependencies/BizHawk-2.11-linux-x64"}"
 EMUHAWK_EXE="$BIZHAWK_HOME/EmuHawk.exe"

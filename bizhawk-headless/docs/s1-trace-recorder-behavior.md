@@ -8,7 +8,7 @@ The maintained writer emits `recorder: native-bizhawk-headless`,
 `csv_version`, `ss_csv_version`, `hardware_timing_schema`, and `run_schema`
 are absent. They are not accepted aliases and do not select behavior.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below records the predecessor Lua-to-native port and its fixture
 evidence. Its old version literals, exact metadata templates, and byte-parity

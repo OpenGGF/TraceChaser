@@ -77,15 +77,16 @@ then independently required to equal the SHA-256 of the production
 `BizHawk.Headless.Gpgx` executable. Java metadata continues to pin the complete,
 unnormalized capability-file SHA-256.
 
-From a fresh checkout at the repository root, create durable inputs and build
-outputs beneath the ignored `target/audio-parity/native/` tree. The package
+From a fresh checkout, create durable inputs and build outputs beneath an
+explicit external root. The package
 directory is caller-supplied and must contain the filenames and bytes
 listed by `prepare-toolchain.sh`; the script checks every SHA-256 against
 `toolchain-lock.json` before publishing the toolchain.
 
 ```bash
-observer=$PWD/bizhawk-headless/native/gpgx-audio-observer
-native=$PWD/target/audio-parity/native/task7-reproduction
+TRACECHASER_ROOT=/absolute/TraceChaser
+observer=$TRACECHASER_ROOT/bizhawk-headless/native/gpgx-audio-observer
+native=/absolute/external/audio-parity/native/task7-reproduction
 packages=/absolute/path/to/locked-package-input
 stock=/absolute/path/to/BizHawk-2.11-linux-x64
 mkdir -p "$native"
@@ -111,8 +112,8 @@ Install beside, never over, the stock distribution:
   --output "$native/install"
 ```
 
-All four output destinations must be absent. Installation output is restricted to this
-repository's ignored `target/audio-parity/native/` or harness `.scratch/`
+All four output destinations must be absent and remain under the explicit
+external root; neither source checkout nor harness `.scratch/` is an output
 tree. The installation includes the complete
 corresponding normalized source archive, literal patch, build evidence, and
 verbatim notices. Genesis Plus GX's license prohibits commercial use and

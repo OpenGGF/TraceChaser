@@ -9,7 +9,7 @@ The predecessor keys `lua_script_version`, `csv_version`, `ss_csv_version`,
 `hardware_timing_schema`, and `run_schema` are absent. They are not accepted
 aliases and do not select behavior.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below records predecessor capture behavior and fixture evidence.
 Old exact templates and Lua parity claims remain useful provenance, but are

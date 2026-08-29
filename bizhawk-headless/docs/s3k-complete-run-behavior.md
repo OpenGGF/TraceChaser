@@ -18,7 +18,7 @@ Native publication authority and review requirements are defined by the
 The detailed material below is retained solely to explain how the native
 segmentation model and frozen predecessor bytes were derived.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below this heading is predecessor research. Any use of “current”,
 “maintained”, “canonical”, “authoritative”, or “must” is scoped to the

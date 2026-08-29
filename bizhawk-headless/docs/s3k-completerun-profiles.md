@@ -15,7 +15,7 @@ Current profile and aux behavior is resolved against the ROM/disassembly and
 native tests. The detailed material below is retained as porting and fixture
 provenance history only.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything below this heading describes predecessor Lua recorders and their
 fixtures. Any “current”, “canonical”, “authoritative”, or normative wording is

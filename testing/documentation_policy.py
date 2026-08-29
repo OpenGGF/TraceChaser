@@ -9,20 +9,30 @@ import sys
 
 AGENT_LINK_PATTERN = re.compile(r"\[[^]]+\]\(([^)\s]+)(?:\s+[^)]*)?\)")
 HISTORICAL_BOUNDARY_PATTERN = re.compile(
-    r"^(#{1,6})\s+Pre-v5 historical(?: evidence)?(?:\s*[:—-].*)?\s*$",
+    r"^(#{1,6})\s+Pre-v5 historical(?: evidence| capture notes)?(?:\s*[:—-].*)?\s*$",
     re.IGNORECASE,
 )
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+")
+FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 OBSOLETE_IGNORE_PATTERN = re.compile(
     r"\.gitignore.{0,160}(?:makes?|making).{0,80}new files.{0,80}invisible",
     re.IGNORECASE | re.DOTALL,
 )
 FORMER_ROOT_COMMAND_PATTERN = re.compile(
-    r"(?m)^[ \t]*(?:\$[ \t]+)?(?:python3?|pwsh|powershell|bash|sh|"
-    r"tools/|docs/|src/test/|[A-Z][A-Z0-9_]*=)[^\n]*"
-    r"(?:tools/(?:bizhawk(?:-headless)?|traces)/|"
-    r"docs/BizHawk-2\.11-linux-x64|"
-    r"(?<!OpenGGF/)src/test/resources/(?:traces|audio)/)"
+    r"(?:tools/(?:bizhawk(?:-headless)?|traces)(?:/|\b)|"
+    r"docs/BizHawk-2\.11-(?:linux|win)-x64(?:/|\b)|"
+    r"(?<!/)src/test/resources/(?:traces|audio)(?:/|\b)|"
+    r"(?:--output(?:-root)?(?:=|\s+)|OGGF_(?:TRACE_OUTPUT_DIR|OUT)=)[^\r\n]*"
+    r"(?:\$PWD/target|%CD%/target|trace_output/|bizhawk-headless/\.scratch/)|"
+    r"(?:^|[\s\"'=])(?:\$PWD/target|%CD%/target|trace_output/|"
+    r"bizhawk-headless/\.scratch/))",
+    re.IGNORECASE,
+)
+COMMAND_FRAGMENT_PATTERN = re.compile(
+    r"(?:^|[`;&|]\s*|\b(?:run|use|invoke)\s+`?)"
+    r"(?:python(?:3(?:\.\d+)?)?|pwsh|powershell|bash|sh|lua|mono|dotnet|"
+    r"call|mkdir|cp|mv|set|export|[.]/)(?:\s|$)",
+    re.IGNORECASE,
 )
 
 
@@ -32,7 +42,7 @@ def find_violations(root: Path) -> list[str]:
     tracked_paths = set(markdown)
     violations = []
     for path, content in markdown.items():
-        active_content = _active_content(content)
+        active_content, active_blocks = _active_markdown(content)
         for match in AGENT_LINK_PATTERN.finditer(active_content):
             target = match.group(1).strip("<>").split("#", 1)[0]
             if PurePosixPath(target).name not in {"AGENTS.md", "CLAUDE.md"}:
@@ -46,75 +56,68 @@ def find_violations(root: Path) -> list[str]:
                 )
         if OBSOLETE_IGNORE_PATTERN.search(active_content):
             violations.append(f"path={path} reason=obsolete broad-ignore guidance")
-        for block in _active_fenced_code_blocks(content):
-            if FORMER_ROOT_COMMAND_PATTERN.search(block):
-                violations.append(f"path={path} reason=active former-root command")
+        normalized_blocks = (block.replace("\\", "/") for block in active_blocks)
+        normalized_lines = active_content.replace("\\", "/").splitlines()
+        if any(FORMER_ROOT_COMMAND_PATTERN.search(block) for block in normalized_blocks) or any(
+            FORMER_ROOT_COMMAND_PATTERN.search(line)
+            and COMMAND_FRAGMENT_PATTERN.search(line)
+            for line in normalized_lines
+        ):
+            violations.append(f"path={path} reason=active former-root command")
     return sorted(set(violations))
 
 
 def _active_content(content: str) -> str:
-    active_lines = []
-    historical_level: int | None = None
-    for line in content.splitlines(keepends=True):
-        stripped = line.rstrip("\r\n")
-        historical = HISTORICAL_BOUNDARY_PATTERN.match(stripped)
-        if historical:
-            historical_level = len(historical.group(1))
-            continue
-        heading = HEADING_PATTERN.match(stripped)
-        if historical_level is not None:
-            if heading and len(heading.group(1)) <= historical_level:
-                historical_level = None
-            else:
-                continue
-        active_lines.append(line)
-    return "".join(active_lines)
-
-
-def _fenced_code_blocks(content: str) -> list[str]:
-    blocks: list[str] = []
-    current: list[str] | None = None
-    for line in content.splitlines(keepends=True):
-        if line.lstrip().startswith("```"):
-            if current is None:
-                current = []
-            else:
-                blocks.append("".join(current))
-                current = None
-        elif current is not None:
-            current.append(line)
-    return blocks
+    return _active_markdown(content)[0]
 
 
 def _active_fenced_code_blocks(content: str) -> list[str]:
-    """Extract active fences while retaining fence state through history."""
+    return _active_markdown(content)[1]
+
+
+def _active_markdown(content: str) -> tuple[str, list[str]]:
+    """Scan headings and fences once, preserving nested historical scope."""
+    active_lines: list[str] = []
     blocks: list[str] = []
-    current: list[str] | None = None
-    historical_level: int | None = None
-    active_fence = False
+    historical_levels: list[int] = []
+    fence_marker: str | None = None
+    fence_active = False
+    current: list[str] = []
     for line in content.splitlines(keepends=True):
-        if line.lstrip().startswith("```"):
-            if current is None:
-                active_fence = historical_level is None
-                current = []
-            else:
-                if active_fence:
+        fence = FENCE_PATTERN.match(line)
+        if fence_marker is not None:
+            if fence and fence.group(1)[0] == fence_marker[0] \
+                    and len(fence.group(1)) >= len(fence_marker):
+                if fence_active:
                     blocks.append("".join(current))
-                current = None
-                active_fence = False
+                    active_lines.append(line)
+                current = []
+                fence_marker = None
+                fence_active = False
+            else:
+                current.append(line)
+                if fence_active:
+                    active_lines.append(line)
             continue
-        if current is not None:
-            current.append(line)
+        if fence:
+            fence_marker = fence.group(1)
+            fence_active = not historical_levels
+            if fence_active:
+                active_lines.append(line)
             continue
         stripped = line.rstrip("\r\n")
-        historical = HISTORICAL_BOUNDARY_PATTERN.match(stripped)
-        if historical:
-            historical_level = len(historical.group(1))
-            continue
         heading = HEADING_PATTERN.match(stripped)
-        if historical_level is not None and heading and len(heading.group(1)) <= historical_level:
-            historical_level = None
-    return blocks
+        if heading:
+            level = len(heading.group(1))
+            while historical_levels and historical_levels[-1] >= level:
+                historical_levels.pop()
+            historical = HISTORICAL_BOUNDARY_PATTERN.match(stripped)
+            if historical:
+                historical_levels.append(level)
+                continue
+        if not historical_levels:
+            active_lines.append(line)
+    return "".join(active_lines), blocks
 
 
 def _tracked_markdown(root: Path) -> dict[str, str]:

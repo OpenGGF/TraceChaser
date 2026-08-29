@@ -139,8 +139,14 @@ recorder that stopped early are indistinguishable to a byte gate.
 ## Capturing a trace
 
 ```bash
+TRACECHASER_ROOT=/absolute/TraceChaser
+INPUT_REPOSITORY_ROOT=/absolute/OpenGGF
+FIXTURE_ROOT="$INPUT_REPOSITORY_ROOT/src/test/resources/traces"
 BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
-./run.sh \
+"$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
+  --tracechaser-root "$TRACECHASER_ROOT" \
+  --input-repository-root "$INPUT_REPOSITORY_ROOT" \
+  --fixture-root "$FIXTURE_ROOT" \
   --mode trace \
   --rom "$S3K_ROM_PATH" \
   --movie /abs/path/to/movie.bk2 \
@@ -179,10 +185,17 @@ the engine jump bit, and Start is ignored. The ROM—not the harness—selects
 demo identities and any LZ restore/water state.
 
 ```bash
+TRACECHASER_ROOT=/absolute/TraceChaser
+INPUT_REPOSITORY_ROOT=/absolute/OpenGGF
+FIXTURE_ROOT="$INPUT_REPOSITORY_ROOT/src/test/resources/traces"
 BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
-./run.sh --mode trace --rom "$S1_ROM_PATH" \
+"$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
+  --tracechaser-root "$TRACECHASER_ROOT" \
+  --input-repository-root "$INPUT_REPOSITORY_ROOT" \
+  --fixture-root "$FIXTURE_ROOT" \
+  --mode trace --rom "$S1_ROM_PATH" \
   --trace-profile credits_demo --credits-target all \
-  --output /scratch/credits-v5-candidate
+  --output /absolute/external/credits-v5-candidate
 ```
 
 `--credits-target` is `all` or `0` through `7`; a single target is diagnostic

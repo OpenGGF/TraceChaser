@@ -790,7 +790,6 @@ foreach ($route in $selectedRoutes) {
         $env:OGGF_BK2_BASENAME = $route.Bk2
         $env:OGGF_BK2_FRAME_COUNT = [string]$frameCount
         $env:OGGF_TRACE_OUTPUT_DIR = $resolvedTraceOutput
-        $env:OGGF_OUTPUT_BOUNDARY_VALIDATED = "tracechaser-output-policy-v1:$resolvedTraceOutput"
 
         # Invoke run_bizhawk_lua.bat directly (not record_s2_trace.bat, which
         # hardcodes the level recorder script s2_trace_recorder.lua).
@@ -810,7 +809,6 @@ foreach ($route in $selectedRoutes) {
     } else {
         $env:OGGF_TRACE_GAMEPLAY_SEGMENT = [string]$route.Segment
         $env:OGGF_TRACE_OUTPUT_DIR = $resolvedTraceOutput
-        $env:OGGF_OUTPUT_BOUNDARY_VALIDATED = "tracechaser-output-policy-v1:$resolvedTraceOutput"
         & $recordScript $romFullPath $bk2Path "level_gated_reset_aware"
         if ($LASTEXITCODE -ne 0) {
             throw "record_s2_trace.bat failed for $($route.Route) with exit code $LASTEXITCODE"

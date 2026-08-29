@@ -50,7 +50,7 @@ real-write route for validation; it never fabricates chip writes. Execute hooks
 also reject queued SFX, reset, or sound commands before the shipped driver can
 clear them. The observer continues past the end of the movie under verified
 neutral input and exits after proving a complete repeated music cycle. Output
-is local diagnostic material under ignored `target/`; never add the detailed
+is local diagnostic material under the explicit external directory; never add the detailed
 tick or raw register stream to source control or test resources.
 
 Both launchers hash the exact BK2 path before starting EmuHawk and supply that

@@ -166,7 +166,7 @@ ordinals alive. A standard-recorder discard/reset clears both ledgers and
 resets both ordinal bases atomically. A module-created Kosinski child is a
 real direct submission with its own direct ordinal and fingerprint.
 
-## Pre-v5 historical evidence
+# Pre-v5 historical evidence
 
 Everything in this section records predecessor fixture and migration history.
 It is not a supported container contract and must not be used to add parser,
