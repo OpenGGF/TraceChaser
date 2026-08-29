@@ -201,6 +201,72 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self.assertIn("path=contracts/v5/fixtures/physics.csv", result.stdout)
         self.assertIn("reason=v5 contract stored size mismatch", result.stdout)
 
+    def test_v5_contract_case_and_gzip_member_policy_is_enforced_in_history(self):
+        logical = b"frame,x\n0,0\n"
+        content = gzip.compress(logical, mtime=0) + gzip.compress(b"1,1\n", mtime=1)
+        path = "fixtures/physics.CSV.GZ"
+        self._write(f"contracts/v5/{path}", content)
+        manifest = {
+            "format": "tracechaser-v5-artifact-manifest-v1",
+            "files": [
+                {
+                    "path": path,
+                    "stored_size": len(content),
+                    "stored_sha256": hashlib.sha256(content).hexdigest(),
+                    "logical_size": len(logical) + len(b"1,1\n"),
+                    "logical_sha256": hashlib.sha256(logical + b"1,1\n").hexdigest(),
+                }
+            ],
+        }
+        self._write(
+            "contracts/v5/manifest.json",
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+        )
+        invalid_commit = self._commit("add uppercase nondeterministic contract")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(f"commit={invalid_commit}", result.stdout)
+        self.assertIn("reason=v5 contract file type is not admissible", result.stdout)
+
+    def test_v5_contract_symlink_is_rejected_in_its_historical_commit(self):
+        files = self._write_contract_pack()
+        valid_commit = self._commit("add valid v5 contract pack")
+        link_target = b"../../outside.json"
+        files["fixtures/link.json"] = link_target
+        self._write_contract_pack(files)
+        link = self.repository / "contracts/v5/fixtures/link.json"
+        link.unlink()
+        link.symlink_to(link_target.decode())
+        invalid_commit = self._commit("replace contract fixture with escaping symlink")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn(f"commit={valid_commit}", result.stdout)
+        self.assertIn(f"commit={invalid_commit}", result.stdout)
+        self.assertIn("path=contracts/v5/fixtures/link.json", result.stdout)
+        self.assertIn("reason=v5 contract entry is not a regular Git file", result.stdout)
+
+    def test_v5_contract_gitlink_manifest_is_rejected_in_history(self):
+        target_commit = "1" * 40
+        self._git(
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{target_commit},contracts/v5/manifest.json",
+        )
+        self._git("commit", "-q", "-m", "add invalid gitlink contract manifest")
+        invalid_commit = self._git("rev-parse", "HEAD").stdout.strip()
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(f"commit={invalid_commit}", result.stdout)
+        self.assertIn("path=contracts/v5/manifest.json", result.stdout)
+        self.assertIn("reason=v5 contract entry is not a regular Git file", result.stdout)
+
     def _audit(self):
         return subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(self.repository)],
@@ -232,18 +298,19 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self._git("commit", "-q", "-m", message)
         return self._git("rev-parse", "HEAD").stdout.strip()
 
-    def _write_contract_pack(self):
-        logical_physics = b"frame,x\n0,0\n"
-        compressed = io.BytesIO()
-        with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as output:
-            output.write(logical_physics)
-        files = {
-            "fixtures/physics.csv": logical_physics,
-            "fixtures/physics.csv.gz": compressed.getvalue(),
-            "fixtures/aux_state.jsonl": b'{"event":"synthetic"}\n',
-            "fixtures/hardware_timing.jsonl": b'{"kind":"synthetic"}\n',
-            "fixtures/run_manifest.json": b'{"segments":[]}\n',
-        }
+    def _write_contract_pack(self, files=None):
+        if files is None:
+            logical_physics = b"frame,x\n0,0\n"
+            compressed = io.BytesIO()
+            with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as output:
+                output.write(logical_physics)
+            files = {
+                "fixtures/physics.csv": logical_physics,
+                "fixtures/physics.csv.gz": compressed.getvalue(),
+                "fixtures/aux_state.jsonl": b'{"event":"synthetic"}\n',
+                "fixtures/hardware_timing.jsonl": b'{"kind":"synthetic"}\n',
+                "fixtures/run_manifest.json": b'{"segments":[]}\n',
+            }
         entries = []
         for path, content in sorted(files.items()):
             entry = {

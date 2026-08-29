@@ -13,6 +13,7 @@ try:
         ContractPackAudit,
         display_path,
         EXACT_LICENSE_PATHS,
+        is_regular_git_mode,
         license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
         ContractPackAudit,
         display_path,
         EXACT_LICENSE_PATHS,
+        is_regular_git_mode,
         license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
@@ -41,6 +43,7 @@ CONTENT_OVERLAP_BYTES = 512
 class Occurrence:
     commit: str
     path: bytes
+    mode: str
 
 
 @dataclass(frozen=True)
@@ -133,20 +136,23 @@ def _contract_audits(
 ]:
     files_by_commit: dict[str, dict[str, BlobSnapshot]] = {}
     contract_objects: dict[tuple[str, str], tuple[str, bytes]] = {}
-    snapshots: dict[str, BlobSnapshot] = {}
+    snapshots: dict[tuple[str, str], BlobSnapshot] = {}
     for object_id, blob_occurrences in occurrences.items():
         for occurrence in blob_occurrences:
             policy_path = occurrence.path.decode("utf-8", "surrogateescape")
             if not policy_path.startswith("contracts/"):
                 continue
-            if object_id not in snapshots:
-                object_type, size = object_metadata[object_id]
+            snapshot_key = (object_id, occurrence.mode)
+            if snapshot_key not in snapshots:
+                size = 0
                 content = None
-                if object_type == "blob" and size <= MAX_BLOB_BYTES:
-                    content = _git_bytes(root, "cat-file", "blob", object_id).stdout
-                snapshots[object_id] = BlobSnapshot(size, content)
+                if is_regular_git_mode(occurrence.mode):
+                    object_type, size = object_metadata[object_id]
+                    if object_type == "blob" and size <= MAX_BLOB_BYTES:
+                        content = _git_bytes(root, "cat-file", "blob", object_id).stdout
+                snapshots[snapshot_key] = BlobSnapshot(size, content, occurrence.mode)
             files_by_commit.setdefault(occurrence.commit, {})[policy_path] = snapshots[
-                object_id
+                snapshot_key
             ]
             contract_objects[(occurrence.commit, policy_path)] = (
                 object_id,
@@ -236,11 +242,16 @@ def _committed_blob_occurrences(
             metadata, separator, path = record.partition(b"\t")
             if not separator:
                 raise RuntimeError(f"malformed ls-tree record in commit {commit}")
-            _mode, object_type, object_id_bytes = metadata.split(b" ")
-            if object_type != b"blob":
+            mode, object_type, object_id_bytes = metadata.split(b" ")
+            policy_path = path.decode("utf-8", "surrogateescape")
+            if object_type != b"blob" and not policy_path.startswith(
+                "contracts/v5/"
+            ):
                 continue
             object_id = object_id_bytes.decode("ascii")
-            occurrences.setdefault(object_id, set()).add(Occurrence(commit, path))
+            occurrences.setdefault(object_id, set()).add(
+                Occurrence(commit, path, mode.decode("ascii"))
+            )
     return {
         object_id: tuple(sorted(blob_occurrences))
         for object_id, blob_occurrences in occurrences.items()

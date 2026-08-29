@@ -1,10 +1,9 @@
 from dataclasses import dataclass
-import gzip
 import hashlib
-import io
 import json
 from pathlib import PurePosixPath
 import re
+import zlib
 from typing import Mapping
 
 
@@ -136,6 +135,7 @@ EXECUTABLE_PREFIXES = (
 class BlobSnapshot:
     size: int
     content: bytes | None
+    mode: str = "100644"
 
 
 @dataclass(frozen=True)
@@ -222,6 +222,11 @@ def audit_contract_pack(files: Mapping[str, BlobSnapshot]) -> ContractPackAudit:
     if manifest_blob is None:
         violations.extend((path, "v5 contract manifest is missing") for path in v5_paths)
         return ContractPackAudit(frozenset(allowed_paths), tuple(sorted(set(violations))))
+    if not is_regular_git_mode(manifest_blob.mode):
+        violations.append(
+            (V5_CONTRACT_MANIFEST, "v5 contract entry is not a regular Git file")
+        )
+        return ContractPackAudit(frozenset(allowed_paths), tuple(violations))
     if manifest_blob.size > MAX_V5_CONTRACT_BYTES or manifest_blob.content is None:
         violations.append((V5_CONTRACT_MANIFEST, "v5 contract manifest exceeds 65536 bytes"))
         return ContractPackAudit(frozenset(allowed_paths), tuple(violations))
@@ -302,8 +307,13 @@ def _contract_entry_violations(
     relative_path: str,
 ) -> list[str]:
     violations = []
-    if not relative_path.lower().endswith(V5_CONTRACT_FILE_SUFFIXES):
+    if (
+        relative_path != relative_path.lower()
+        or not relative_path.endswith(V5_CONTRACT_FILE_SUFFIXES)
+    ):
         violations.append("v5 contract file type is not admissible")
+    if not is_regular_git_mode(blob.mode):
+        violations.append("v5 contract entry is not a regular Git file")
     if blob.size > MAX_V5_CONTRACT_BYTES or blob.content is None:
         return [*violations, "v5 contract file exceeds 65536 bytes"]
     if entry.get("stored_size") != blob.size:
@@ -314,18 +324,22 @@ def _contract_entry_violations(
         violations.append("v5 contract stored SHA-256 mismatch")
 
     if relative_path.endswith(".gz"):
-        if not _deterministic_gzip_header(blob.content):
-            violations.append("v5 contract gzip header is not deterministic")
+        required_identity_fields = {
+            "stored_size",
+            "stored_sha256",
+            "logical_size",
+            "logical_sha256",
+        }
+        if not required_identity_fields.issubset(entry):
+            violations.append(
+                "v5 contract gzip stored and logical identity fields are required"
+            )
             return violations
-        try:
-            with gzip.GzipFile(fileobj=io.BytesIO(blob.content), mode="rb") as compressed:
-                logical = compressed.read(MAX_V5_CONTRACT_BYTES + 1)
-        except (EOFError, OSError):
-            violations.append("v5 contract gzip payload is invalid")
+        logical, gzip_reason = _decode_deterministic_gzip(blob.content)
+        if gzip_reason is not None:
+            violations.append(gzip_reason)
             return violations
-        if len(logical) > MAX_V5_CONTRACT_BYTES:
-            violations.append("v5 contract logical file exceeds 65536 bytes")
-            return violations
+        assert logical is not None
         violations.extend(
             blob_content_violations(
                 len(logical),
@@ -342,13 +356,58 @@ def _contract_entry_violations(
     return violations
 
 
-def _deterministic_gzip_header(content: bytes) -> bool:
-    return (
-        len(content) >= 10
-        and content[:3] == b"\x1f\x8b\x08"
-        and content[3] == 0
-        and content[4:8] == b"\x00\x00\x00\x00"
-    )
+def _decode_deterministic_gzip(content: bytes) -> tuple[bytes | None, str | None]:
+    offset = 0
+    logical = bytearray()
+    while offset < len(content):
+        if content[offset : offset + 2] != b"\x1f\x8b":
+            reason = (
+                "v5 contract gzip stream has trailing data"
+                if offset
+                else "v5 contract gzip member header is malformed"
+            )
+            return None, reason
+        if len(content) - offset < 10 or content[offset + 2] != 8:
+            return None, "v5 contract gzip member header is malformed"
+        if content[offset + 3] != 0 or content[offset + 4 : offset + 8] != b"\x00" * 4:
+            return None, "v5 contract gzip member header is not deterministic"
+
+        compressed_start = offset + 10
+        inflater = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
+        remaining = MAX_V5_CONTRACT_BYTES - len(logical)
+        try:
+            member = inflater.decompress(content[compressed_start:], remaining + 1)
+        except zlib.error:
+            return None, "v5 contract gzip payload is malformed"
+        if len(member) > remaining:
+            return None, "v5 contract logical file exceeds 65536 bytes"
+        if not inflater.eof:
+            return None, "v5 contract gzip payload is malformed"
+
+        compressed_size = len(content[compressed_start:]) - len(inflater.unused_data)
+        trailer_start = compressed_start + compressed_size
+        if len(content) - trailer_start < 8:
+            return None, "v5 contract gzip payload is malformed"
+        expected_crc = int.from_bytes(content[trailer_start : trailer_start + 4], "little")
+        expected_size = int.from_bytes(
+            content[trailer_start + 4 : trailer_start + 8], "little"
+        )
+        if (
+            zlib.crc32(member) != expected_crc
+            or (len(member) & 0xFFFFFFFF) != expected_size
+        ):
+            return None, "v5 contract gzip payload is malformed"
+
+        logical.extend(member)
+        offset = trailer_start + 8
+
+    if offset == 0:
+        return None, "v5 contract gzip member header is malformed"
+    return bytes(logical), None
+
+
+def is_regular_git_mode(mode: str) -> bool:
+    return mode in {"100644", "100755"}
 
 
 def _valid_sha256(value: object) -> bool:

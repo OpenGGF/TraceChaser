@@ -10,6 +10,7 @@ try:
         blob_content_violations,
         BlobSnapshot,
         display_path,
+        is_regular_git_mode,
         license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
@@ -21,6 +22,7 @@ except ModuleNotFoundError:
         blob_content_violations,
         BlobSnapshot,
         display_path,
+        is_regular_git_mode,
         license_content_violations,
         MACHINE_PATH_PATTERN,
         MAX_BLOB_BYTES,
@@ -33,11 +35,11 @@ def find_violations(root: Path) -> list[str]:
     violations = []
     tracked = _tracked_blobs(root)
     snapshots = {
-        path.decode("utf-8", "surrogateescape"): _blob_snapshot(root, object_id)
-        for object_id, path in tracked
+        path.decode("utf-8", "surrogateescape"): _blob_snapshot(root, object_id, mode)
+        for mode, object_id, path in tracked
     }
     contract_audit = audit_contract_pack(snapshots)
-    for object_id, path in tracked:
+    for _mode, object_id, path in tracked:
         policy_path = path.decode("utf-8", "surrogateescape")
         rendered_path = display_path(path)
         curated_contract_member = policy_path in contract_audit.allowed_paths
@@ -69,18 +71,20 @@ def find_violations(root: Path) -> list[str]:
     return sorted(set(violations))
 
 
-def _blob_snapshot(root: Path, object_id: str) -> BlobSnapshot:
+def _blob_snapshot(root: Path, object_id: str, mode: str) -> BlobSnapshot:
+    if not is_regular_git_mode(mode):
+        return BlobSnapshot(0, None, mode)
     object_type = _git(root, "cat-file", "-t", object_id).stdout.strip()
     if object_type != b"blob":
-        return BlobSnapshot(0, None)
+        return BlobSnapshot(0, None, mode)
     size = int(_git(root, "cat-file", "-s", object_id).stdout)
     content = None
     if size <= MAX_BLOB_BYTES:
         content = _git(root, "cat-file", "blob", object_id).stdout
-    return BlobSnapshot(size, content)
+    return BlobSnapshot(size, content, mode)
 
 
-def _tracked_blobs(root: Path) -> list[tuple[str, bytes]]:
+def _tracked_blobs(root: Path) -> list[tuple[str, str, bytes]]:
     output = _git(root, "ls-files", "--stage", "-z").stdout
     tracked = []
     for record in output.split(b"\x00"):
@@ -89,8 +93,8 @@ def _tracked_blobs(root: Path) -> list[tuple[str, bytes]]:
         metadata, separator, path = record.partition(b"\t")
         if not separator:
             raise RuntimeError("malformed git ls-files record")
-        _mode, object_id, _stage = metadata.split(b" ")
-        tracked.append((object_id.decode("ascii"), path))
+        mode, object_id, _stage = metadata.split(b" ")
+        tracked.append((mode.decode("ascii"), object_id.decode("ascii"), path))
     return tracked
 
 

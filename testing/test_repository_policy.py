@@ -180,7 +180,10 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
 
         self.assertEqual(1, result.returncode)
         self.assertIn("reason=v5 contract file exceeds 65536 bytes", result.stdout)
-        self.assertIn("reason=v5 contract gzip header is not deterministic", result.stdout)
+        self.assertIn(
+            "reason=v5 contract gzip member header is not deterministic",
+            result.stdout,
+        )
 
     def test_rejects_manifest_paths_that_escape_the_exact_pack_boundary(self):
         files, manifest_bytes = self._contract_pack()
@@ -229,6 +232,127 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
         )
         self.assertIn(
             "path=contracts/v5/fixtures/notes.txt reason=v5 contract file type is not admissible",
+            result.stdout,
+        )
+
+    def test_v5_contract_filenames_and_suffixes_are_exactly_lowercase(self):
+        files, _manifest_bytes = self._contract_pack()
+        files["fixtures/physics.CSV.GZ"] = b"not a lowercase gzip contract\n"
+        files["fixtures/Physics.csv.gz"] = gzip.compress(b"frame,x\n", mtime=0)
+        manifest = self._manifest(files)
+        self._stage_contract_pack(files=files, manifest=manifest)
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "path=contracts/v5/fixtures/physics.CSV.GZ reason=v5 contract file type is not admissible",
+            result.stdout,
+        )
+        self.assertIn(
+            "path=contracts/v5/fixtures/Physics.csv.gz reason=v5 contract file type is not admissible",
+            result.stdout,
+        )
+
+    def test_v5_gzip_entries_require_complete_stored_and_logical_identity(self):
+        files, manifest_bytes = self._contract_pack()
+        manifest = json.loads(manifest_bytes)
+        gzip_entry = next(
+            entry for entry in manifest["files"] if entry["path"].endswith(".gz")
+        )
+        del gzip_entry["stored_size"]
+        del gzip_entry["logical_size"]
+        del gzip_entry["logical_sha256"]
+        self._stage_contract_pack(files=files, manifest=manifest)
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "reason=v5 contract gzip stored and logical identity fields are required",
+            result.stdout,
+        )
+
+    def test_v5_gzip_parser_checks_every_member_and_rejects_trailing_or_malformed_data(self):
+        deterministic = gzip.compress(b"frame,x\n0,0\n", mtime=0)
+        nondeterministic_member = gzip.compress(b"1,1\n", mtime=1)
+        unsafe_member = bytearray(gzip.compress(b"2,2\n", mtime=0))
+        unsafe_member[3] = 4
+        files = {
+            "fixtures/bad-second.csv.gz": deterministic + nondeterministic_member,
+            "fixtures/bad-flags.csv.gz": deterministic + bytes(unsafe_member),
+            "fixtures/trailing.csv.gz": deterministic + b"trailing junk",
+            "fixtures/malformed.csv.gz": deterministic[:-4],
+        }
+        logical = {
+            "fixtures/bad-second.csv.gz": b"frame,x\n0,0\n1,1\n",
+            "fixtures/bad-flags.csv.gz": b"frame,x\n0,0\n2,2\n",
+            "fixtures/trailing.csv.gz": b"frame,x\n0,0\n",
+            "fixtures/malformed.csv.gz": b"frame,x\n0,0\n",
+        }
+        manifest = {
+            "format": "tracechaser-v5-artifact-manifest-v1",
+            "files": [
+                self._manifest_entry(path, content, logical[path])
+                for path, content in sorted(files.items())
+            ],
+        }
+        self._stage_contract_pack(files=files, manifest=manifest)
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "path=contracts/v5/fixtures/bad-second.csv.gz reason=v5 contract gzip member header is not deterministic",
+            result.stdout,
+        )
+        self.assertIn(
+            "path=contracts/v5/fixtures/bad-flags.csv.gz reason=v5 contract gzip member header is not deterministic",
+            result.stdout,
+        )
+        self.assertIn(
+            "path=contracts/v5/fixtures/trailing.csv.gz reason=v5 contract gzip stream has trailing data",
+            result.stdout,
+        )
+        self.assertIn(
+            "path=contracts/v5/fixtures/malformed.csv.gz reason=v5 contract gzip payload is malformed",
+            result.stdout,
+        )
+
+    def test_v5_contract_entries_must_be_regular_git_files(self):
+        files, _manifest_bytes = self._contract_pack()
+        link_target = b"../../outside.json"
+        files["fixtures/link.json"] = link_target
+        self._stage_contract_pack(files=files, manifest=self._manifest(files))
+        link = self.repository / "contracts/v5/fixtures/link.json"
+        link.unlink()
+        link.symlink_to(link_target.decode())
+        self._git("add", "-f", "contracts/v5/fixtures/link.json")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "path=contracts/v5/fixtures/link.json reason=v5 contract entry is not a regular Git file",
+            result.stdout,
+        )
+
+    def test_v5_contract_gitlink_is_rejected_without_loading_its_object(self):
+        files, _manifest_bytes = self._contract_pack()
+        files["fixtures/gitlink.json"] = b"placeholder"
+        self._stage_contract_pack(files=files, manifest=self._manifest(files))
+        self._git(
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{'2' * 40},contracts/v5/fixtures/gitlink.json",
+        )
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "path=contracts/v5/fixtures/gitlink.json reason=v5 contract entry is not a regular Git file",
             result.stdout,
         )
 
@@ -290,22 +414,27 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
         ).encode() + b"\n"
 
     def _manifest(self, files):
-        entries = []
-        for path, content in sorted(files.items()):
-            entry = {
-                "path": path,
-                "stored_size": len(content),
-                "stored_sha256": hashlib.sha256(content).hexdigest(),
-            }
-            if path.endswith(".gz"):
-                logical = gzip.decompress(content)
-                entry["logical_size"] = len(logical)
-                entry["logical_sha256"] = hashlib.sha256(logical).hexdigest()
-            entries.append(entry)
+        entries = [
+            self._manifest_entry(path, content)
+            for path, content in sorted(files.items())
+        ]
         return {
             "format": "tracechaser-v5-artifact-manifest-v1",
             "files": entries,
         }
+
+    def _manifest_entry(self, path, content, logical=None):
+        entry = {
+            "path": path,
+            "stored_size": len(content),
+            "stored_sha256": hashlib.sha256(content).hexdigest(),
+        }
+        if path.endswith(".gz"):
+            if logical is None:
+                logical = gzip.decompress(content)
+            entry["logical_size"] = len(logical)
+            entry["logical_sha256"] = hashlib.sha256(logical).hexdigest()
+        return entry
 
     def _git(self, *arguments, check=True):
         return subprocess.run(
