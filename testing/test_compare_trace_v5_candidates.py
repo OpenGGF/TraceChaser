@@ -125,6 +125,25 @@ class CompareTraceV5CandidatesTests(unittest.TestCase):
         self.assertFalse(delta["lines_truncated"])
         self.assertFalse(comparison["literal_deltas_truncated"])
 
+    def test_aux_comparison_accepts_v5_type_discriminated_state_snapshots(self) -> None:
+        self.write_fixture(self.old, HEADER_42, [["0"] * 42])
+        self.write_fixture(self.candidate, HEADER_42, [["0"] * 42])
+        old_fixture = self.old / "s1" / "credits_00_ghz1"
+        candidate_fixture = self.candidate / "s1" / "credits_00_ghz1"
+        payload = '{"frame":-1,"type":"state_snapshot","rings":"0x0000"}\n'
+        (old_fixture / "aux_state.jsonl").write_text(payload)
+        (candidate_fixture / "aux_state.jsonl").write_text(payload)
+
+        comparison = self.file_report(
+            compare_roots(self.old, self.candidate),
+            "s1/credits_00_ghz1/aux_state.jsonl")["comparison"]
+
+        self.assertEqual(
+            {"state_snapshot": 1}, comparison["predecessor_event_counts"])
+        self.assertEqual(
+            {"state_snapshot": 1}, comparison["candidate_event_counts"])
+        self.assertEqual(0, comparison["literal_delta_count"])
+
     def test_aux_literal_explanations_are_deterministically_bounded(self) -> None:
         self.write_fixture(self.old, HEADER_42, [["0"] * 42])
         self.write_fixture(self.candidate, HEADER_42, [["0"] * 42])

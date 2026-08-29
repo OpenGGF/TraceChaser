@@ -255,10 +255,11 @@ def event_counts(content: bytes) -> Counter[str]:
     counts: Counter[str] = Counter()
     for number, line in enumerate(content.decode("utf-8").splitlines(), start=1):
         document = json.loads(line)
-        event = document.get("event")
-        if not isinstance(event, str) or not event:
-            raise ValueError(f"aux line {number} has no event name")
-        counts[event] += 1
+        discriminator = document.get("event", document.get("type"))
+        if not isinstance(discriminator, str) or not discriminator:
+            raise ValueError(
+                f"aux line {number} has no event or type discriminator")
+        counts[discriminator] += 1
     return counts
 
 
