@@ -1,3 +1,7 @@
+import gzip
+import hashlib
+import io
+import json
 import os
 import subprocess
 import sys
@@ -174,6 +178,29 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
             self.assertIn(f"path={path}", result.stdout)
             self.assertIn(f"reason={reason}", result.stdout)
 
+    def test_manifested_v5_contract_pack_passes_reachable_history_audit(self):
+        self._write_contract_pack()
+        self._commit("add bounded v5 contract pack")
+
+        result = self._audit()
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("history audit: PASS\n", result.stdout)
+
+    def test_v5_manifest_relationship_is_enforced_at_each_historical_commit(self):
+        files = self._write_contract_pack()
+        valid_commit = self._commit("add valid v5 contract pack")
+        self._write("contracts/v5/fixtures/physics.csv", files["fixtures/physics.csv"] + b"1,1\n")
+        invalid_commit = self._commit("change contract without manifest update")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn(f"commit={valid_commit}", result.stdout)
+        self.assertIn(f"commit={invalid_commit}", result.stdout)
+        self.assertIn("path=contracts/v5/fixtures/physics.csv", result.stdout)
+        self.assertIn("reason=v5 contract stored size mismatch", result.stdout)
+
     def _audit(self):
         return subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(self.repository)],
@@ -204,6 +231,41 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self._git("add", ".")
         self._git("commit", "-q", "-m", message)
         return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def _write_contract_pack(self):
+        logical_physics = b"frame,x\n0,0\n"
+        compressed = io.BytesIO()
+        with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as output:
+            output.write(logical_physics)
+        files = {
+            "fixtures/physics.csv": logical_physics,
+            "fixtures/physics.csv.gz": compressed.getvalue(),
+            "fixtures/aux_state.jsonl": b'{"event":"synthetic"}\n',
+            "fixtures/hardware_timing.jsonl": b'{"kind":"synthetic"}\n',
+            "fixtures/run_manifest.json": b'{"segments":[]}\n',
+        }
+        entries = []
+        for path, content in sorted(files.items()):
+            entry = {
+                "path": path,
+                "stored_size": len(content),
+                "stored_sha256": hashlib.sha256(content).hexdigest(),
+            }
+            if path.endswith(".gz"):
+                logical = gzip.decompress(content)
+                entry["logical_size"] = len(logical)
+                entry["logical_sha256"] = hashlib.sha256(logical).hexdigest()
+            entries.append(entry)
+            self._write(f"contracts/v5/{path}", content)
+        manifest = {
+            "format": "tracechaser-v5-artifact-manifest-v1",
+            "files": entries,
+        }
+        self._write(
+            "contracts/v5/manifest.json",
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n",
+        )
+        return files
 
     def _git(self, *arguments):
         return subprocess.run(

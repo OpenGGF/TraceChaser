@@ -6,7 +6,9 @@ import sys
 
 try:
     from artifact_policy import (
+        audit_contract_pack,
         blob_content_violations,
+        BlobSnapshot,
         display_path,
         license_content_violations,
         MACHINE_PATH_PATTERN,
@@ -15,7 +17,9 @@ try:
     )
 except ModuleNotFoundError:
     from testing.artifact_policy import (
+        audit_contract_pack,
         blob_content_violations,
+        BlobSnapshot,
         display_path,
         license_content_violations,
         MACHINE_PATH_PATTERN,
@@ -27,34 +31,53 @@ except ModuleNotFoundError:
 def find_violations(root: Path) -> list[str]:
     root = root.resolve()
     violations = []
-    for object_id, path in _tracked_blobs(root):
+    tracked = _tracked_blobs(root)
+    snapshots = {
+        path.decode("utf-8", "surrogateescape"): _blob_snapshot(root, object_id)
+        for object_id, path in tracked
+    }
+    contract_audit = audit_contract_pack(snapshots)
+    for object_id, path in tracked:
         policy_path = path.decode("utf-8", "surrogateescape")
         rendered_path = display_path(path)
+        curated_contract_member = policy_path in contract_audit.allowed_paths
         violations.extend(
             f"path={rendered_path} reason={reason}"
-            for reason in path_violations(policy_path)
+            for reason in path_violations(policy_path, curated_contract_member)
         )
 
-        object_type = _git(root, "cat-file", "-t", object_id).stdout.strip()
-        if object_type != b"blob":
+        snapshot = snapshots[policy_path]
+        if snapshot.content is None and snapshot.size == 0:
             continue
-        size = int(_git(root, "cat-file", "-s", object_id).stdout)
-        content = b""
-        if size <= MAX_BLOB_BYTES:
-            content = _git(root, "cat-file", "blob", object_id).stdout
+        content = snapshot.content or b""
         violations.extend(
             f"path={rendered_path} reason={reason}"
             for reason in blob_content_violations(
-                size,
+                snapshot.size,
                 content[:512],
                 bool(MACHINE_PATH_PATTERN.search(content)),
+                curated_contract_member and policy_path.endswith(".gz"),
             )
         )
         violations.extend(
             f"path={rendered_path} reason={reason}"
             for reason in license_content_violations(policy_path, content)
         )
+    violations.extend(
+        f"path={path} reason={reason}" for path, reason in contract_audit.violations
+    )
     return sorted(set(violations))
+
+
+def _blob_snapshot(root: Path, object_id: str) -> BlobSnapshot:
+    object_type = _git(root, "cat-file", "-t", object_id).stdout.strip()
+    if object_type != b"blob":
+        return BlobSnapshot(0, None)
+    size = int(_git(root, "cat-file", "-s", object_id).stdout)
+    content = None
+    if size <= MAX_BLOB_BYTES:
+        content = _git(root, "cat-file", "blob", object_id).stdout
+    return BlobSnapshot(size, content)
 
 
 def _tracked_blobs(root: Path) -> list[tuple[str, bytes]]:

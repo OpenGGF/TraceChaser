@@ -67,6 +67,13 @@ The current-tree gate scans exactly the Git index. The history gate scans every
 blob reachable from every ref. Both share one artifact policy, including exact
 content hashes for the root GPL license and the curated Zstandard notice.
 
+The sole raw-payload exception is the small conformance pack below
+`contracts/v5/`. Every member must be listed by the pack's exact manifest path,
+stored size, and stored SHA-256; deterministic gzip members also require logical
+size and SHA-256. Both scanners enforce the relationship in the current index
+or in each historical commit independently. This admission policy does not
+define trace-v5 semantics; the forthcoming contract suite does that separately.
+
 ## License
 
 TraceChaser is licensed under GPLv3. See [LICENSE](LICENSE). The exact upstream

@@ -403,8 +403,8 @@ fixtures/         Small synthetic inputs for unit tests
 
 ## Contributing
 
-Read [`CLAUDE.md`](CLAUDE.md) before changing anything here — it carries the
-constraints that are expensive to discover by trial: the two `.csproj` files that
-both need editing, the test registry that silently drops unregistered classes,
-the `.gitignore` rule that makes new files here invisible to `git status`, and
-which kinds of test cannot run beside anything else.
+Read the [root agent guidance](../CLAUDE.md) before changing anything here — it
+carries the constraints that are expensive to discover by trial: the two
+`.csproj` files that both need editing, the test registry that silently drops
+unregistered classes, the ignored dependency/build roots that must not receive
+source files, and which kinds of test cannot run beside anything else.

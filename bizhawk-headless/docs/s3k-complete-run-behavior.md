@@ -12,6 +12,9 @@ secondary timing-schema axis is emitted or accepted.
 
 Current publication and validation are owned by the native harness,
 `docs/guide/contributing/trace-v5-publication.md`, and the v5 contract tests.
+Native publication authority and review requirements are defined by the
+[root agent guidance](../../AGENTS.md) and the
+[native harness README](../README.md).
 The detailed material below is retained solely to explain how the native
 segmentation model and frozen predecessor bytes were derived.
 
@@ -52,12 +55,6 @@ authorize compatibility with a legacy trace.
 > `src/test/resources/traces/s3k/hardware-timing-publication.tsv`. The raw
 > terminal tokens are curated semantically as `hpz22 -> hpz`, `hpz -> ssz`,
 > `ssz -> dez`, `dez23 -> ddz`, and `ddz -> ending`.
->
-> This document remains the segmentation research record. Native publication
-> authority and review requirements are defined by `../AGENTS.md` and
-> `../README.md`; Lua is retained as optional corroboration and diagnostic
-> substrate, not as fixture-publishing authority.
-
 Authoritative specification for the **segmentation** half of
 `tools/bizhawk/s3k_complete_run_recorder.lua`
 (`LUA_SCRIPT_VERSION = "6.33-s3k-completerun"`, 5918 lines, loading

@@ -52,6 +52,10 @@ trace_output/
 **/hardware_timing_interstitial.jsonl
 **/run_manifest.json
 
+# Small manifest-bound conformance sources are reviewed repository inputs.
+!contracts/v5/
+!contracts/v5/**
+
 # Uncurated diagnostic output
 *.log
 *.out

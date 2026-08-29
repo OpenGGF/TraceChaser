@@ -23,7 +23,11 @@ documentation status.
    checks the Git index; `testing/history_audit.py` checks every reachable Git
    object. Do not weaken their shared predicates or the exact root-license and
    Zstandard-notice content exceptions.
-5. Keep this file and `CLAUDE.md` byte-identical. Repository-wide guidance lives
+5. Raw and gzip conformance fixtures are permitted only below `contracts/v5/`
+   when the bounded artifact manifest pins their exact path, stored size and
+   SHA-256, plus logical size and SHA-256 for deterministic gzip. The history
+   scanner enforces that relationship independently in every commit.
+6. Keep this file and `CLAUDE.md` byte-identical. Repository-wide guidance lives
    only at the root; do not add nested agent-policy copies.
 
 ## Native headless GPGX trace harness

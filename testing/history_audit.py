@@ -7,7 +7,10 @@ import sys
 
 try:
     from artifact_policy import (
+        audit_contract_pack,
         blob_content_violations,
+        BlobSnapshot,
+        ContractPackAudit,
         display_path,
         EXACT_LICENSE_PATHS,
         license_content_violations,
@@ -17,7 +20,10 @@ try:
     )
 except ModuleNotFoundError:
     from testing.artifact_policy import (
+        audit_contract_pack,
         blob_content_violations,
+        BlobSnapshot,
+        ContractPackAudit,
         display_path,
         EXACT_LICENSE_PATHS,
         license_content_violations,
@@ -56,14 +62,23 @@ def find_violations(root: Path) -> list[Violation]:
     objects = _reachable_objects(root)
     object_metadata = _object_metadata(root, objects)
     occurrences = _committed_blob_occurrences(root, object_metadata)
+    contract_audits, contract_objects = _contract_audits(
+        root, occurrences, object_metadata
+    )
     violations = []
 
     for object_id, blob_occurrences in occurrences.items():
         for occurrence in blob_occurrences:
             policy_path = occurrence.path.decode("utf-8", "surrogateescape")
+            curated_contract_member = (
+                policy_path
+                in contract_audits.get(
+                    occurrence.commit, ContractPackAudit(frozenset(), ())
+                ).allowed_paths
+            )
             violations.extend(
                 Violation(occurrence.commit, object_id, occurrence.path, reason)
-                for reason in path_violations(policy_path)
+                for reason in path_violations(policy_path, curated_contract_member)
             )
 
     for object_id in sorted(objects):
@@ -75,19 +90,73 @@ def find_violations(root: Path) -> list[Violation]:
             continue
         blob_occurrences = occurrences.get(object_id)
         if blob_occurrences:
-            violations.extend(
-                Violation(occurrence.commit, object_id, occurrence.path, reason)
-                for occurrence in blob_occurrences
-                for reason in reasons
-            )
+            for occurrence in blob_occurrences:
+                policy_path = occurrence.path.decode("utf-8", "surrogateescape")
+                curated_gzip_member = (
+                    policy_path.endswith(".gz")
+                    and policy_path
+                    in contract_audits.get(
+                        occurrence.commit, ContractPackAudit(frozenset(), ())
+                    ).allowed_paths
+                )
+                occurrence_reasons = reasons
+                if curated_gzip_member:
+                    occurrence_reasons = [
+                        reason for reason in reasons if reason != "archive or BK2 magic"
+                    ]
+                violations.extend(
+                    Violation(occurrence.commit, object_id, occurrence.path, reason)
+                    for reason in occurrence_reasons
+                )
         else:
             violations.extend(
                 Violation("<direct>", object_id, None, reason) for reason in reasons
             )
 
+    for commit, audit in contract_audits.items():
+        for policy_path, reason in audit.violations:
+            object_id, raw_path = contract_objects[(commit, policy_path)]
+            violations.append(Violation(commit, object_id, raw_path, reason))
+
     violations.extend(_license_content_violations(root, occurrences))
 
     return sorted(set(violations), key=_violation_sort_key)
+
+
+def _contract_audits(
+    root: Path,
+    occurrences: dict[str, tuple[Occurrence, ...]],
+    object_metadata: dict[str, tuple[str, int]],
+) -> tuple[
+    dict[str, ContractPackAudit],
+    dict[tuple[str, str], tuple[str, bytes]],
+]:
+    files_by_commit: dict[str, dict[str, BlobSnapshot]] = {}
+    contract_objects: dict[tuple[str, str], tuple[str, bytes]] = {}
+    snapshots: dict[str, BlobSnapshot] = {}
+    for object_id, blob_occurrences in occurrences.items():
+        for occurrence in blob_occurrences:
+            policy_path = occurrence.path.decode("utf-8", "surrogateescape")
+            if not policy_path.startswith("contracts/"):
+                continue
+            if object_id not in snapshots:
+                object_type, size = object_metadata[object_id]
+                content = None
+                if object_type == "blob" and size <= MAX_BLOB_BYTES:
+                    content = _git_bytes(root, "cat-file", "blob", object_id).stdout
+                snapshots[object_id] = BlobSnapshot(size, content)
+            files_by_commit.setdefault(occurrence.commit, {})[policy_path] = snapshots[
+                object_id
+            ]
+            contract_objects[(occurrence.commit, policy_path)] = (
+                object_id,
+                occurrence.path,
+            )
+    audits = {
+        commit: audit_contract_pack(files)
+        for commit, files in files_by_commit.items()
+    }
+    return audits, contract_objects
 
 
 def _license_content_violations(
