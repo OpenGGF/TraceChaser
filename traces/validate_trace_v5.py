@@ -44,8 +44,9 @@ FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}\Z")
 class Validation:
     """Collects independent contract failures without mutating the fixture root."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, require_frame_keyed_auxiliary: bool = False) -> None:
         self.root = root
+        self.require_frame_keyed_auxiliary = require_frame_keyed_auxiliary
         self.errors: list[str] = []
 
     def reject(self, path: Path, reason: str) -> None:
@@ -102,6 +103,9 @@ class Validation:
         physics = self.single_payload(fixture_directory, "physics.csv")
         if physics is not None and isinstance(game, str) and isinstance(profile, str):
             self.validate_rows(physics, SPECIAL_STAGE_WIDTHS.get((game, profile), 42))
+        auxiliary = self.single_payload(fixture_directory, "aux_state.jsonl", required=False)
+        if auxiliary is not None and self.require_frame_keyed_auxiliary:
+            self.validate_auxiliary(auxiliary)
         timing = self.single_payload(fixture_directory, "hardware_timing.jsonl", required=False)
         if timing is not None and valid_trace_frame_count:
             self.validate_timing(timing, trace_frame_count)
@@ -125,6 +129,7 @@ class Validation:
         transitions = manifest.get("dynamic_art_gap_transitions")
         if not isinstance(transitions, list):
             self.reject(path, "dynamic_art_gap_transitions must be an array")
+        self.validate_manifest_member_order(path, manifest)
         interstitial = path.parent / "hardware_timing_interstitial.jsonl"
         if interstitial.is_file():
             self.validate_interstitial_timing(interstitial)
@@ -161,6 +166,64 @@ class Validation:
                     self.reject(path, f"row {number} has {len(row)} columns; expected {width}")
         except csv.Error as error:
             self.reject(path, f"invalid CSV: {error}")
+
+    def validate_auxiliary(self, path: Path) -> None:
+        content = self.read_text(path)
+        if content is None:
+            return
+        for number, line in enumerate(content.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as error:
+                self.reject(path, f"line {number} malformed JSON: {error.msg}")
+                continue
+            if not isinstance(event, dict):
+                self.reject(path, f"line {number} must be a JSON object")
+                continue
+            frame = event.get("frame")
+            if not isinstance(frame, int) or isinstance(frame, bool):
+                self.reject(path, f"line {number} has invalid or missing frame")
+
+    def validate_manifest_member_order(
+        self, path: Path, manifest: dict[str, Any]
+    ) -> None:
+        segments = manifest.get("segments")
+        if isinstance(segments, list):
+            previous_offset: int | None = None
+            for index, segment in enumerate(segments):
+                if not isinstance(segment, dict):
+                    self.reject(path, f"segment {index} must be a JSON object")
+                    continue
+                offset = segment.get("bk2_frame_offset")
+                if not isinstance(offset, int) or isinstance(offset, bool):
+                    self.reject(path, f"segment {index} has invalid bk2_frame_offset")
+                    continue
+                if previous_offset is not None and offset <= previous_offset:
+                    self.reject(
+                        path,
+                        f"segment {index} bk2_frame_offset must be strictly increasing",
+                    )
+                previous_offset = offset
+
+        transitions = manifest.get("transitions")
+        if isinstance(transitions, list):
+            previous_from: int | None = None
+            for index, transition in enumerate(transitions):
+                if not isinstance(transition, dict):
+                    self.reject(path, f"transition {index} must be a JSON object")
+                    continue
+                from_segment = transition.get("from_segment")
+                if not isinstance(from_segment, int) or isinstance(from_segment, bool):
+                    self.reject(path, f"transition {index} has invalid from_segment")
+                    continue
+                if previous_from is not None and from_segment <= previous_from:
+                    self.reject(
+                        path,
+                        f"transition {index} from_segment must be strictly increasing",
+                    )
+                previous_from = from_segment
 
     def validate_timing(self, path: Path, frame_count: int) -> None:
         content = self.read_text(path)
@@ -379,8 +442,16 @@ def reject_duplicate_keys(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, help="trace fixture root to validate without modifying")
+    parser.add_argument(
+        "--require-frame-keyed-auxiliary",
+        action="store_true",
+        help="reject aux JSONL that the OpenGGF frame-keyed event parser cannot consume",
+    )
     args = parser.parse_args(argv)
-    errors = Validation(args.root).run()
+    errors = Validation(
+        args.root,
+        require_frame_keyed_auxiliary=args.require_frame_keyed_auxiliary,
+    ).run()
     if errors:
         print("trace v5 validation failed:", file=sys.stderr)
         print(*errors, sep="\n", file=sys.stderr)

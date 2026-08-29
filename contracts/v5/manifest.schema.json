@@ -1,0 +1,141 @@
+{
+  "$defs": {
+    "case": {
+      "properties": {
+        "consumer_entry": {
+          "type": "string"
+        },
+        "consumer_exact_diagnostic": {
+          "type": "string"
+        },
+        "exact_diagnostic": {
+          "type": "string"
+        },
+        "expected_outcome": {
+          "$ref": "#/$defs/outcome"
+        },
+        "id": {
+          "type": "string"
+        },
+        "normalized_semantics": {
+          "type": "object"
+        },
+        "producer_entry": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "rules",
+        "expected_outcome",
+        "producer_entry",
+        "consumer_entry"
+      ],
+      "type": "object"
+    },
+    "file": {
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "consumer_entry": {
+          "type": "string"
+        },
+        "consumer_exact_diagnostic": {
+          "type": "string"
+        },
+        "exact_diagnostic": {
+          "type": "string"
+        },
+        "expected_outcome": {
+          "$ref": "#/$defs/outcome"
+        },
+        "logical_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "logical_size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "normalized_semantics": {
+          "type": "object"
+        },
+        "path": {
+          "type": "string"
+        },
+        "producer_entry": {
+          "type": "string"
+        },
+        "stored_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "stored_size": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "stored_size",
+        "stored_sha256",
+        "case_id",
+        "expected_outcome",
+        "producer_entry",
+        "consumer_entry"
+      ],
+      "type": "object"
+    },
+    "outcome": {
+      "enum": [
+        "accept",
+        "reject"
+      ]
+    }
+  },
+  "$id": "https://github.com/OpenGGF/TraceChaser/contracts/v5/manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/case"
+      },
+      "type": "array"
+    },
+    "consumer_expectation_format": {
+      "const": "openggf-trace-v5-consumer-expectation-v1"
+    },
+    "contract_version": {
+      "const": 1
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/file"
+      },
+      "type": "array"
+    },
+    "format": {
+      "const": "tracechaser-v5-artifact-manifest-v1"
+    }
+  },
+  "required": [
+    "format",
+    "contract_version",
+    "consumer_expectation_format",
+    "cases",
+    "files"
+  ],
+  "title": "TraceChaser trace-v5 semantic conformance manifest",
+  "type": "object"
+}

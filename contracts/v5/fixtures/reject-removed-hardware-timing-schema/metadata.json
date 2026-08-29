@@ -1,0 +1,15 @@
+{
+  "act": 1,
+  "bk2_frame_offset": 0,
+  "game": "s2",
+  "hardware_timing_schema": 1,
+  "recorder": "native-bizhawk-headless",
+  "recorder_version": "3.0",
+  "start_x": "0x0000",
+  "start_y": "0x0000",
+  "trace_frame_count": 1,
+  "trace_profile": "complete_run",
+  "trace_schema": 5,
+  "zone": "synthetic",
+  "zone_id": 0
+}

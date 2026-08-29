@@ -199,6 +199,51 @@ class ValidateTraceV5Tests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("run_manifest.json: segments must be an array", result.stderr)
 
+    def test_rejects_aux_jsonl_that_java_cannot_parse_as_frame_keyed_events(self) -> None:
+        fixture = self.write_fixture("s2", "complete_run")
+        (fixture / "aux_state.jsonl").write_text(
+            '{"frame":0,"event":"state_snapshot","tag":"accepted"}\n'
+            '{"event":"state_snapshot","tag":"missing-frame"}\n'
+        )
+
+        result = self.validate(require_frame_keyed_auxiliary=True)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            f"{fixture / 'aux_state.jsonl'}: line 2 has invalid or missing frame",
+            result.stderr,
+        )
+
+    def test_rejects_run_manifest_members_that_do_not_preserve_declared_order(self) -> None:
+        self.write_fixture("s2", "complete_run", name="seg0")
+        self.write_fixture("s2", "complete_run", name="seg1")
+        self.write_manifest({
+            "segments": [
+                {"dir": "seg0", "kind": "level", "trace_profile": "complete_run",
+                 "bk2_frame_offset": 20, "trace_frame_count": 1},
+                {"dir": "seg1", "kind": "level", "trace_profile": "complete_run",
+                 "bk2_frame_offset": 10, "trace_frame_count": 1},
+            ],
+            "transitions": [
+                {"from_segment": 1, "to_segment": 2, "entry_kind": "level_advance",
+                 "mode_change_bk2_frame": 9},
+                {"from_segment": 0, "to_segment": 1, "entry_kind": "level_advance",
+                 "mode_change_bk2_frame": 8},
+            ],
+        })
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "run_manifest.json: segment 1 bk2_frame_offset must be strictly increasing",
+            result.stderr,
+        )
+        self.assertIn(
+            "run_manifest.json: transition 1 from_segment must be strictly increasing",
+            result.stderr,
+        )
+
     def test_rejects_per_segment_fields_in_interstitial_timing(self) -> None:
         self.write_fixture("s3k", "complete_run")
         self.write_manifest({})
@@ -317,9 +362,14 @@ class ValidateTraceV5Tests(unittest.TestCase):
         else:
             path.write_text(content)
 
-    def validate(self, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def validate(
+            self, root: Path | None = None, *,
+            require_frame_keyed_auxiliary: bool = False) -> subprocess.CompletedProcess[str]:
+        command = [sys.executable, str(VALIDATOR), str(root or self.root)]
+        if require_frame_keyed_auxiliary:
+            command.append("--require-frame-keyed-auxiliary")
         return subprocess.run(
-            [sys.executable, str(VALIDATOR), str(root or self.root)],
+            command,
             text=True,
             capture_output=True,
             check=False,
