@@ -121,9 +121,10 @@ assembly versions and parses `monodis` method/custom-attribute metadata. Each
 locked API must bind its registration name to the exact managed method on the
 locked Lua library class; a matching method on another library or an
 unregistered method is rejected. The lifted `client.invisibleemulation` shipped
-example is scanned as executable Lua, so comments and strings cannot satisfy
-the witness. Preflight does not start EmuHawk, load a ROM, require a display, or
-create capture output.
+example must contain the exact executable identifier, dot, method, and call
+tokens; whitespace is allowed, while comments, strings, and identifier
+prefixes/suffixes cannot satisfy the witness. Preflight does not start EmuHawk,
+load a ROM, require a display, or create capture output.
 
 ## Updating a lock
 

@@ -3,14 +3,18 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+import bizhawk.bizhawk_2_11 as bizhawk_dependency
 from bizhawk.bizhawk_2_11 import (
     DependencyError,
+    _extract_archive,
     _publish_directory_noreplace,
     acquire_archive,
     load_runtime_lock,
@@ -119,6 +123,31 @@ def _metadata_probe(
     attribute_output: str = ATTRIBUTE_METADATA,
 ):
     return lambda _path: parse_lua_metadata(method_output, attribute_output)
+
+
+def _valid_offline_archive(path: Path) -> dict:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+        for relative, content in (
+            ("EmuHawk.exe", b"managed"),
+            ("dll/BizHawk.Client.Common.dll", b"managed"),
+            ("dll/NLua.dll", b"nlua"),
+            (
+                "Lua/GBA/SonicAdvance_CamHack.lua",
+                b"client.invisibleemulation(true)\n",
+            ),
+        ):
+            info = tarfile.TarInfo(f"BizHawk-2.11-linux-x64/{relative}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+    archive_bytes = payload.getvalue()
+    path.write_bytes(archive_bytes)
+    return _synthetic_lock(hashlib.sha256(archive_bytes).hexdigest())
+
+
+def _extract_fully_trusted(archive: Path, staging_root: Path) -> None:
+    with tarfile.open(archive, mode="r:gz") as source:
+        source.extractall(staging_root, filter="fully_trusted")
 
 
 class RuntimeArchiveLockTests(unittest.TestCase):
@@ -315,6 +344,8 @@ class PreflightTests(unittest.TestCase):
             "-- client.invisibleemulation(true)\nreturn true\n",
             "local note = 'client.invisibleemulation(true)'\nreturn note\n",
             "--[=[ client.invisibleemulation(true) ]=]\nreturn true\n",
+            "fakeclient.invisibleemulation(true)\n",
+            "client.invisibleemulation_removed(true)\n",
         )
         for source in decoys:
             with self.subTest(source=source), tempfile.TemporaryDirectory() as temporary:
@@ -334,6 +365,25 @@ class PreflightTests(unittest.TestCase):
                 self.assertIn("client.invisibleemulation", diagnostic)
                 self.assertIn("detected raw='missing'", diagnostic)
                 self.assertIn("expected raw='client.invisibleemulation'", diagnostic)
+
+    def test_exact_example_call_tokens_allow_whitespace(self) -> None:
+        lock = _synthetic_lock()
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "explicit-user-install"
+            _write_install(home, lock)
+            example = home / "Lua" / "GBA" / "SonicAdvance_CamHack.lua"
+            example.write_text(
+                "client  .  invisibleemulation  ( true )\n", encoding="utf-8"
+            )
+
+            report = preflight_installation(
+                home,
+                lock,
+                version_probe=_version_probe("Version: 2.11.0.0"),
+                metadata_probe=_metadata_probe(),
+            )
+
+        self.assertIn("client.invisibleemulation", report.lua_capabilities)
 
     def test_lua_launcher_rejects_wrong_version_before_emulator_start(self) -> None:
         lock = load_runtime_lock(LOCK_PATH)
@@ -438,21 +488,69 @@ class PreflightTests(unittest.TestCase):
 class AcquisitionTests(unittest.TestCase):
     def test_atomic_publication_rejects_destination_that_appears_at_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "TraceChaser"
+            root.mkdir()
+            archive_path = Path(temporary) / "offline.tar.gz"
+            lock = _valid_offline_archive(archive_path)
+            real_publish = _publish_directory_noreplace
+            observed: dict[str, bool] = {}
+
+            def publish_after_competitor(staged: Path, destination: Path) -> None:
+                self.assertFalse(destination.exists())
+                destination.mkdir()
+                existing = destination / "existing"
+                existing.write_text("keep", encoding="utf-8")
+                try:
+                    real_publish(staged, destination)
+                except DependencyError:
+                    observed["staged_preserved"] = (
+                        staged.is_dir() and (staged / "EmuHawk.exe").is_file()
+                    )
+                    observed["destination_preserved"] = (
+                        existing.read_text(encoding="utf-8") == "keep"
+                    )
+                    raise
+
+            with mock.patch.object(
+                bizhawk_dependency,
+                "_publish_directory_noreplace",
+                side_effect=publish_after_competitor,
+            ) as publisher:
+                with self.assertRaises(DependencyError) as raised:
+                    acquire_archive(
+                        root,
+                        lock,
+                        archive_path=archive_path,
+                        version_probe=_version_probe("Version: 2.11.0.0"),
+                        metadata_probe=_metadata_probe(),
+                    )
+            publisher.assert_called_once()
+
+            destination = root / ".dependencies" / "BizHawk-2.11-linux-x64"
+            self.assertEqual("keep", (destination / "existing").read_text())
+            self.assertEqual(
+                {"staged_preserved": True, "destination_preserved": True}, observed
+            )
+        diagnostic = str(raised.exception)
+        self.assertIn("appeared and was left untouched", diagnostic)
+        self.assertIn("errno=17 (File exists)", diagnostic)
+
+    def test_legacy_check_then_rename_control_overwrites_competing_empty_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             staged = root / "staged"
             destination = root / "destination"
             staged.mkdir()
             (staged / "payload").write_text("candidate", encoding="utf-8")
+
+            self.assertFalse(destination.exists())
             destination.mkdir()
-            existing = destination / "existing"
-            existing.write_text("keep", encoding="utf-8")
+            os.rename(staged, destination)
 
-            with self.assertRaises(DependencyError) as raised:
-                _publish_directory_noreplace(staged, destination)
-
-            self.assertEqual("keep", existing.read_text(encoding="utf-8"))
-            self.assertTrue((staged / "payload").is_file())
-        self.assertIn("appeared and was left untouched", str(raised.exception))
+            self.assertFalse(staged.exists())
+            self.assertEqual(
+                "candidate", (destination / "payload").read_text(encoding="utf-8")
+            )
 
     def test_wrong_archive_hash_is_rejected_before_extraction(self) -> None:
         lock = _synthetic_lock("f" * 64)
@@ -473,67 +571,144 @@ class AcquisitionTests(unittest.TestCase):
 
     def test_parent_traversal_archive_is_rejected_without_escape_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "TraceChaser"
-            root.mkdir()
-            escaped = Path(temporary) / "escaped-by-traversal"
+            root = Path(temporary)
             payload = io.BytesIO()
             with tarfile.open(fileobj=payload, mode="w:gz") as archive:
-                member = tarfile.TarInfo("../../escaped-by-traversal")
+                member = tarfile.TarInfo("../escaped-by-traversal/sentinel")
                 content = b"must not escape"
                 member.size = len(content)
                 archive.addfile(member, io.BytesIO(content))
             archive_path = Path(temporary) / "traversal.tar.gz"
             archive_path.write_bytes(payload.getvalue())
-            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+            control_area = root / "control"
+            (control_area / "escaped-symlink-target").mkdir(parents=True)
+            control_staging = control_area / "staging"
+            control_staging.mkdir()
 
-            with self.assertRaises(DependencyError):
-                acquire_archive(root, lock, archive_path=archive_path)
+            def require_rejection(extractor) -> None:
+                with self.assertRaises(DependencyError):
+                    extractor(archive_path, control_staging)
 
-            self.assertFalse(escaped.exists())
+            # Mutation control: fully_trusted must fail the rejection assertion
+            # and demonstrate the exact write the production filter prevents.
+            with self.assertRaises(AssertionError):
+                require_rejection(_extract_fully_trusted)
+            self.assertEqual(
+                content,
+                (control_area / "escaped-by-traversal" / "sentinel").read_bytes(),
+            )
+
+            secure_area = root / "secure"
+            secure_staging = secure_area / "staging"
+            secure_staging.mkdir(parents=True)
+            with self.assertRaises(DependencyError) as raised:
+                _extract_archive(archive_path, secure_staging)
+
+            self.assertIs(
+                type(raised.exception.__cause__), tarfile.OutsideDestinationError
+            )
+            self.assertFalse(
+                (secure_area / "escaped-by-traversal" / "sentinel").exists()
+            )
+            escaped_sentinels = [
+                path
+                for path in secure_area.rglob("sentinel")
+                if not path.is_relative_to(secure_staging)
+            ]
+            self.assertEqual([], escaped_sentinels)
 
     def test_escaping_symlink_archive_is_rejected_without_escape_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "TraceChaser"
-            root.mkdir()
-            escaped = Path(temporary) / "escaped-symlink-target"
+            root = Path(temporary)
             payload = io.BytesIO()
             with tarfile.open(fileobj=payload, mode="w:gz") as archive:
-                member = tarfile.TarInfo(
-                    "BizHawk-2.11-linux-x64/escaping-link"
-                )
-                member.type = tarfile.SYMTYPE
-                member.linkname = "../../../escaped-symlink-target"
-                archive.addfile(member)
+                link = tarfile.TarInfo("escaping-link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "../escaped-symlink-target"
+                archive.addfile(link)
+                content = b"must not follow escaping link"
+                sentinel = tarfile.TarInfo("escaping-link/sentinel")
+                sentinel.size = len(content)
+                archive.addfile(sentinel, io.BytesIO(content))
             archive_path = Path(temporary) / "symlink.tar.gz"
             archive_path.write_bytes(payload.getvalue())
-            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+            control_area = root / "control"
+            (control_area / "escaped-symlink-target").mkdir(parents=True)
+            control_staging = control_area / "staging"
+            control_staging.mkdir()
 
-            with self.assertRaises(DependencyError):
-                acquire_archive(root, lock, archive_path=archive_path)
+            def require_rejection(extractor) -> None:
+                with self.assertRaises(DependencyError):
+                    extractor(archive_path, control_staging)
 
-            self.assertFalse(escaped.exists())
+            # Mutation control: fully_trusted follows the link and writes out.
+            with self.assertRaises(AssertionError):
+                require_rejection(_extract_fully_trusted)
+            self.assertEqual(
+                content,
+                (control_area / "escaped-symlink-target" / "sentinel").read_bytes(),
+            )
+
+            secure_area = root / "secure"
+            (secure_area / "escaped-symlink-target").mkdir(parents=True)
+            secure_staging = secure_area / "staging"
+            secure_staging.mkdir()
+            with self.assertRaises(DependencyError) as raised:
+                _extract_archive(archive_path, secure_staging)
+
+            self.assertIs(
+                type(raised.exception.__cause__), tarfile.LinkOutsideDestinationError
+            )
+            self.assertFalse(
+                (secure_area / "escaped-symlink-target" / "sentinel").exists()
+            )
+            escaped_sentinels = [
+                path
+                for path in secure_area.rglob("sentinel")
+                if not path.is_relative_to(secure_staging)
+            ]
+            self.assertEqual([], escaped_sentinels)
 
     def test_special_device_archive_is_rejected_without_device_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "TraceChaser"
-            root.mkdir()
+            root = Path(temporary)
             payload = io.BytesIO()
             with tarfile.open(fileobj=payload, mode="w:gz") as archive:
-                member = tarfile.TarInfo("BizHawk-2.11-linux-x64/device")
-                member.type = tarfile.CHRTYPE
-                member.devmajor = 1
-                member.devminor = 3
+                member = tarfile.TarInfo("special-entry")
+                member.type = tarfile.FIFOTYPE
                 archive.addfile(member)
-            archive_path = Path(temporary) / "device.tar.gz"
+            archive_path = Path(temporary) / "special.tar.gz"
             archive_path.write_bytes(payload.getvalue())
-            lock = _synthetic_lock(hashlib.sha256(payload.getvalue()).hexdigest())
+            control_staging = root / "control" / "staging"
+            control_staging.mkdir(parents=True)
 
-            with self.assertRaises(DependencyError):
-                acquire_archive(root, lock, archive_path=archive_path)
+            def require_rejection(extractor) -> None:
+                with self.assertRaises(DependencyError):
+                    extractor(archive_path, control_staging)
 
-            self.assertFalse(
-                (root / ".dependencies" / "BizHawk-2.11-linux-x64" / "device").exists()
+            # Mutation control: fully_trusted creates the forbidden FIFO.
+            with self.assertRaises(AssertionError):
+                require_rejection(_extract_fully_trusted)
+            self.assertTrue(
+                stat.S_ISFIFO(os.lstat(control_staging / "special-entry").st_mode)
             )
+
+            secure_area = root / "secure"
+            secure_staging = secure_area / "staging"
+            secure_staging.mkdir(parents=True)
+            with self.assertRaises(DependencyError) as raised:
+                _extract_archive(archive_path, secure_staging)
+
+            self.assertIs(
+                type(raised.exception.__cause__), tarfile.SpecialFileError
+            )
+            self.assertFalse((secure_staging / "special-entry").exists())
+            escaped_sentinels = [
+                path
+                for path in secure_area.rglob("sentinel")
+                if not path.is_relative_to(secure_staging)
+            ]
+            self.assertEqual([], escaped_sentinels)
 
     def test_offline_archive_is_verified_staged_and_published_only_under_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -551,7 +726,7 @@ class AcquisitionTests(unittest.TestCase):
                     ("dll/NLua.dll", b"nlua"),
                     (
                         "Lua/GBA/SonicAdvance_CamHack.lua",
-                        b"client.invisibleemulation",
+                        b"client.invisibleemulation(true)\n",
                     ),
                 ):
                     info = tarfile.TarInfo(

@@ -20,6 +20,7 @@ NON_API_EVENT_FIELDS = frozenset(
         "event.source_cpu",
     }
 )
+LUA_IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
 
 
 def _long_bracket_close(source: str, start: int) -> str | None:
@@ -96,6 +97,18 @@ def strip_lua_comments_and_strings(source: str) -> str:
         executable.append(current)
         index += 1
     return "".join(executable)
+
+
+def has_lua_api_call(source: str, api: str) -> bool:
+    """Recognize one exact namespace.method( token sequence in executable Lua."""
+    api_match = re.fullmatch(rf"({LUA_IDENTIFIER})\.({LUA_IDENTIFIER})", api)
+    if api_match is None:
+        return False
+    namespace, method = map(re.escape, api_match.groups())
+    executable = strip_lua_comments_and_strings(source)
+    return re.search(
+        rf"(?<![A-Za-z0-9_]){namespace}\s*\.\s*{method}\s*\(", executable
+    ) is not None
 
 
 def collect_lua_api_references(

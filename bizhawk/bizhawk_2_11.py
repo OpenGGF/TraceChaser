@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Callable
 
 if __package__:
-    from bizhawk.lua_source import strip_lua_comments_and_strings
+    from bizhawk.lua_source import has_lua_api_call
 else:
-    from lua_source import strip_lua_comments_and_strings
+    from lua_source import has_lua_api_call
 
 
 TRACECHASER_ROOT = Path(__file__).resolve().parents[1]
@@ -292,8 +292,7 @@ def preflight_installation(
             if not isinstance(example_path, str) or not isinstance(example_marker, str):
                 raise DependencyError(f"Lua capability example contract is malformed: {api}")
             example_source = (resolved_home / example_path).read_text(encoding="utf-8")
-            executable_example = strip_lua_comments_and_strings(example_source)
-            if example_marker not in executable_example:
+            if not has_lua_api_call(example_source, example_marker):
                 raise DependencyError(
                     f"required Lua capability example is unavailable: {api}: "
                     f"detected raw='missing'; expected raw={example_marker!r}"
@@ -390,7 +389,8 @@ def _publish_directory_noreplace(staged: Path, destination: Path) -> None:
     detected_errno = ctypes.get_errno()
     if detected_errno in (errno.EEXIST, errno.ENOTEMPTY):
         raise DependencyError(
-            f"BizHawk destination appeared and was left untouched: {destination}"
+            f"BizHawk destination appeared and was left untouched: {destination}: "
+            f"detected errno={detected_errno} ({os.strerror(detected_errno)})"
         )
     if detected_errno in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
         raise DependencyError(
