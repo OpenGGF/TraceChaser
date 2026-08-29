@@ -28,20 +28,20 @@
     ],
     "native_artifacts": {
       "BizHawk.Headless.Gpgx.Tests.exe": {
-        "sha256": "8037fd404b34175f6bcda9fe279248914ed1e7a942cf83eff0443eb57511ce61",
-        "size": 1030656
+        "sha256": "c04978da9d6c6eb287fc554de2078fc90bd63c4da5cafce03a5cc7f3c72882a4",
+        "size": 1031168
       },
       "BizHawk.Headless.Gpgx.Tests.pdb": {
-        "sha256": "2016799266bbec029ddb9dd6d504ade46f43d4817da9e0f0753a04f772e4a75b",
-        "size": 243076
+        "sha256": "4546e24c4ef2b5a95667d40cfba7ef96c5e594eeeef22ab3436340b86879d86a",
+        "size": 243176
       },
       "BizHawk.Headless.Gpgx.exe": {
-        "sha256": "4ffa855031e4b49d440059d91213240f40570f1308efc6370262a948e102e0c1",
-        "size": 538624
+        "sha256": "363e27d31dd992f7954a57f8497b1bb4c26b63ac37765203dbdfd41a838c427a",
+        "size": 539136
       },
       "BizHawk.Headless.Gpgx.pdb": {
-        "sha256": "1249f5c2722b33f70a8f2a353be0758b577d55654f2d79786dc6822637e92c10",
-        "size": 158264
+        "sha256": "b0bb6688a1441d787469a0147b5a011ee8a5a2b0db0c1d23b00027825a4703d0",
+        "size": 158384
       }
     },
     "bizhawk": {
@@ -140,10 +140,10 @@
         "invocations": 156,
         "note": "The earlier Task 1 statement of 150 tests was a mistaken line count. Reproduction of immutable OpenGGF commit 41828f10998f531e614d855c858ba1b26429d757 with all verified ROMs selected 156 invocations representing 153 distinct tests; three TraceCli S3K complete-run cases overlapped the substring selectors. Immutable OpenGGF provenance above remains unchanged."
       },
-      "reason": "Task 9 fresh-clone preflight exposed OpenGGF-relative native-test fixtures, a legacy wrapper-literal assumption, and an exit-code-only native gate that accepted missing-ROM skips. The corrected standalone boundary propagates the explicit verified ROM map, consumes machine-readable outcomes, fails on every skip, and uses ten disjoint identity-locked selectors. Its two additions over the 153-test OpenGGF boundary are the external canonical-fixture-root guard and the canonical producer-path alias guard.",
-      "source_commit": "ebc345e6c43453269b269ee5d08c2fc9c64a7ac4",
+      "reason": "Task 9 fresh-clone preflight exposed OpenGGF-relative native-test fixtures, a legacy wrapper-literal assumption, an exit-code-only native gate that accepted missing-ROM skips, and a canonical GHZ1 reader check still derived from the former OpenGGF assembly ancestry. The corrected standalone boundary propagates the explicit verified ROM and fixture maps, derives canonical movie identity from the explicit external fixture root, consumes machine-readable outcomes, fails on every skip, and uses ten disjoint identity-locked selectors. Its two additions over the 153-test OpenGGF boundary are the external canonical-fixture-root guard and the canonical producer-path alias guard.",
+      "source_commit": "a35d4aec1025ff0c3d5a9782bc76a930b9a5b01d",
       "source_diff_base_commit": "7031acc7d21436ca4a649ae455601c2ece79bfeb",
-      "source_diff_sha256": "ddfe741c0991606a8c5f9a3c3bb24a2fcb1b8e7866bae67703c9403a76dedd9f",
+      "source_diff_sha256": "880bd3653eb33f21eb5cd36082a6c81aaf0ef33dbbb8e8cb888d5fc71b450da4",
       "native_test_inventory": [
         {"mode": "name-prefix", "value": "Bk2Reader", "expected_count": 24, "expected_names_sha256": "349b1edad99d1a17c56561260af94100811b9b7e2a2e6214b022d643504db79e"},
         {"mode": "name-prefix", "value": "S1TraceCaptureRunner", "expected_count": 8, "expected_names_sha256": "be6ef691400ea2c5cb72d56ec4b13fee79c7ec88039fd3b50c4917a14ae288dd"},
