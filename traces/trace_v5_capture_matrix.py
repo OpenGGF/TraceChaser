@@ -307,6 +307,112 @@ def _verify_locked_repository_file(
     return content
 
 
+def _read_committed_identity(
+    repository_root: Path,
+    source_commit: str,
+    relative: str,
+    expected_sha256: str,
+    description: str,
+) -> bytes:
+    if not relative or len(expected_sha256) != 64:
+        raise ValueError(f"BizHawk {description} identity is missing")
+    try:
+        content = subprocess.run(
+            ["git", "-C", str(repository_root), "show", f"{source_commit}:{relative}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"BizHawk {description} identity mismatch") from error
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise ValueError(f"BizHawk {description} identity mismatch")
+    return content
+
+
+def _verify_runtime_archive_authority(
+    repository_root: Path,
+    source_commit: str,
+    binding: dict[str, Any],
+    archive_lock: dict[str, Any],
+) -> None:
+    legacy_path = archive_lock.get("path")
+    legacy_sha256 = archive_lock.get("sha256")
+    current_path = archive_lock.get("tracechaser_path")
+    current_sha256 = archive_lock.get("tracechaser_sha256")
+    if not all(isinstance(value, str) and value for value in (
+        legacy_path, legacy_sha256, current_path, current_sha256
+    )):
+        raise ValueError("BizHawk legacy/current archive provenance is missing")
+    if current_path != "dependencies/bizhawk-2.11-linux-x64.lock.json":
+        if current_path == legacy_path:
+            raise ValueError("legacy and current archive provenance must remain distinct")
+        raise ValueError("BizHawk runtime archive lock path is unsupported")
+    if current_path == legacy_path or current_sha256 == legacy_sha256:
+        raise ValueError("legacy and current archive provenance must remain distinct")
+
+    runtime_lock_bytes = _read_committed_identity(
+        repository_root,
+        source_commit,
+        current_path,
+        current_sha256,
+        "runtime archive lock",
+    )
+    _validate_runtime_archive_lock(binding, archive_lock, runtime_lock_bytes)
+
+    wrapper = binding.get("acquisition_wrapper")
+    if not isinstance(wrapper, dict):
+        raise ValueError("BizHawk acquisition wrapper contract is missing")
+    wrapper_path = wrapper.get("path")
+    implementation_path = wrapper.get("implementation_path")
+    if (
+        wrapper_path != "bizhawk/fetch_bizhawk_2_11_linux.sh"
+        or implementation_path != "bizhawk/bizhawk_2_11.py"
+    ):
+        raise ValueError("BizHawk acquisition wrapper contract mismatch")
+    wrapper_bytes = _read_committed_identity(
+        repository_root,
+        source_commit,
+        wrapper_path,
+        wrapper.get("sha256", ""),
+        "acquisition wrapper",
+    )
+    implementation_bytes = _read_committed_identity(
+        repository_root,
+        source_commit,
+        implementation_path,
+        wrapper.get("implementation_sha256", ""),
+        "acquisition implementation",
+    )
+    wrapper_text = wrapper_bytes.decode("utf-8", errors="strict")
+    implementation_text = implementation_bytes.decode("utf-8", errors="strict")
+    if '"$script_dir/bizhawk_2_11.py" acquire' not in wrapper_text:
+        raise ValueError("BizHawk acquisition wrapper contract mismatch")
+    for token in ('"dependencies"', '"bizhawk-2.11-linux-x64.lock.json"'):
+        if token not in implementation_text:
+            raise ValueError("BizHawk acquisition wrapper contract mismatch")
+
+
+def _validate_runtime_archive_lock(
+    binding: dict[str, Any],
+    archive_lock: dict[str, Any],
+    runtime_lock_bytes: bytes,
+) -> None:
+    try:
+        runtime_lock = json.loads(runtime_lock_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("BizHawk runtime archive lock contract mismatch") from error
+    release = runtime_lock.get("release")
+    if (
+        runtime_lock.get("schema") != "tracechaser.bizhawk-runtime-archive-lock.v1"
+        or runtime_lock.get("consumer") != "official-linux-runtime"
+        or not isinstance(release, dict)
+        or release.get("version") != binding.get("version")
+        or release.get("archive_name") != archive_lock.get("archive_name")
+        or release.get("sha256") != archive_lock.get("archive_sha256")
+    ):
+        raise ValueError("BizHawk runtime archive lock contract mismatch")
+
+
 def verify_bizhawk_installation(
     repository_root: Path,
     bizhawk_home: Path,
@@ -320,15 +426,12 @@ def verify_bizhawk_installation(
     source_lock = binding.get("source_lock")
     if not isinstance(archive_lock, dict) or not isinstance(source_lock, dict):
         raise ValueError("BizHawk archive/source lock is missing")
-    archive_bytes = _verify_locked_repository_file(repository_root, archive_lock, "archive", source_commit)
+    _verify_runtime_archive_authority(repository_root, source_commit, binding, archive_lock)
     _verify_locked_repository_file(repository_root, source_lock, "source", source_commit)
     archive_name = archive_lock.get("archive_name")
     archive_sha256 = archive_lock.get("archive_sha256")
     if not isinstance(archive_name, str) or not isinstance(archive_sha256, str):
         raise ValueError("BizHawk archive lock contract is missing")
-    archive_text = archive_bytes.decode("utf-8", errors="strict")
-    if archive_name not in archive_text or archive_sha256 not in archive_text:
-        raise ValueError("BizHawk archive lock contract mismatch")
 
     runtime_inputs = binding.get("runtime_inputs")
     if not isinstance(runtime_inputs, dict) or not runtime_inputs:

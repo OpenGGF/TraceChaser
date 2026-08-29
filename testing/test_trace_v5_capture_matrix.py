@@ -24,6 +24,7 @@ from traces.trace_v5_capture_matrix import (
     verify_movies,
     verify_roms,
     verify_extraction_freeze,
+    _validate_runtime_archive_lock,
 )
 
 
@@ -286,6 +287,51 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 build_test_runner=lambda *_: {"exit_code": 0, "artifacts": wrong_artifacts},
             )
 
+    def test_runtime_archive_authority_rejects_lock_wrapper_and_provenance_substitution(self) -> None:
+        repository, bizhawk_home, document = self._freeze_document()
+        binding = document["freeze"]["bizhawk"]
+        current_lock = binding["archive_lock"]
+
+        cases = []
+        tampered_identity = copy.deepcopy(document)
+        tampered_identity["freeze"]["bizhawk"]["archive_lock"]["tracechaser_sha256"] = "0" * 64
+        cases.append(("tampered lock identity", tampered_identity, "runtime archive lock identity mismatch"))
+
+        bad_lock = repository / "dependencies" / "bad-runtime.lock.json"
+        with self.assertRaisesRegex(ValueError, "runtime archive lock contract mismatch"):
+            _validate_runtime_archive_lock(binding, current_lock, bad_lock.read_bytes())
+
+        wrong_wrapper = copy.deepcopy(document)
+        bad_wrapper = repository / "bizhawk" / "bad-fetch.sh"
+        wrong_wrapper["freeze"]["bizhawk"]["acquisition_wrapper"].update({
+            "path": bad_wrapper.relative_to(repository).as_posix(),
+            "sha256": hashlib.sha256(bad_wrapper.read_bytes()).hexdigest(),
+        })
+        cases.append(("wrong wrapper relationship", wrong_wrapper, "acquisition wrapper contract mismatch"))
+
+        substituted = copy.deepcopy(document)
+        substituted["freeze"]["bizhawk"]["archive_lock"].update({
+            "tracechaser_path": current_lock["path"],
+            "tracechaser_sha256": current_lock["sha256"],
+        })
+        cases.append(("legacy provenance substitution", substituted, "legacy and current archive provenance must remain distinct"))
+
+        for name, changed, message in cases:
+            with self.subTest(name=name), patch(
+                "traces.trace_v5_capture_matrix._command_first_line",
+                side_effect=("synthetic mono", "synthetic xbuild", "synthetic roslyn"),
+            ), self.assertRaisesRegex(ValueError, message):
+                verify_extraction_freeze(
+                    repository,
+                    changed,
+                    bizhawk_home=bizhawk_home,
+                    fixture_root=self.fixture_root,
+                    build_test_runner=lambda *_: {
+                        "exit_code": 0,
+                        "artifacts": copy.deepcopy(changed["freeze"]["native_artifacts"]),
+                    },
+                )
+
     def _freeze_document(self) -> tuple[Path, Path, dict]:
         repository = self.root / "synthetic source repository"
         repository.mkdir()
@@ -294,10 +340,48 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.invalid"], check=True)
         source = repository / "source.txt"
         source.write_text("base\n", encoding="utf-8")
-        archive_lock = repository / "bizhawk-archive-lock.sh"
+        archive_lock = repository / "legacy" / "fetch_bizhawk_2_11_linux.sh"
+        archive_lock.parent.mkdir()
         archive_name = "BizHawk-2.11-linux-x64.tar.gz"
         archive_sha256 = "a" * 64
         archive_lock.write_text(f"{archive_name} {archive_sha256}\n", encoding="utf-8")
+        runtime_lock = repository / "dependencies" / "bizhawk-2.11-linux-x64.lock.json"
+        runtime_lock.parent.mkdir()
+        runtime_lock.write_text(json.dumps({
+            "schema": "tracechaser.bizhawk-runtime-archive-lock.v1",
+            "consumer": "official-linux-runtime",
+            "release": {
+                "version": "2.11",
+                "archive_name": archive_name,
+                "sha256": archive_sha256,
+            },
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        bad_runtime_lock = runtime_lock.parent / "bad-runtime.lock.json"
+        bad_runtime_lock.write_text(json.dumps({
+            "schema": "tracechaser.bizhawk-runtime-archive-lock.v1",
+            "consumer": "official-linux-runtime",
+            "release": {
+                "version": "2.12",
+                "archive_name": archive_name,
+                "sha256": archive_sha256,
+            },
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        acquisition_wrapper = repository / "bizhawk" / "fetch_bizhawk_2_11_linux.sh"
+        acquisition_wrapper.parent.mkdir()
+        acquisition_wrapper.write_text(
+            '#!/usr/bin/env bash\nexec python3 "$script_dir/bizhawk_2_11.py" acquire "$@"\n',
+            encoding="utf-8",
+        )
+        bad_wrapper = acquisition_wrapper.parent / "bad-fetch.sh"
+        bad_wrapper.write_text(
+            '#!/usr/bin/env bash\nexec python3 "$script_dir/not-the-lock-owner.py" acquire "$@"\n',
+            encoding="utf-8",
+        )
+        acquisition_implementation = acquisition_wrapper.parent / "bizhawk_2_11.py"
+        acquisition_implementation.write_text(
+            'TRACECHASER_ROOT / "dependencies" / "bizhawk-2.11-linux-x64.lock.json"\n',
+            encoding="utf-8",
+        )
         source_lock = repository / "source-lock.json"
         source_lock.write_text("{}\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
@@ -361,10 +445,18 @@ class TraceV5CaptureMatrixTests(unittest.TestCase):
                 "bizhawk": {
                     "version": "2.11",
                     "archive_lock": {
-                        "path": archive_lock.name,
+                        "path": archive_lock.relative_to(repository).as_posix(),
                         "sha256": hashlib.sha256(archive_lock.read_bytes()).hexdigest(),
+                        "tracechaser_path": runtime_lock.relative_to(repository).as_posix(),
+                        "tracechaser_sha256": hashlib.sha256(runtime_lock.read_bytes()).hexdigest(),
                         "archive_name": archive_name,
                         "archive_sha256": archive_sha256,
+                    },
+                    "acquisition_wrapper": {
+                        "path": acquisition_wrapper.relative_to(repository).as_posix(),
+                        "sha256": hashlib.sha256(acquisition_wrapper.read_bytes()).hexdigest(),
+                        "implementation_path": acquisition_implementation.relative_to(repository).as_posix(),
+                        "implementation_sha256": hashlib.sha256(acquisition_implementation.read_bytes()).hexdigest(),
                     },
                     "source_lock": {
                         "path": source_lock.name,
