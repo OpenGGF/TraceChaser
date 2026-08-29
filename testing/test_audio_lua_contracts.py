@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -232,8 +233,31 @@ class S1AudioParityProbeContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             home = root / "bizhawk"
-            home.mkdir()
-            (home / "EmuHawk.exe").write_text("", encoding="utf-8")
+            lock = json.loads(
+                (
+                    ROOT
+                    / "dependencies"
+                    / "bizhawk-2.11-linux-x64.lock.json"
+                ).read_text(encoding="utf-8")
+            )
+            for relative in lock["required_files"]:
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+            (home / "dll" / "BizHawk.Client.Common.dll").write_bytes(
+                b"\0".join(
+                    marker.encode("utf-8")
+                    for capability in lock["lua_capabilities"]
+                    for marker in (
+                        capability["library_marker"], capability["method_marker"]
+                    )
+                )
+            )
+            for capability in lock["lua_capabilities"]:
+                if "example_path" in capability:
+                    (home / capability["example_path"]).write_text(
+                        capability["example_marker"], encoding="utf-8"
+                    )
             lua = root / "probe.lua"
             lua.write_text("return true\n", encoding="utf-8")
             movie = root / "movie.bk2"
@@ -246,6 +270,13 @@ class S1AudioParityProbeContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_mono.chmod(0o700)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            fake_monodis = fake_bin / "monodis"
+            fake_monodis.write_text(
+                "#!/bin/sh\nprintf 'Version: 2.11.0.0\\n'\n", encoding="utf-8"
+            )
+            fake_monodis.chmod(0o700)
             work = root / "work"
             work.mkdir()
             environment = os.environ.copy()
@@ -255,6 +286,7 @@ class S1AudioParityProbeContractTests(unittest.TestCase):
                     "MONO_BIN": str(fake_mono),
                     "OGGF_WORKDIR": str(work),
                     "OGGF_BIZHAWK_MOVIE_SHA256": "caller-value-must-not-win",
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
                 }
             )
             environment.pop("OGGF_TRACE_OUTPUT_DIR", None)

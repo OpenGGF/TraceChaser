@@ -28,6 +28,9 @@ command -v xbuild >/dev/null || {
   return 1 2>/dev/null || exit 1
 }
 
+"$BIZHAWK_REPO_ROOT/bizhawk/preflight_bizhawk_2_11.sh" \
+  --bizhawk-home "$BIZHAWK_HOME" >/dev/null
+
 for required_file in \
   BizHawk.Common.dll \
   BizHawk.Emulation.Common.dll \

@@ -1,0 +1,72 @@
+{
+  "schema": "tracechaser.bizhawk-runtime-archive-lock.v1",
+  "consumer": "official-linux-runtime",
+  "release": {
+    "version": "2.11",
+    "assembly_version": "2.11.0.0",
+    "assembly_version_raw": "Version: 2.11.0.0",
+    "archive_name": "BizHawk-2.11-linux-x64.tar.gz",
+    "official_url": "https://github.com/TASEmulators/BizHawk/releases/download/2.11/BizHawk-2.11-linux-x64.tar.gz",
+    "sha256": "cdaf9650d880bae660d63a388430f630b8d8a96b1ba59ebf0e0195a645c3bab8",
+    "install_directory": "BizHawk-2.11-linux-x64"
+  },
+  "runtime_consumers": [
+    "bizhawk Lua recorders and probes through EmuHawk",
+    "bizhawk-headless stock managed assemblies and GPGX core"
+  ],
+  "versioned_files": [
+    "EmuHawk.exe",
+    "dll/BizHawk.Client.Common.dll",
+    "dll/BizHawk.Common.dll",
+    "dll/BizHawk.Emulation.Common.dll",
+    "dll/BizHawk.Emulation.Cores.dll",
+    "dll/BizHawk.Emulation.DiscSystem.dll",
+    "dll/BizHawk.BizInvoke.dll"
+  ],
+  "required_files": [
+    "EmuHawk.exe",
+    "dll/BizHawk.Client.Common.dll",
+    "dll/BizHawk.Common.dll",
+    "dll/BizHawk.Emulation.Common.dll",
+    "dll/BizHawk.Emulation.Cores.dll",
+    "dll/BizHawk.Emulation.DiscSystem.dll",
+    "dll/BizHawk.BizInvoke.dll",
+    "dll/Newtonsoft.Json.dll",
+    "dll/NLua.dll",
+    "dll/gpgx.wbx.zst",
+    "dll/libwaterboxhost.so",
+    "Lua/GBA/SonicAdvance_CamHack.lua"
+  ],
+  "lua_capabilities": [
+    {"api": "client.SetSoundOn", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "SetSoundOn"},
+    {"api": "client.exit", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "exit"},
+    {"api": "client.invisibleemulation", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "invisibleemulation", "example_path": "Lua/GBA/SonicAdvance_CamHack.lua", "example_marker": "client.invisibleemulation"},
+    {"api": "client.ispaused", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "ispaused"},
+    {"api": "client.pause", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "pause"},
+    {"api": "client.speedmode", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "speedmode"},
+    {"api": "client.unpause", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "ClientLuaLibrary", "method_marker": "unpause"},
+    {"api": "emu.frameadvance", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "frameadvance"},
+    {"api": "emu.framecount", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "framecount"},
+    {"api": "emu.getregister", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "getregister"},
+    {"api": "emu.islagged", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "islagged"},
+    {"api": "emu.lagcount", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "lagcount"},
+    {"api": "emu.limitframerate", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EmulationLuaLibrary", "method_marker": "limitframerate"},
+    {"api": "event.onmemoryexecute", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EventsLuaLibrary", "method_marker": "onmemoryexecute"},
+    {"api": "event.onmemorywrite", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EventsLuaLibrary", "method_marker": "onmemorywrite"},
+    {"api": "event.unregisterbyid", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EventsLuaLibrary", "method_marker": "unregisterbyid"},
+    {"api": "event.unregisterbyname", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "EventsLuaLibrary", "method_marker": "unregisterbyname"},
+    {"api": "joypad.get", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "JoypadLuaLibrary", "method_marker": "get"},
+    {"api": "mainmemory.read_s16_be", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MainMemoryLuaLibrary", "method_marker": "read_s16_be"},
+    {"api": "mainmemory.read_s8", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MainMemoryLuaLibrary", "method_marker": "read_s8"},
+    {"api": "mainmemory.read_u16_be", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MainMemoryLuaLibrary", "method_marker": "read_u16_be"},
+    {"api": "mainmemory.read_u32_be", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MainMemoryLuaLibrary", "method_marker": "read_u32_be"},
+    {"api": "mainmemory.read_u8", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MainMemoryLuaLibrary", "method_marker": "read_u8"},
+    {"api": "memory.getmemorydomainsize", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MemoryLuaLibrary", "method_marker": "getmemorydomainsize"},
+    {"api": "memory.read_u8", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MemoryLuaLibrary", "method_marker": "read_u8"},
+    {"api": "movie.getheader", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MovieLuaLibrary", "method_marker": "getheader"},
+    {"api": "movie.getinput", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MovieLuaLibrary", "method_marker": "getinput"},
+    {"api": "movie.isloaded", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MovieLuaLibrary", "method_marker": "isloaded"},
+    {"api": "movie.length", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MovieLuaLibrary", "method_marker": "length"},
+    {"api": "movie.mode", "assembly": "dll/BizHawk.Client.Common.dll", "library_marker": "MovieLuaLibrary", "method_marker": "mode"}
+  ]
+}

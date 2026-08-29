@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from testing.test_audio_lua_contracts import lua_54_or_skip
+if __package__:
+    from testing.test_audio_lua_contracts import lua_54_or_skip
+else:
+    from test_audio_lua_contracts import lua_54_or_skip
 
 
 ROOT = Path(__file__).resolve().parents[1]

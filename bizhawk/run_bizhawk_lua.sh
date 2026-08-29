@@ -74,6 +74,7 @@ if [ -n "${OGGF_TRACE_OUTPUT_DIR:-}" ]; then
 fi
 BIZHAWK_HOME="${BIZHAWK_HOME:-"$TRACECHASER_ROOT/.dependencies/BizHawk-2.11-linux-x64"}"
 EMUHAWK_EXE="$BIZHAWK_HOME/EmuHawk.exe"
+"$SCRIPT_DIR/preflight_bizhawk_2_11.sh" --bizhawk-home "$BIZHAWK_HOME" >/dev/null
 # Resolve mono to an absolute path so the launcher is independent of PATH (a
 # non-login/background shell may not have /usr/bin on PATH).
 MONO_BIN="${MONO_BIN:-$(command -v mono || true)}"

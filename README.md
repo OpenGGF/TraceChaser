@@ -32,12 +32,14 @@ outside both the TraceChaser and OpenGGF repositories.
 
 The history-preserving import and the portable path/input boundary are documented
 in [History import](docs/history-import.md) and
-[Migration from OpenGGF](docs/migration-from-openggf.md). The following reviewed
-workflow documents are forthcoming; none of these links represents a currently
-shipped command or support promise:
+[Migration from OpenGGF](docs/migration-from-openggf.md).
 
-- Installation: [BizHawk 2.11](docs/install-bizhawk-2.11.md) and
-  [scratch and security policy](docs/scratch-and-security.md).
+The supported BizHawk dependency workflow is documented in
+[Install and verify BizHawk 2.11](docs/install-bizhawk-2.11.md). The following
+additional workflow documents are forthcoming; none of these links represents
+a currently shipped command or support promise:
+
+- Installation: [scratch and security policy](docs/scratch-and-security.md).
 - Capture (standard and complete-run modes where supported):
   [Sonic 1](docs/capture-s1.md), [Sonic 2](docs/capture-s2.md),
   [Sonic 3 & Knuckles](docs/capture-s3k.md),

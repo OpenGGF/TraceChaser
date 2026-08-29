@@ -6,7 +6,11 @@ RAM snapshot events without changing chip writes, emulated cycles, CPU results,
 or savestated state. The observer is disabled until explicitly configured.
 
 The supported managed integration is `REFLECTION` against the exact stock
-BizHawk assemblies locked by Task 6. No patched managed DLL is built or shipped.
+BizHawk assemblies from the separately locked official Linux runtime described
+in [`../../../docs/install-bizhawk-2.11.md`](../../../docs/install-bizhawk-2.11.md).
+This directory's `source-lock.json` is consumed only by the reproducible native
+observer source/build workflow; it is not the runtime archive-install lock and
+the two locks must not be combined. No patched managed DLL is built or shipped.
 The native API reports ABI v4 while continuing to accept exact legacy v1,
 v2, and v3 configurations. Events remain little-endian, 32 bytes each, with a fixed
 capacity of 65,536. ABI v2 added profile-gated pre-arm filtering and a one-shot

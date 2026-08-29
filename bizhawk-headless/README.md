@@ -52,7 +52,9 @@ unmaintained Lua is fine; it is not the fixture publisher.
   `test.sh` and `run.sh` both rebuild through this contract before execution.
 - A **BizHawk 2.11 distribution**. `common-env.sh` defaults `BIZHAWK_HOME` to the
   checkout-local `.dependencies/BizHawk-2.11-linux-x64`, validates that it is an existing
-  absolute path, and checks the required DLLs are present under `dll/`.
+  absolute path, and runs the shared exact-version/runtime-capability preflight
+  before checking the required DLLs under `dll/`. Install or select it using
+  [`../docs/install-bizhawk-2.11.md`](../docs/install-bizhawk-2.11.md).
 - **User-supplied ROMs**, passed by environment variable and SHA-1 verified:
   `S1_ROM_PATH`, `S2_ROM_PATH`, `S3K_ROM_PATH`. No ROM is committed to this repo.
 

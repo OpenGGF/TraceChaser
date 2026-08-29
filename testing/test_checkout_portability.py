@@ -184,19 +184,37 @@ class CheckoutPortabilityTests(unittest.TestCase):
 
     def test_native_default_bizhawk_home_is_checkout_local_and_space_safe(self) -> None:
         dependency = self.checkout / ".dependencies" / "BizHawk-2.11-linux-x64"
-        (dependency / "dll").mkdir(parents=True)
-        for name in (
-            "BizHawk.Common.dll", "BizHawk.Emulation.Common.dll",
-            "BizHawk.Emulation.Cores.dll", "BizHawk.Emulation.DiscSystem.dll",
-            "BizHawk.BizInvoke.dll", "Newtonsoft.Json.dll", "gpgx.wbx.zst",
-            "libwaterboxhost.so",
-        ):
-            (dependency / "dll" / name).write_bytes(b"fixture")
+        lock = json.loads(
+            (
+                self.checkout
+                / "dependencies"
+                / "bizhawk-2.11-linux-x64.lock.json"
+            ).read_text(encoding="utf-8")
+        )
+        for relative in lock["required_files"]:
+            path = dependency / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture")
+        (dependency / "dll" / "BizHawk.Client.Common.dll").write_bytes(
+            b"\0".join(
+                marker.encode("utf-8")
+                for capability in lock["lua_capabilities"]
+                for marker in (
+                    capability["library_marker"], capability["method_marker"]
+                )
+            )
+        )
+        for capability in lock["lua_capabilities"]:
+            if "example_path" in capability:
+                (dependency / capability["example_path"]).write_text(
+                    capability["example_marker"], encoding="utf-8"
+                )
         fake_bin = self.root / "fake tool bin"
         fake_bin.mkdir()
-        for command in ("mono", "xbuild"):
+        for command in ("mono", "xbuild", "monodis"):
             path = fake_bin / command
-            path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            body = "printf 'Version: 2.11.0.0\\n'" if command == "monodis" else "exit 0"
+            path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
             path.chmod(0o755)
         environment = os.environ.copy()
         environment.pop("BIZHAWK_HOME", None)

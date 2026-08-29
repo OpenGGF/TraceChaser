@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import unittest
 from pathlib import Path
@@ -241,15 +243,29 @@ class BizHawkLuaToolingContractTests(unittest.TestCase):
     def test_linux_tooling_pins_recorder_compatible_211(self) -> None:
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         fetch = _source("fetch_bizhawk_2_11_linux.sh")
+        preflight = _source("preflight_bizhawk_2_11.sh")
+        lock = json.loads(
+            (ROOT / "dependencies" / "bizhawk-2.11-linux-x64.lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
         launcher = _source("run_bizhawk_lua.sh")
         readme = _source("README.md")
         self.assertIn(".dependencies/", ignore)
-        self.assertIn('BIZHAWK_VERSION="2.11"', fetch)
-        self.assertIn("BizHawk-2.11-linux-x64.tar.gz", fetch)
-        self.assertIn("cdaf9650d880bae660d63a388430f630b8d8a96b1ba59ebf0e0195a645c3bab8", fetch)
-        self.assertIn("client.invisibleemulation", fetch)
-        self.assertIn('[[ -e "${destination}" || -L "${destination}" ]]', fetch)
-        self.assertIn("mv --no-clobber --no-target-directory", fetch)
+        self.assertEqual("2.11", lock["release"]["version"])
+        self.assertEqual("BizHawk-2.11-linux-x64.tar.gz", lock["release"]["archive_name"])
+        self.assertEqual(
+            "cdaf9650d880bae660d63a388430f630b8d8a96b1ba59ebf0e0195a645c3bab8",
+            lock["release"]["sha256"],
+        )
+        self.assertIn(
+            "client.invisibleemulation",
+            {capability["api"] for capability in lock["lua_capabilities"]},
+        )
+        self.assertIn('bizhawk_2_11.py" acquire', fetch)
+        self.assertIn('bizhawk_2_11.py" preflight', preflight)
+        self.assertTrue(os.access(BIZHAWK / "fetch_bizhawk_2_11_linux.sh", os.X_OK))
+        self.assertTrue(os.access(BIZHAWK / "preflight_bizhawk_2_11.sh", os.X_OK))
         self.assertIn(".dependencies/BizHawk-2.11-linux-x64", launcher)
         self.assertNotIn(".dependencies/BizHawk-*-linux-x64", launcher)
         self.assertNotIn(".dependencies/BizHawk-2.11.1-linux-x64", launcher)
