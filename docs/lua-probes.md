@@ -12,20 +12,24 @@ Create a fresh external work/output directory, then launch a probe with explicit
 input boundaries:
 
 ```bash
+mkdir -p /absolute/scratch/probe-work /absolute/scratch/probe-result
 export BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64
 export OGGF_INPUT_REPOSITORY_ROOT=/absolute/OpenGGF
-export OGGF_TRACE_OUTPUT_DIR=/absolute/scratch/probe-result
 export OGGF_WORKDIR=/absolute/scratch/probe-work
+export OGGF_OUT=/absolute/scratch/probe-result/example-stage.log
 bizhawk/run_bizhawk_lua.sh \
-  bizhawk/probes/example.lua \
+  bizhawk/probes/example_stage_probe.lua \
   /absolute/movies/route.bk2 \
   /absolute/roms/game.gen
 ```
 
-Replace `example.lua` with an actual recursively namespaced file below
-`bizhawk/probes/`. The launcher hashes the movie bytes it actually passes to
-EmuHawk, validates output aliases, clears inherited common-module overrides,
-and supplies the repository-owned `probe_runtime.lua`.
+The checked-in example waits for S3K AIZ1 and records its first reviewed
+`Process_Sprites` hook. Replace it with another actual recursively namespaced
+file below `bizhawk/probes/` as needed. `OGGF_OUT` is the exact file opened by
+`ProbeRuntime`; its parent must already exist. The launcher passes that file
+through the producer/consumer external-output alias guard before BizHawk starts,
+hashes the movie bytes it actually passes to EmuHawk, clears inherited
+common-module overrides, and supplies the repository-owned `probe_runtime.lua`.
 
 On Linux, EmuHawk still requires a reachable X display even with chromeless
 rendering. Use a trusted Xvfb/display configuration. Set

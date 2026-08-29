@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from testing.source_only_ci import audit_unittest_result
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "source-only.yml"
@@ -48,8 +50,10 @@ class SourceOnlyWorkflowContractTests(unittest.TestCase):
             "git diff --check",
             "rg_status",
             "monodis_status",
-            "PowerShell is unavailable on PATH",
-            "pwsh is unavailable",
+            "dotnet tool install --tool-path \"$RUNNER_TEMP/powershell\" PowerShell --version 7.4.7",
+            "PowerShell 7.4.7",
+            "Mono JIT compiler version 6\\.12\\.0",
+            "python3 testing/source_only_ci.py",
         )
         for token in required:
             with self.subTest(token=token):
@@ -60,6 +64,31 @@ class SourceOnlyWorkflowContractTests(unittest.TestCase):
         tests = source.index("python3 -m unittest discover")
         self.assertLess(provision, checkout)
         self.assertLess(checkout, tests)
+        self.assertNotIn("PowerShell is unavailable", source)
+        self.assertNotIn("pwsh is unavailable", source)
+        self.assertNotIn("allowed skip", source.lower())
+
+    def test_unittest_audit_rejects_every_skip_and_nonzero_status(self) -> None:
+        clean = "Ran 180 tests in 1.0s\n\nOK\n"
+        audit_unittest_result(clean, 0)
+        with self.assertRaisesRegex(ValueError, "skip"):
+            audit_unittest_result(
+                "test_x ... skipped 'pwsh is unavailable'\n"
+                "Ran 180 tests in 1.0s\n\nOK (skipped=1)\n",
+                0,
+            )
+        with self.assertRaisesRegex(ValueError, "status 1"):
+            audit_unittest_result(
+                "Ran 180 tests in 1.0s\n\nFAILED (errors=2, skipped=2)\n",
+                1,
+            )
+
+    def test_lua_probe_guide_uses_real_guarded_probe_contract(self) -> None:
+        guide = (ROOT / "docs" / "lua-probes.md").read_text(encoding="utf-8")
+        self.assertIn("bizhawk/probes/example_stage_probe.lua", guide)
+        self.assertIn("export OGGF_OUT=/absolute/scratch/probe-result/example-stage.log", guide)
+        self.assertNotIn("bizhawk/probes/example.lua", guide)
+        self.assertIn("OGGF_OUT", guide)
 
     def test_native_integration_is_optional_and_preflights_verified_cache(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
@@ -67,6 +96,12 @@ class SourceOnlyWorkflowContractTests(unittest.TestCase):
         self.assertIn("workflow_dispatch", native)
         self.assertIn("self-hosted", native)
         self.assertIn("bizhawk/preflight_bizhawk_2_11.sh", native)
+        self.assertIn("BIZHAWK_ARCHIVE", native)
+        self.assertIn("BizHawk-2.11-linux-x64.tar.gz", native)
+        self.assertIn("bizhawk/fetch_bizhawk_2_11_linux.sh", native)
+        self.assertIn("--archive \"$BIZHAWK_ARCHIVE\"", native)
+        self.assertLess(native.index("--archive \"$BIZHAWK_ARCHIVE\""),
+                        native.index("bizhawk/preflight_bizhawk_2_11.sh"))
         self.assertIn("BIZHAWK_HOME", native)
         self.assertIn("bizhawk-headless/test.sh", native)
         source_only = source[source.index("source-only:") : source.index("native-integration:")]

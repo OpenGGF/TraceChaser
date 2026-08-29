@@ -209,6 +209,39 @@ class OutputPolicyTests(unittest.TestCase):
         self.assertIn("outside", result.stdout + result.stderr)
         self.assertNotIn("BizHawk", result.stdout)
 
+    def test_probe_launcher_requires_and_guards_the_actual_oggf_out_file(self) -> None:
+        probe = ROOT / "bizhawk/probes/example_stage_probe.lua"
+        movie = self.consumer / "movie.bk2"
+        rom = self.consumer / "rom.gen"
+        movie.write_text("movie\n", encoding="utf-8")
+        rom.write_text("rom\n", encoding="utf-8")
+        base = os.environ.copy()
+        base.update({
+            "OGGF_INPUT_REPOSITORY_ROOT": str(self.consumer),
+            "OGGF_WORKDIR": str(self.external),
+        })
+
+        missing = subprocess.run(
+            [str(ROOT / "bizhawk/run_bizhawk_lua.sh"), str(probe),
+             str(movie), str(rom)],
+            env=base, text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(0, missing.returncode)
+        self.assertIn("OGGF_OUT", missing.stdout + missing.stderr)
+        self.assertNotIn("EmuHawk", missing.stdout + missing.stderr)
+
+        alias = self.root / "consumer output alias"
+        alias.symlink_to(self.consumer, target_is_directory=True)
+        guarded = base | {"OGGF_OUT": str(alias / "probe.log")}
+        rejected = subprocess.run(
+            [str(ROOT / "bizhawk/run_bizhawk_lua.sh"), str(probe),
+             str(movie), str(rom)],
+            env=guarded, text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("outside", rejected.stdout + rejected.stderr)
+        self.assertNotIn("EmuHawk", rejected.stdout + rejected.stderr)
+
     def test_native_and_audio_launchers_reject_proc_root_consumer_aliases(self) -> None:
         proc_alias = Path("/proc/self/root" + str(self.consumer / "capture"))
         fixture = self.consumer / "fixtures"

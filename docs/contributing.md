@@ -6,8 +6,10 @@ single live trace-v5 contract.
 
 ## Local source-only gate
 
-Use Python 3.12+, Lua 5.4, Bash, Git, ripgrep, Mono's `monodis`, and PowerShell
-when available. From a clean clone, run:
+The pinned Linux CI toolchain is Python 3.12, Lua 5.4, PowerShell 7.4.7,
+Mono 6.12.0, Bash, Git, and ripgrep 14. PowerShell is installed as the exact
+NuGet tool version before checkout; it is not inherited from the hosted-runner
+image. From a clean clone with that toolchain, run:
 
 ```bash
 LUA_BIN=lua5.4 python3 -m unittest discover -s testing -p 'test_*.py' -v
@@ -29,11 +31,11 @@ done < <(git ls-files -z -- '*.sh')
 test "$count" -gt 0
 ```
 
-The pinned GitHub source-only job expects no skips. Its only permitted
-conditional skips are the two PowerShell-specific checks when `pwsh` is absent:
-`test_windows_validator_accepts_nested_probe_and_ignores_long_bracket_decoys`
-and `test_all_shell_and_powershell_sources_parse_from_spaced_checkout`. Lua,
-Bash/coreutils, and `monodis` are provisioned; any other skip fails CI.
+The source-only job permits no test skips. It provisions and version-checks
+every selected external interpreter before checkout; a missing or wrong tool
+fails preflight before tests. The post-test auditor independently rejects a
+nonzero unittest status, any verbose skip line, a missing run summary, or any
+summary other than exact `OK`.
 
 When checking an optional search result, handle all ripgrep outcomes. Status 0
 means matches, 1 means no matches, and 2 or greater is an error; do not write

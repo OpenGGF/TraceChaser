@@ -24,15 +24,20 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y python3 lua5.4 mono-utils ripgrep
+          dotnet tool install --tool-path "$RUNNER_TEMP/powershell" PowerShell --version 7.4.7
+          echo "$RUNNER_TEMP/powershell" >>"$GITHUB_PATH"
           python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
           lua5.4 -v 2>&1 | rg '^Lua 5\.4(?:\.[0-9]+)?\b'
+          test "$("$RUNNER_TEMP/powershell/pwsh" -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()')" = "7.4.7"
           set +e
           monodis_output=$(monodis --version 2>&1)
           monodis_status=$?
           set -e
           test "$monodis_status" -eq 1
           printf '%s\n' "$monodis_output" | rg '^monodis -- Mono Common Intermediate Language Disassembler'
+          mono --version | rg '^Mono JIT compiler version 6\.12\.0\b'
           rg --version | rg '^ripgrep 14\.'
+          echo "source-only toolchain: Python 3.12; Lua 5.4; PowerShell 7.4.7; Mono 6.12.0; ripgrep 14"
 
       - name: Checkout complete reachable history
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -58,19 +63,11 @@ jobs:
           rg_status=$?
           set -e
           case "$rg_status" in
-            0) ;;
+            0) cat "$skips" >&2; echo "source-only tests must not skip" >&2; exit 1 ;;
             1) : >"$skips" ;;
             *) echo "ripgrep failed while accounting for unittest skips" >&2; exit "$rg_status" ;;
           esac
-
-          while IFS= read -r skipped; do
-            case "$skipped" in
-              *"test_windows_validator_accepts_nested_probe_and_ignores_long_bracket_decoys"*"skipped 'PowerShell is unavailable on PATH'") ;;
-              *"test_all_shell_and_powershell_sources_parse_from_spaced_checkout"*"skipped 'pwsh is unavailable'") ;;
-              *) echo "unexpected source-only skip: $skipped" >&2; exit 1 ;;
-            esac
-          done <"$skips"
-          exit "$test_status"
+          python3 testing/source_only_ci.py --log "$log" --status "$test_status"
 
       - name: Run current-tree repository policy
         run: python3 testing/repository_policy.py --root .
@@ -114,15 +111,20 @@ jobs:
     runs-on: [self-hosted, linux, x64, tracechaser-bizhawk-2.11]
     timeout-minutes: 45
     env:
-      BIZHAWK_HOME: ${{ runner.tool_cache }}/tracechaser/BizHawk-2.11-linux-x64
+      BIZHAWK_ARCHIVE: ${{ runner.tool_cache }}/tracechaser/BizHawk-2.11-linux-x64.tar.gz
+      BIZHAWK_HOME: ${{ github.workspace }}/.dependencies/BizHawk-2.11-linux-x64
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
-      - name: Verify the pre-provisioned runtime cache
-        run: bizhawk/preflight_bizhawk_2_11.sh --bizhawk-home "$BIZHAWK_HOME"
+      - name: Verify official archive identity and stage the runtime
+        run: |
+          set -euo pipefail
+          test -f "$BIZHAWK_ARCHIVE"
+          bizhawk/fetch_bizhawk_2_11_linux.sh --archive "$BIZHAWK_ARCHIVE"
+          bizhawk/preflight_bizhawk_2_11.sh --bizhawk-home "$BIZHAWK_HOME"
 
       - name: Run native source integration tests
         run: BIZHAWK_HOME="$BIZHAWK_HOME" bizhawk-headless/test.sh --no-gates

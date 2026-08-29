@@ -72,6 +72,19 @@ if [ -n "${OGGF_TRACE_OUTPUT_DIR:-}" ]; then
 		--output-root "$OGGF_TRACE_OUTPUT_DIR")
 	export OGGF_TRACE_OUTPUT_DIR
 fi
+case "$LUA_SCRIPT" in
+	"$SCRIPT_DIR/probes/"*.lua)
+		: "${OGGF_OUT:?set OGGF_OUT to an explicit absolute external diagnostic file}"
+		;;
+esac
+if [ -n "${OGGF_OUT:-}" ]; then
+	: "${OGGF_INPUT_REPOSITORY_ROOT:?set OGGF_INPUT_REPOSITORY_ROOT to the explicit consumer checkout}"
+	OGGF_OUT=$("$PYTHON_BIN" "$TRACECHASER_ROOT/traces/output_policy.py" \
+		--tracechaser-root "$TRACECHASER_ROOT" \
+		--input-repository-root "$OGGF_INPUT_REPOSITORY_ROOT" \
+		--output-root "$OGGF_OUT")
+	export OGGF_OUT
+fi
 BIZHAWK_HOME="${BIZHAWK_HOME:-"$TRACECHASER_ROOT/.dependencies/BizHawk-2.11-linux-x64"}"
 EMUHAWK_EXE="$BIZHAWK_HOME/EmuHawk.exe"
 "$SCRIPT_DIR/preflight_bizhawk_2_11.sh" --bizhawk-home "$BIZHAWK_HOME" >/dev/null

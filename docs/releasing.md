@@ -11,8 +11,10 @@ movies, captures, native build output, or OpenGGF fixtures.
    object, license/provenance notice, and conformance-pack exception.
 3. Validate the v5 conformance pack and reproduce it byte-for-byte into a new
    external directory.
-4. Preflight exact BizHawk 2.11 and run native source integration on the
-   labelled cache host. Run ROM-backed gates only with verified user-supplied
+4. On the labelled native host, take the pre-provisioned official 2.11 archive,
+   verify its SHA-256 against the runtime lock, extract it into the job-local
+   checkout dependency root, then preflight that installation before native
+   source integration. Run ROM-backed gates only with verified user-supplied
    inputs, and record skips separately from passes.
 5. Reproduce the reviewed capture matrix. Freeze ROM/movie identities, argv,
    counts, ordering, stored/logical hashes, normalized semantics, host/toolchain,
