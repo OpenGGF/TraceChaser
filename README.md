@@ -7,10 +7,8 @@ toolchain. It contains the native BizHawk/GPGX recorder, Lua and RetroArch
 capture utilities, and trace-v5 validation, comparison, compression, inventory,
 evidence, and publication tools.
 
-This repository is being prepared for its first release. OpenGGF integration,
-the verified BizHawk installer, and the workflow guides marked below are not yet
-available; their links reserve the reviewed documentation structure for the
-remaining extraction work.
+The repository is source-only. It does not make OpenGGF a build dependency and
+does not vendor the emulator or private capture inputs.
 
 ## Repository layout
 
@@ -35,9 +33,7 @@ in [History import](docs/history-import.md) and
 [Migration from OpenGGF](docs/migration-from-openggf.md).
 
 The supported BizHawk dependency workflow is documented in
-[Install and verify BizHawk 2.11](docs/install-bizhawk-2.11.md). The following
-additional workflow documents are forthcoming; none of these links represents
-a currently shipped command or support promise:
+[Install and verify BizHawk 2.11](docs/install-bizhawk-2.11.md).
 
 - Installation: [scratch and security policy](docs/scratch-and-security.md).
 - Capture (standard and complete-run modes where supported):
@@ -45,15 +41,10 @@ a currently shipped command or support promise:
   [Sonic 3 & Knuckles](docs/capture-s3k.md),
   [native headless workflows](docs/native-headless.md), and
   [Lua probes](docs/lua-probes.md).
-- Trace-v5 lifecycle: [producer contract](docs/trace-v5-contract.md),
-  [validation](docs/validation.md), [comparison](docs/comparison.md),
-  [compression](docs/compression.md), [inventory](docs/inventory.md), and
-  [publication](docs/publication.md).
-- Project work: [contributing](docs/contributing.md), [testing](docs/testing.md), and
+- Trace-v5 lifecycle: [contract](docs/trace-v5.md) and
+  [validation, comparison, compression, inventory, and publication](docs/validate-compare-publish.md).
+- Project work: [contributing](docs/contributing.md) and
   [releasing](docs/releasing.md).
-
-Until those guides land, treat the imported component READMEs as historical
-context and do not infer portable commands from their former OpenGGF paths.
 
 ## Repository policy
 
@@ -74,7 +65,7 @@ The sole raw-payload exception is the small conformance pack below
 stored size, and stored SHA-256; deterministic gzip members also require logical
 size and SHA-256. Both scanners enforce the relationship in the current index
 or in each historical commit independently. This admission policy does not
-define trace-v5 semantics; the forthcoming contract suite does that separately.
+define trace-v5 semantics; the executable conformance pack does that separately.
 
 ## License
 

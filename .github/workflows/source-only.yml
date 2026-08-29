@@ -1,0 +1,128 @@
+name: Source-only validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_native_integration:
+        description: Run the pre-provisioned BizHawk 2.11 native integration job
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install pinned source-only toolchain before checkout
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3 lua5.4 mono-utils ripgrep
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+          lua5.4 -v 2>&1 | rg '^Lua 5\.4(?:\.[0-9]+)?\b'
+          set +e
+          monodis_output=$(monodis --version 2>&1)
+          monodis_status=$?
+          set -e
+          test "$monodis_status" -eq 1
+          printf '%s\n' "$monodis_output" | rg '^monodis -- Mono Common Intermediate Language Disassembler'
+          rg --version | rg '^ripgrep 14\.'
+
+      - name: Checkout complete reachable history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Every following command is local-only. Do not add dependency installation,
+      # downloads, package actions, remote fetches, or service containers below checkout.
+      - name: Run Python source contracts with exact skip accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/source-only-unittest.log"
+          skips="$RUNNER_TEMP/source-only-skips.log"
+          set +e
+          LUA_BIN=lua5.4 python3 -m unittest discover -s testing -p 'test_*.py' -v 2>&1 | tee "$log"
+          test_status=${PIPESTATUS[0]}
+          set -e
+
+          set +e
+          rg ' \.\.\. skipped ' "$log" >"$skips"
+          rg_status=$?
+          set -e
+          case "$rg_status" in
+            0) ;;
+            1) : >"$skips" ;;
+            *) echo "ripgrep failed while accounting for unittest skips" >&2; exit "$rg_status" ;;
+          esac
+
+          while IFS= read -r skipped; do
+            case "$skipped" in
+              *"test_windows_validator_accepts_nested_probe_and_ignores_long_bracket_decoys"*"skipped 'PowerShell is unavailable on PATH'") ;;
+              *"test_all_shell_and_powershell_sources_parse_from_spaced_checkout"*"skipped 'pwsh is unavailable'") ;;
+              *) echo "unexpected source-only skip: $skipped" >&2; exit 1 ;;
+            esac
+          done <"$skips"
+          exit "$test_status"
+
+      - name: Run current-tree repository policy
+        run: python3 testing/repository_policy.py --root .
+
+      - name: Audit every reachable historical object
+        run: python3 testing/history_audit.py --root .
+
+      - name: Parse every tracked shell script
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+            count=$((count + 1))
+          done < <(git ls-files -z -- '*.sh')
+          test "$count" -gt 0
+          echo "shell syntax: PASS ($count tracked scripts)"
+
+      - name: Execute Lua 5.4 behavioral contracts
+        env:
+          LUA_BIN: lua5.4
+        run: |
+          set -euo pipefail
+          LUA_BIN=lua5.4 python3 -m unittest \
+            testing.test_audio_lua_contracts.PureLuaAudioContractTests \
+            testing.test_probe_contract.ProbeRuntimeContractTests.test_shared_runtime_cleans_up_and_preserves_original_failures \
+            testing.test_plc_probe_contract.PlcProbeBehaviorContractTests -v
+
+      - name: Validate the trace-v5 conformance manifest
+        run: python3 traces/validate_v5_conformance.py contracts/v5
+
+      - name: Audit active documentation links and commands
+        run: python3 testing/documentation_policy.py --root .
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+  native-integration:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_integration }}
+    runs-on: [self-hosted, linux, x64, tracechaser-bizhawk-2.11]
+    timeout-minutes: 45
+    env:
+      BIZHAWK_HOME: ${{ runner.tool_cache }}/tracechaser/BizHawk-2.11-linux-x64
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Verify the pre-provisioned runtime cache
+        run: bizhawk/preflight_bizhawk_2_11.sh --bizhawk-home "$BIZHAWK_HOME"
+
+      - name: Run native source integration tests
+        run: BIZHAWK_HOME="$BIZHAWK_HOME" bizhawk-headless/test.sh --no-gates
