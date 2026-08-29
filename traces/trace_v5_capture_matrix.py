@@ -287,21 +287,29 @@ def _verify_locked_repository_file(
     repository_root: Path,
     lock: dict[str, Any],
     description: str,
+    source_commit: str,
 ) -> bytes:
-    relative = lock.get("path")
+    relative = lock.get("tracechaser_path", lock.get("path"))
     expected_sha256 = lock.get("sha256")
     if not isinstance(relative, str) or not relative or not isinstance(expected_sha256, str):
         raise ValueError(f"BizHawk {description} lock is missing")
-    path = repository_root / relative
-    if not path.is_file() or sha256_file(path) != expected_sha256:
+    try:
+        content = subprocess.run(
+            ["git", "-C", str(repository_root), "show", f"{source_commit}:{relative}"],
+            check=True, capture_output=True,
+        ).stdout
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"BizHawk {description} lock identity mismatch") from error
+    if hashlib.sha256(content).hexdigest() != lock.get("tracechaser_sha256", expected_sha256):
         raise ValueError(f"BizHawk {description} lock identity mismatch")
-    return path.read_bytes()
+    return content
 
 
 def verify_bizhawk_installation(
     repository_root: Path,
     bizhawk_home: Path,
     freeze: dict[str, Any],
+    source_commit: str,
 ) -> None:
     binding = freeze.get("bizhawk")
     if not isinstance(binding, dict) or binding.get("version") != "2.11":
@@ -310,8 +318,8 @@ def verify_bizhawk_installation(
     source_lock = binding.get("source_lock")
     if not isinstance(archive_lock, dict) or not isinstance(source_lock, dict):
         raise ValueError("BizHawk archive/source lock is missing")
-    archive_bytes = _verify_locked_repository_file(repository_root, archive_lock, "archive")
-    _verify_locked_repository_file(repository_root, source_lock, "source")
+    archive_bytes = _verify_locked_repository_file(repository_root, archive_lock, "archive", source_commit)
+    _verify_locked_repository_file(repository_root, source_lock, "source", source_commit)
     archive_name = archive_lock.get("archive_name")
     archive_sha256 = archive_lock.get("archive_sha256")
     if not isinstance(archive_name, str) or not isinstance(archive_sha256, str):
@@ -357,8 +365,16 @@ def verify_extraction_freeze(
     build_test_runner: Callable[[Path, str, Path, tuple[str, ...]], Any] = _run_clean_native_build_tests,
 ) -> None:
     freeze = document["freeze"]
-    source_commit = freeze["source_commit"]
-    source_diff_base_commit = freeze.get("source_diff_base_commit")
+    build = freeze.get("tracechaser_build")
+    if not isinstance(build, dict):
+        raise ValueError("TraceChaser build boundary is missing from extraction freeze")
+    for provenance_key in ("source_commit", "source_diff_base_commit", "source_diff_sha256"):
+        provenance_value = freeze.get(provenance_key)
+        expected_length = 64 if provenance_key.endswith("sha256") else 40
+        if not isinstance(provenance_value, str) or len(provenance_value) != expected_length:
+            raise ValueError(f"OpenGGF provenance field is malformed: {provenance_key}")
+    source_commit = build.get("source_commit")
+    source_diff_base_commit = build.get("source_diff_base_commit")
     if not isinstance(source_diff_base_commit, str) or not source_diff_base_commit:
         raise ValueError("extraction source diff base commit is missing")
     try:
@@ -372,7 +388,7 @@ def verify_extraction_freeze(
         ).stdout
     except subprocess.CalledProcessError as error:
         raise ValueError("extraction source boundary is unavailable") from error
-    if hashlib.sha256(actual_diff).hexdigest() != freeze["source_diff_sha256"]:
+    if hashlib.sha256(actual_diff).hexdigest() != build.get("source_diff_sha256"):
         raise ValueError("extraction source diff hash mismatch")
 
     toolchain = freeze["toolchain"]
@@ -386,7 +402,7 @@ def verify_extraction_freeze(
     if _command_first_line(["/usr/bin/mono", str(roslyn_csc), "-version"]) != toolchain["roslyn_csc_version"]:
         raise ValueError("extraction Roslyn compiler version mismatch")
 
-    configured_filters = freeze.get("native_test_filters")
+    configured_filters = build.get("native_test_filters")
     if not isinstance(configured_filters, list) or not configured_filters or any(
         not isinstance(test_filter, str) or not test_filter for test_filter in configured_filters
     ):
@@ -399,7 +415,7 @@ def verify_extraction_freeze(
     bizhawk_home = bizhawk_home.resolve()
     if not bizhawk_home.is_dir():
         raise ValueError(f"extraction BizHawk home is unavailable: {bizhawk_home}")
-    verify_bizhawk_installation(repository_root, bizhawk_home, freeze)
+    verify_bizhawk_installation(repository_root, bizhawk_home, freeze, source_commit)
 
     expected_artifacts = freeze.get("native_artifacts")
     required_artifacts = {
@@ -630,6 +646,8 @@ def main(argv: list[str] | None = None) -> int:
             content = ("\n".join(" ".join(shlex.quote(argument) for argument in row) for row in argv_rows) + "\n").encode()
             if args.output:
                 from traces.no_replace_output import write_bytes_no_replace
+                from traces.output_policy import require_external_output_root
+                require_external_output_root(args.output, TRACECHASER_ROOT, args.input_repository_root)
                 write_bytes_no_replace(args.output, content, "capture command ledger")
             else:
                 sys.stdout.buffer.write(content)

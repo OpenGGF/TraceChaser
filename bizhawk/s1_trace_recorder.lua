@@ -57,9 +57,7 @@ end
 --- Constants ---
 -----------------
 
--- Output directory (relative to BizHawk working dir)
-local OUTPUT_DIR = os.getenv("OGGF_TRACE_OUTPUT_DIR") or "trace_output/"
-if OUTPUT_DIR:sub(-1) ~= "/" and OUTPUT_DIR:sub(-1) ~= "\\" then OUTPUT_DIR = OUTPUT_DIR .. "/" end
+local OUTPUT_DIR = C.require_external_output_dir()
 
 -- Headless mode: run at maximum speed, auto-exit when done.
 -- Enable when running via CLI: EmuHawk.exe --chromeless --lua ... --movie ... rom.gen

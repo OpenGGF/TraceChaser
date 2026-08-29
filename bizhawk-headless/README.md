@@ -51,7 +51,7 @@ unmaintained Lua is fine; it is not the fixture publisher.
   response file is created under `obj/` for one build and removed on exit.
   `test.sh` and `run.sh` both rebuild through this contract before execution.
 - A **BizHawk 2.11 distribution**. `common-env.sh` defaults `BIZHAWK_HOME` to the
-  repo-local `docs/BizHawk-2.11-linux-x64`, validates that it is an existing
+  checkout-local `.dependencies/BizHawk-2.11-linux-x64`, validates that it is an existing
   absolute path, and checks the required DLLs are present under `dll/`.
 - **User-supplied ROMs**, passed by environment variable and SHA-1 verified:
   `S1_ROM_PATH`, `S2_ROM_PATH`, `S3K_ROM_PATH`. No ROM is committed to this repo.
@@ -73,7 +73,7 @@ location, run two clean builds under a new durable output root:
 ```bash
 ./verify-deterministic-build.sh \
   --bizhawk-home /abs/path/to/BizHawk-2.11-linux-x64 \
-  --output /abs/path/to/repo/target/audio-parity/deterministic-headless-build
+  --output /absolute/external/scratch/deterministic-headless-build
 ```
 
 The output root must not already exist. One copied checkout includes spaces in
@@ -139,7 +139,7 @@ recorder that stopped early are indistinguishable to a byte gate.
 ## Capturing a trace
 
 ```bash
-BIZHAWK_HOME=/abs/path/to/docs/BizHawk-2.11-linux-x64 \
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
 ./run.sh \
   --mode trace \
   --rom "$S3K_ROM_PATH" \
@@ -179,7 +179,7 @@ the engine jump bit, and Start is ignored. The ROM—not the harness—selects
 demo identities and any LZ restore/water state.
 
 ```bash
-BIZHAWK_HOME=/abs/path/to/docs/BizHawk-2.11-linux-x64 \
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
 ./run.sh --mode trace --rom "$S1_ROM_PATH" \
   --trace-profile credits_demo --credits-target all \
   --output /scratch/credits-v5-candidate
@@ -238,15 +238,16 @@ module-plus-direct grammar, and every run manifest includes
 Validate and compare a complete scratch fleet before publication:
 
 ```bash
-python3 tools/traces/validate_trace_v5.py /scratch/v5-candidate/traces
-python3 tools/traces/compare_trace_v5_candidates.py \
-  src/test/resources/traces /scratch/v5-candidate/traces \
-  --mode credits-20-to-42 --output /scratch/v5-candidate-report.json
+python3 ../traces/validate_trace_v5.py /absolute/external/v5-candidate/traces
+python3 ../traces/compare_trace_v5_candidates.py \
+  /absolute/OpenGGF/src/test/resources/traces \
+  /absolute/external/v5-candidate/traces \
+  --mode credits-20-to-42 --output /absolute/external/v5-candidate-report.json
 ```
 
 The comparator never installs output. Detailed capture-matrix, credits
 raw-host-evidence, candidate-root replay, and exact-byte approval instructions
-live in `docs/guide/contributing/trace-v5-publication.md`.
+are consumer-owned; see [`../docs/migration-from-openggf.md`](../docs/migration-from-openggf.md).
 
 **The two payloads are gzipped at publication by default**, landing as
 `physics.csv.gz` and `aux_state.jsonl.gz` once they reach `--compress-threshold`
@@ -346,7 +347,7 @@ export S2_ROM_PATH=/absolute/sonic2-rev01.gen
 export S2_BK2_PATH=/absolute/sonic-2-sonic-tails-complete-emeralds.bk2
 export S3K_ROM_PATH=/absolute/sonic3k-locked-on.gen
 export S3K_BK2_PATH=/absolute/s3k-knuckles-complete-superemeralds.bk2
-tools/bizhawk-headless/test.sh --filter GpgxZ80AudioCapabilityTests --jobs 1
+./test.sh --filter GpgxZ80AudioCapabilityTests --jobs 1
 ```
 
 Add `OPENGGF_GPGX_Z80_PERFORMANCE=1` for the bounded three-lane performance

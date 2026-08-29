@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][string]$RomPath,
-    [Parameter(Mandatory=$true)][string]$MoviesDir,
-    [Parameter(Mandatory=$true)][string]$OutputRoot,
+    [string]$RomPath,
+    [string]$MoviesDir,
+    [string]$OutputRoot,
+    [string]$InputRepositoryRoot,
     [string]$Only,
     [switch]$Help
 )
@@ -35,12 +36,13 @@ $Routes = @(
 
 function Show-Usage {
     Write-Host "Usage:"
-    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File record_s2_level_select_traces.ps1 -RomPath `"<rom>`" -MoviesDir `"<movies>`" -OutputRoot `"<external-output>`" [-Only cpz]"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File record_s2_level_select_traces.ps1 -RomPath `"<rom>`" -MoviesDir `"<movies>`" -InputRepositoryRoot `"<consumer-checkout>`" -OutputRoot `"<external-output>`" [-Only cpz]"
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -RomPath     Explicit Sonic 2 REV01 ROM path."
     Write-Host "  -MoviesDir   Directory containing s2-lvl-select-*.bk2 movies."
     Write-Host "  -OutputRoot  Explicit output root outside the TraceChaser source tree."
+    Write-Host "  -InputRepositoryRoot  Explicit consumer checkout protected from writes."
     Write-Host ("  -Only        Generate one route slug: {0}." -f (($Routes | ForEach-Object { $_.Route }) -join ", "))
     Write-Host ""
     Write-Host "Routes:"
@@ -728,6 +730,10 @@ if ($Help) {
     exit 0
 }
 
+if (-not $RomPath -or -not $MoviesDir -or -not $OutputRoot -or -not $InputRepositoryRoot) {
+    throw "RomPath, MoviesDir, InputRepositoryRoot, and OutputRoot are required unless -Help is used"
+}
+
 $selectedRoutes = $Routes
 if ($Only) {
     $selectedRoutes = @($Routes | Where-Object { $_.Route -eq $Only })
@@ -739,18 +745,16 @@ if ($Only) {
 $romFullPath = Resolve-RepoPath $RomPath
 $moviesFullPath = Resolve-RepoPath $MoviesDir
 $traceChaserRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$requestedOutput = [System.IO.Path]::GetFullPath($OutputRoot)
-if ($requestedOutput -eq $traceChaserRoot -or $requestedOutput.StartsWith(
-        $traceChaserRoot + [System.IO.Path]::DirectorySeparatorChar,
-        [StringComparison]::OrdinalIgnoreCase)) {
-    throw "OutputRoot must be outside the TraceChaser source tree"
+$inputRepositoryFullPath = Resolve-RepoPath $InputRepositoryRoot
+$outputGuard = Resolve-RepoPath (Join-Path $PSScriptRoot "assert_external_output.ps1")
+$outputFullPath = & $outputGuard -TraceChaserRoot $traceChaserRoot `
+    -InputRepositoryRoot $inputRepositoryFullPath -OutputRoot $OutputRoot
+if ($LASTEXITCODE -ne 0 -or -not $outputFullPath) {
+    throw "OutputRoot must be absolute and outside both source trees"
 }
-$outputFullPath = if (Test-Path -LiteralPath $OutputRoot) {
-    (Resolve-Path -LiteralPath $OutputRoot).Path
-} else {
-    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
-    (Resolve-Path -LiteralPath $OutputRoot).Path
-}
+New-Item -ItemType Directory -Path $outputFullPath -Force | Out-Null
+$env:OGGF_TRACECHASER_ROOT = (Resolve-Path -LiteralPath $traceChaserRoot).Path
+$env:OGGF_INPUT_REPOSITORY_ROOT = $inputRepositoryFullPath
 $recordScript = Resolve-RepoPath (Join-Path $PSScriptRoot "record_s2_trace.bat")
 $bizhawkToolsDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $traceOutput = [System.IO.Path]::GetFullPath(

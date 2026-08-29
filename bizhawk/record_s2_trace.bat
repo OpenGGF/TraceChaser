@@ -20,7 +20,15 @@ if "%OGGF_TRACE_OUTPUT_DIR%"=="" (
     echo ERROR: set OGGF_TRACE_OUTPUT_DIR to an explicit external directory.
     exit /b 1
 )
+if "%OGGF_INPUT_REPOSITORY_ROOT%"=="" (
+    echo ERROR: set OGGF_INPUT_REPOSITORY_ROOT to the explicit consumer checkout.
+    exit /b 1
+)
 for %%I in ("%OGGF_TRACE_OUTPUT_DIR%") do set "OUTPUT_DIR=%%~fI"
+for %%I in ("%~dp0..") do set "OGGF_TRACECHASER_ROOT=%%~fI"
+set "OUTPUT_GUARD=%~dp0assert_external_output.ps1"
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%OUTPUT_GUARD%" -TraceChaserRoot "%OGGF_TRACECHASER_ROOT%" -InputRepositoryRoot "%OGGF_INPUT_REPOSITORY_ROOT%" -OutputRoot "%OUTPUT_DIR%" >NUL
+if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 set "COMPRESS_SCRIPT=%~dp0..\traces\compress-traces.ps1"
 
 if "%~1"=="" (

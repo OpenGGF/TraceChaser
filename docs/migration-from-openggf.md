@@ -48,11 +48,25 @@ optional; they return to the OpenGGF consumer suite in the integration task.
 | Git-index inventory discovery from OpenGGF root and fixture children | Keep as an OpenGGF worktree integration test. |
 | Exact six-movie extraction identities, frozen OpenGGF commits/diffs, extraction argv ledger, and committed fixture publication mappings | Keep in the OpenGGF extraction/integration evidence suite using explicit paths into both checkouts. |
 | Count and placement of OpenGGF BK2 fixtures after assembly | Assert in OpenGGF's consumer publication test; TraceChaser asserts only that the explicitly supplied static inputs are copied byte-for-byte. |
+| OpenGGF provenance commits `081167cb…41828f10` are present in the producer repository | Preserve those IDs unchanged as opaque provenance in the reviewed matrix. OpenGGF asserts its cutover mapping; TraceChaser preflights mapped build commits `88ec9f1c…39848394` from the filter-repo proof. |
+| The legacy full publication matrix has exactly 36 producer rows | Retained as a producer-owned behavioral contract over `ROWS`; the six-row extraction matrix remains a separate, exact-order cutover contract. |
+| The deterministic native build runs every reviewed named filter | Retained in the explicit `tracechaser_build.native_test_filters` boundary and asserted before the clean build runner receives the filter tuple. |
+| Lua recorders could silently default to `trace_output/` | Replaced by direct producer enforcement: all six recorders require explicit absolute producer root, consumer root, and external output environment values. |
+| Stable-Retro recorders defaulted to caller-relative output | Replaced by required `--input-repository-root` and `--output-dir` arguments and the same canonical external-output policy. |
+| Windows/Bash recorder wrappers only normalized output text | Replaced by behavioral canonical-path rejection, including existing symlink/junction aliases, before emulator startup. |
+| Capture command-ledger output was only no-replace | Retains no-replace publication and additionally rejects output beneath either source checkout. |
 
 TraceChaser continues to test exact matrix format and row ordering, complete
 explicit ROM/movie identity checks, typed argv expansion, no-replacement
 assembly, source-tree write rejection, trace-v5 validation, comparison, and raw
 host-evidence behavior.
+
+The OpenGGF consumer cutover must assert the exact filter-repo relationship
+`41828f10998f531e614d855c858ba1b26429d757 ->
+398483941681d4b6a29d68494c5664a0e58a59a7` and the mapped parent boundary
+`88ec9f1c61992a04f72763d94a231e7ffe0ff801..398483941681d4b6a29d68494c5664a0e58a59a7`.
+TraceChaser deliberately does not attempt to discover or open an OpenGGF
+checkout while verifying that standalone build boundary.
 
 ## Historical citations
 

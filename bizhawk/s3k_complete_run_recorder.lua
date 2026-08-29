@@ -352,10 +352,7 @@ end
 -- limit; the per-zone segmentation additions tip it over if declared local.
 -- Globals do not count against that limit and the recorder runs as a single
 -- standalone script, so there is no namespace-collision risk.
-BASE_OUTPUT_DIR = os.getenv("OGGF_TRACE_OUTPUT_DIR") or "trace_output/"
-if BASE_OUTPUT_DIR:sub(-1) ~= "/" and BASE_OUTPUT_DIR:sub(-1) ~= "\\" then
-    BASE_OUTPUT_DIR = BASE_OUTPUT_DIR .. "/"
-end
+BASE_OUTPUT_DIR = C.require_external_output_dir()
 OUTPUT_DIR = BASE_OUTPUT_DIR
 local HEADLESS = true
 local MOVIE_FRAME_SAFETY_MARGIN = 30

@@ -9,12 +9,20 @@ import sys
 
 AGENT_LINK_PATTERN = re.compile(r"\[[^]]+\]\(([^)\s]+)(?:\s+[^)]*)?\)")
 HISTORICAL_BOUNDARY_PATTERN = re.compile(
-    r"^#{1,6}\s+Pre-v5 historical evidence\s*$",
+    r"^(#{1,6})\s+Pre-v5 historical(?: evidence)?(?:\s*[:—-].*)?\s*$",
     re.IGNORECASE,
 )
+HEADING_PATTERN = re.compile(r"^(#{1,6})\s+")
 OBSOLETE_IGNORE_PATTERN = re.compile(
     r"\.gitignore.{0,160}(?:makes?|making).{0,80}new files.{0,80}invisible",
     re.IGNORECASE | re.DOTALL,
+)
+FORMER_ROOT_COMMAND_PATTERN = re.compile(
+    r"(?m)^[ \t]*(?:\$[ \t]+)?(?:python3?|pwsh|powershell|bash|sh|"
+    r"tools/|docs/|src/test/|[A-Z][A-Z0-9_]*=)[^\n]*"
+    r"(?:tools/(?:bizhawk(?:-headless)?|traces)/|"
+    r"docs/BizHawk-2\.11-linux-x64|"
+    r"(?<!OpenGGF/)src/test/resources/(?:traces|audio)/)"
 )
 
 
@@ -38,16 +46,44 @@ def find_violations(root: Path) -> list[str]:
                 )
         if OBSOLETE_IGNORE_PATTERN.search(active_content):
             violations.append(f"path={path} reason=obsolete broad-ignore guidance")
+        for block in _fenced_code_blocks(active_content):
+            if FORMER_ROOT_COMMAND_PATTERN.search(block):
+                violations.append(f"path={path} reason=active former-root command")
     return sorted(set(violations))
 
 
 def _active_content(content: str) -> str:
     active_lines = []
+    historical_level: int | None = None
     for line in content.splitlines(keepends=True):
-        if HISTORICAL_BOUNDARY_PATTERN.match(line.rstrip("\r\n")):
-            break
+        stripped = line.rstrip("\r\n")
+        historical = HISTORICAL_BOUNDARY_PATTERN.match(stripped)
+        if historical:
+            historical_level = len(historical.group(1))
+            continue
+        heading = HEADING_PATTERN.match(stripped)
+        if historical_level is not None:
+            if heading and len(heading.group(1)) <= historical_level:
+                historical_level = None
+            else:
+                continue
         active_lines.append(line)
     return "".join(active_lines)
+
+
+def _fenced_code_blocks(content: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] | None = None
+    for line in content.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            if current is None:
+                current = []
+            else:
+                blocks.append("".join(current))
+                current = None
+        elif current is not None:
+            current.append(line)
+    return blocks
 
 
 def _tracked_markdown(root: Path) -> dict[str, str]:

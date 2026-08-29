@@ -34,24 +34,30 @@ Prerequisites:
 import argparse
 import os
 import sys
+from pathlib import Path
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 try:
     import stable_retro
 except ImportError:
-    print("ERROR: stable-retro is not installed.", file=sys.stderr)
-    print("  pip install stable-retro", file=sys.stderr)
-    print("  python -m stable_retro.import /path/to/roms/", file=sys.stderr)
-    sys.exit(1)
+    stable_retro = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from trace_core import (
-    GenesisRAM, TraceRecorder, BizhawkBK2, write_metadata,
-    ADDR_GAME_MODE, ADDR_ZONE, ADDR_ACT,
-    PLAYER_BASE, OFF_X_POS, OFF_Y_POS, OFF_CTRL_LOCK,
-    GAMEMODE_LEVEL, ZONE_NAMES,
-)
+
+
+def _load_trace_core():
+    import trace_core
+    names = (
+        "GenesisRAM", "TraceRecorder", "BizhawkBK2", "write_metadata",
+        "ADDR_GAME_MODE", "ADDR_ZONE", "ADDR_ACT", "PLAYER_BASE",
+        "OFF_X_POS", "OFF_Y_POS", "OFF_CTRL_LOCK", "GAMEMODE_LEVEL",
+        "ZONE_NAMES",
+    )
+    globals().update({name: getattr(trace_core, name) for name in names})
 
 GAME_NAME = 'SonicTheHedgehog-Genesis-v0'
 def parse_args():
@@ -64,8 +70,10 @@ def parse_args():
                      help='Replay a BizHawk BK2 movie file (auto-converted)')
     p.add_argument('--state', metavar='NAME', default=None,
                    help='Boot from a named savestate (e.g. GreenHillZone.Act1)')
-    p.add_argument('--output-dir', default='trace_output',
-                   help='Output directory (default: trace_output)')
+    p.add_argument('--output-dir', required=True,
+                   help='Explicit absolute external output directory')
+    p.add_argument('--input-repository-root', required=True,
+                   help='Explicit consumer checkout root protected from writes')
     p.add_argument('--max-frames', type=int, default=0,
                    help='Maximum trace frames to record (0=unlimited)')
     p.add_argument('--bk2-offset', type=int, default=0,
@@ -85,6 +93,15 @@ def _make_env(game=GAME_NAME, state=None, **kwargs):
 
 def main():
     args = parse_args()
+    tracechaser_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(tracechaser_root))
+    from traces.output_policy import require_external_output_root
+    args.output_dir = str(require_external_output_root(
+        Path(args.output_dir), tracechaser_root, Path(args.input_repository_root)))
+    if stable_retro is None or np is None:
+        print("ERROR: stable-retro and numpy are required.", file=sys.stderr)
+        return 1
+    _load_trace_core()
 
     movie = None
     bk2_input = None
@@ -226,4 +243,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

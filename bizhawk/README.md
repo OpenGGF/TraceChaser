@@ -49,12 +49,12 @@ Linux trace recording is pinned to **BizHawk 2.11 Linux x64**. Install the
 official release from any working directory with:
 
 ```bash
-tools/bizhawk/fetch_bizhawk_2_11_linux.sh
+./fetch_bizhawk_2_11_linux.sh
 ```
 
 The script verifies the release checksum and installs it locally at
-`docs/BizHawk-2.11-linux-x64`. Local BizHawk installations follow the
-`docs/BizHawk-<version>-<platform>-<architecture>` naming convention and are
+`../.dependencies/BizHawk-2.11-linux-x64`. Local BizHawk installations remain
+below `.dependencies/` and are
 ignored by Git.
 
 Do not substitute BizHawk 2.11.1 for trace recording. BizHawk 2.11.1 removed
@@ -62,7 +62,7 @@ Do not substitute BizHawk 2.11.1 for trace recording. BizHawk 2.11.1 removed
 capture. An existing 2.11.1 installation may remain locally, but it must not be
 selected when running the trace tools.
 
-## Sonic 1 GHZ music-driver parity
+## Pre-v5 historical evidence: Sonic 1 GHZ music-driver parity
 
 From the repository root, run the local two-sided driver check with:
 
@@ -92,7 +92,7 @@ usage. A status of `3` is a successful diagnostic run, not a capture failure.
 Inspect the printed run directory before changing audio code; the tool never
 realigns ticks or changes chip-port ordering.
 
-## Sonic 1 GHZ1 gameplay-audio timeline
+## Pre-v5 historical evidence: Sonic 1 GHZ1 gameplay-audio timeline
 
 The gameplay timeline is a separate, stricter diagnostic: schema v2 compares
 raw caller/ROM queue requests and later resolved admissions at their own frame
@@ -132,7 +132,7 @@ is not trusted.
 ## Native S1/S2 v5 capture contract
 
 Current S1 and S2 publication runs through
-`tools/bizhawk-headless/run.sh`. Every candidate eligible for publication must
+`../bizhawk-headless/run.sh`. Every candidate eligible for publication must
 be a strict v5 envelope with `recorder: native-bizhawk-headless`,
 `recorder_version: 3.0`, and `trace_schema: 5`; level segments use the shared
 42-column physics row.
@@ -143,16 +143,16 @@ are not compatibility inputs.
 When `--load-queue-state` is selected, current captures advertise
 `load_queue_state_per_frame` and
 `dynamic_art_transfer_state_per_frame`. Validate every scratch candidate with
-`tools/traces/validate_trace_v5.py` and follow
-[`docs/guide/contributing/trace-v5-publication.md`](../../docs/guide/contributing/trace-v5-publication.md)
-before replacing a committed fixture.
+`../traces/validate_trace_v5.py`; consumer publication procedure and fixture
+ownership are recorded in [`../docs/migration-from-openggf.md`](../docs/migration-from-openggf.md).
 
 The standard invocation shape is:
 
 ```bash
-BIZHAWK_HOME=/abs/path/to/docs/BizHawk-2.11-linux-x64 \
-tools/bizhawk-headless/run.sh --mode trace --rom /abs/path/to/game.gen \
-  --movie /abs/path/to/movie.bk2 --output /abs/path/to/scratch-candidate
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
+../bizhawk-headless/run.sh --mode trace --rom /absolute/roms/game.gen \
+  --movie /absolute/OpenGGF/movies/movie.bk2 \
+  --output /absolute/external/trace-output/scratch-candidate
 ```
 
 Use `--trace-profile complete_run` or `--run-id <id>` for the corresponding
@@ -1377,8 +1377,8 @@ modes (`$14` continue screen, `$20` ending, `$00` game over/Sega) still
 finalize the run. Run-mode `ss` segments now also emit the standalone SS
 recorder's hook-free aux event stream (see the halfpipe section above).
 
-**Canonical run fixture:**
-`src/test/resources/traces/s2/runs/s2-sonic-tails-complete-emeralds/` — a
+**Canonical consumer run fixture:**
+`/absolute/OpenGGF/src/test/resources/traces/s2/runs/s2-sonic-tails-complete-emeralds/` — a
 259,590-row Sonic+Tails movie from title screen through the DEZ ending,
 collecting all seven emeralds: 35 segments (`seg1_ehz1` … `seg28_dez1` plus
 `ss` … `ss_7`) and 34 transitions (7 `starpost_special`, 7 `stage_exit`,
@@ -1388,7 +1388,7 @@ set comes from a native 9.13-s2 capture proven content-identical — modulo
 CRLF vs LF and `recording_date` — to a validated Lua reference capture of the
 same movie. The permanent differential gate
 (`S2TraceDifferential native run mode capture matches canonical complete
-emeralds run`, in `tools/bizhawk-headless/test.sh`) re-runs one native
+emeralds run`, in `../bizhawk-headless/test.sh`) re-runs one native
 `--run-id` capture and asserts per-segment sha256 for all 35 `physics.csv` /
 `aux_state.jsonl` pairs, normalized metadata/manifest equality
 (`recording_date` only), and the exact output layout.
@@ -1396,12 +1396,12 @@ emeralds run`, in `tools/bizhawk-headless/test.sh`) re-runs one native
 **Verified native capture command (Linux):**
 
 ```bash
-BIZHAWK_HOME=/abs/path/to/docs/BizHawk-2.11-linux-x64 \
-tools/bizhawk-headless/run.sh \
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
+../bizhawk-headless/run.sh \
   --mode trace \
   --rom "$S2_ROM_PATH" \
-  --movie "$PWD/src/test/resources/traces/s2/runs/s2-sonic-tails-complete-emeralds/sonic-2-sonic-tails-complete-emeralds.bk2" \
-  --output "$PWD/target/bizhawk-headless-trace" \
+  --movie "/absolute/OpenGGF/src/test/resources/traces/s2/runs/s2-sonic-tails-complete-emeralds/sonic-2-sonic-tails-complete-emeralds.bk2" \
+  --output "/absolute/external/trace-output/bizhawk-headless-trace" \
   --run-id s2-sonic-tails-complete-emeralds
 ```
 
@@ -1411,17 +1411,20 @@ fixture — see §11.5 of the run-mode spec).
 
 **Verified Lua reference capture command (Linux, BizHawk 2.11 via
 `fetch_bizhawk_2_11_linux.sh` — full movie ≈ 6 minutes; run ONE EmuHawk at a
-time, and move any existing `tools/bizhawk/trace_output/` aside first, since
-the recorder always writes there):**
+time and choose an absent external output root):**
 
 ```bash
-cd <repo-root> && DISPLAY=:0 \
-BIZHAWK_HOME=$PWD/docs/BizHawk-2.11-linux-x64 \
+cd /absolute/TraceChaser/bizhawk && DISPLAY=:0 \
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
+OGGF_TRACECHASER_ROOT=/absolute/TraceChaser \
+OGGF_INPUT_REPOSITORY_ROOT=/absolute/OpenGGF \
+OGGF_TRACE_OUTPUT_DIR=/absolute/external/trace-output/s2-reference \
 OGGF_TRACE_RUN_ID=s2-sonic-tails-complete-emeralds \
 OGGF_BK2_FRAME_COUNT=259590 \
 OGGF_BK2_BASENAME=sonic-2-sonic-tails-complete-emeralds.bk2 \
-tools/bizhawk/run_bizhawk_lua.sh tools/bizhawk/s2_trace_recorder.lua \
-  <path-to-bk2> s2.gen
+./run_bizhawk_lua.sh ./s2_trace_recorder.lua \
+  /absolute/OpenGGF/movies/sonic-2-sonic-tails-complete-emeralds.bk2 \
+  /absolute/roms/sonic2-rev01.gen
 ```
 
 (The "KNOWN BLOCKER" note in the Linux Launcher section above applies to

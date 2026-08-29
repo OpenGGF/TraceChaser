@@ -148,13 +148,10 @@ end
 --- Constants ---
 -----------------
 
--- Output directory (relative to BizHawk working dir).
+-- Output root is explicit and external; the launcher canonicalizes symlinks.
 -- MULTI-SEGMENT complete-run recorder: OUTPUT_DIR is reassigned per act to
 -- BASE_OUTPUT_DIR<zone><act>/ (e.g. trace_output/ghz1/) on each arm. See on_frame_end.
-local BASE_OUTPUT_DIR = os.getenv("OGGF_TRACE_OUTPUT_DIR") or "trace_output/"
-if BASE_OUTPUT_DIR:sub(-1) ~= "/" and BASE_OUTPUT_DIR:sub(-1) ~= "\\" then
-    BASE_OUTPUT_DIR = BASE_OUTPUT_DIR .. "/"
-end
+local BASE_OUTPUT_DIR = C.require_external_output_dir()
 local OUTPUT_DIR = BASE_OUTPUT_DIR
 
 -- Headless mode: run at maximum speed, auto-exit when done.

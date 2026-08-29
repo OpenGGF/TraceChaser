@@ -57,6 +57,20 @@ class DocumentationPolicyIntegrationTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual("documentation policy: PASS\n", result.stdout)
 
+    def test_rejects_active_former_root_commands_in_any_markdown_location(self):
+        self._write(
+            "imported/component/README.md",
+            "# Current workflow\n\n```bash\n"
+            "python3 tools/traces/validate_trace_v5.py src/test/resources/traces\n"
+            "```\n",
+        )
+        self._git("add", ".")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("reason=active former-root command", result.stdout)
+
     def test_tracechaser_active_guidance_chain_is_valid(self):
         result = subprocess.run(
             [sys.executable, str(SCANNER), "--root", str(REPOSITORY_ROOT)],

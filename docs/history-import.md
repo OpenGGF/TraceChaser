@@ -65,7 +65,7 @@ git -C "$TRACECHASER_ROOT" for-each-ref --format='delete %(refname)' refs/tags |
 Immediately before filtering, `refs/heads/main` was the only local branch and
 resolved to the exact extraction base; no remote or tag remained.
 
-## Literal filter command
+## Pre-v5 historical evidence: literal filter command
 
 The reviewed command below was generated directly from the checked-in path
 map, with one explicit `--path` and `--path-rename` pair per entry, then
@@ -436,6 +436,18 @@ therefore maps to the all-zero object in `.git/filter-repo/commit-map`; this is
 the expected empty-commit pruning result. The latest retained source commit
 `a8bbcbbebcfe7bad39294066e38a39eba6983940` maps to the filtered import tip
 `4e4a1cfcf9289abb171c64d6388ebfc9d7814bdc`.
+
+The reviewed extraction capture freeze has a distinct retained build boundary.
+OpenGGF provenance commit `41828f10998f531e614d855c858ba1b26429d757`
+maps to TraceChaser `398483941681d4b6a29d68494c5664a0e58a59a7`;
+its filtered parent is
+`88ec9f1c61992a04f72763d94a231e7ffe0ff801`. The predecessor provenance
+commit `081167cb9363f989b74d56e7551b3cce37a8017a` maps to the all-zero object
+because its changes are outside the retained path set. Accordingly the matrix
+keeps the OpenGGF IDs opaque while standalone build preflight uses the mapped
+`88ec9f1c…39848394` boundary. These relationships are copied directly from
+`.git/filter-repo/commit-map` and the filtered commit parent, not inferred from
+timestamps or subjects.
 
 The single filtered root is
 `3fc3f6d5ffa5448b9a0f9acbcf644d2084a01080`, originating from OpenGGF

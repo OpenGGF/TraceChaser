@@ -34,33 +34,38 @@ import json
 import os
 import sys
 import tempfile
+from pathlib import Path
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 try:
     import stable_retro
 except ImportError:
-    print("ERROR: stable-retro is not installed.", file=sys.stderr)
-    print("  pip install stable-retro", file=sys.stderr)
-    sys.exit(1)
+    stable_retro = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from trace_core import (
-    GenesisRAM, TraceRecorder, write_metadata, write_credits_manifest,
-    ADDR_GAME_MODE, ADDR_CTRL1, ADDR_ZONE, ADDR_ACT,
-    ADDR_LIVES, ADDR_RING_COUNT, ADDR_TIME, ADDR_SCORE,
-    ADDR_WATER_ROUTINE, ADDR_WATER_STATE,
-    ADDR_DEMO_FLAG, ADDR_DEMO_NUM, ADDR_CREDITS_NUM,
-    ADDR_LAST_LAMP, ADDR_LAMP_X, ADDR_LAMP_Y, ADDR_LAMP_RINGS,
-    ADDR_LAMP_TIME, ADDR_LAMP_LIMIT_BTM,
-    ADDR_LAMP_SCR_X, ADDR_LAMP_SCR_Y,
-    ADDR_LAMP_BG1_X, ADDR_LAMP_BG1_Y, ADDR_LAMP_BG2_X, ADDR_LAMP_BG2_Y,
-    ADDR_LAMP_BG3_X, ADDR_LAMP_BG3_Y,
-    ADDR_LAMP_WATER_POS, ADDR_LAMP_WATER_ROUT, ADDR_LAMP_WATER_STAT,
-    PLAYER_BASE, OFF_X_POS, OFF_Y_POS, OFF_ROUTINE, OFF_CTRL_LOCK,
-    GAMEMODE_TITLE, GAMEMODE_DEMO, GAMEMODE_LEVEL, GAMEMODE_CREDITS,
-    ZONE_NAMES,
-)
+
+
+def _load_trace_core():
+    import trace_core
+    names = (
+        "GenesisRAM", "TraceRecorder", "write_metadata", "write_credits_manifest",
+        "ADDR_GAME_MODE", "ADDR_CTRL1", "ADDR_ZONE", "ADDR_ACT", "ADDR_LIVES",
+        "ADDR_RING_COUNT", "ADDR_TIME", "ADDR_SCORE", "ADDR_WATER_ROUTINE",
+        "ADDR_WATER_STATE", "ADDR_DEMO_FLAG", "ADDR_DEMO_NUM", "ADDR_CREDITS_NUM",
+        "ADDR_LAST_LAMP", "ADDR_LAMP_X", "ADDR_LAMP_Y", "ADDR_LAMP_RINGS",
+        "ADDR_LAMP_TIME", "ADDR_LAMP_LIMIT_BTM", "ADDR_LAMP_SCR_X",
+        "ADDR_LAMP_SCR_Y", "ADDR_LAMP_BG1_X", "ADDR_LAMP_BG1_Y",
+        "ADDR_LAMP_BG2_X", "ADDR_LAMP_BG2_Y", "ADDR_LAMP_BG3_X",
+        "ADDR_LAMP_BG3_Y", "ADDR_LAMP_WATER_POS", "ADDR_LAMP_WATER_ROUT",
+        "ADDR_LAMP_WATER_STAT", "PLAYER_BASE", "OFF_X_POS", "OFF_Y_POS",
+        "OFF_ROUTINE", "OFF_CTRL_LOCK", "GAMEMODE_TITLE", "GAMEMODE_DEMO",
+        "GAMEMODE_LEVEL", "GAMEMODE_CREDITS", "ZONE_NAMES",
+    )
+    globals().update({name: getattr(trace_core, name) for name in names})
 
 GAME_NAME = 'SonicTheHedgehog-Genesis-v0'
 RAM_BASE = 0xFF0000  # 68K work RAM base for absolute address calculation
@@ -193,8 +198,10 @@ def parse_args():
     p.add_argument('--force-mode', default='redirect_level',
                    choices=['redirect_level', 'direct', 'none'],
                    help='How to enter credits mode (default: redirect_level)')
-    p.add_argument('--output-dir', default='trace_output/credits_demos',
-                   help='Output root directory')
+    p.add_argument('--output-dir', required=True,
+                   help='Explicit absolute external output root')
+    p.add_argument('--input-repository-root', required=True,
+                   help='Explicit consumer checkout root protected from writes')
     p.add_argument('--force-delay', type=int, default=30,
                    help='Frames to wait on title before forcing (default: 30)')
     p.add_argument('--prestart-timeout', type=int, default=2400,
@@ -576,9 +583,18 @@ class CreditsRecorder:
 
 def main():
     args = parse_args()
+    tracechaser_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(tracechaser_root))
+    from traces.output_policy import require_external_output_root
+    args.output_dir = str(require_external_output_root(
+        Path(args.output_dir), tracechaser_root, Path(args.input_repository_root)))
+    if stable_retro is None or np is None:
+        print("ERROR: stable-retro and numpy are required.", file=sys.stderr)
+        return 1
+    _load_trace_core()
     recorder = CreditsRecorder(args)
     recorder.run()
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

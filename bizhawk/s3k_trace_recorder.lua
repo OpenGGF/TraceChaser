@@ -291,10 +291,7 @@ end
 --- Constants ---
 -----------------
 
-local OUTPUT_DIR = os.getenv("OGGF_TRACE_OUTPUT_DIR") or "trace_output/"
-if OUTPUT_DIR:sub(-1) ~= "/" and OUTPUT_DIR:sub(-1) ~= "\\" then
-    OUTPUT_DIR = OUTPUT_DIR .. "/"
-end
+local OUTPUT_DIR = C.require_external_output_dir()
 local HEADLESS = true
 local MOVIE_FRAME_SAFETY_MARGIN = 30
 local TRACE_PROFILE = os.getenv("OGGF_S3K_TRACE_PROFILE") or "gameplay_unlock"

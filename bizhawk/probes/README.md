@@ -12,7 +12,7 @@ looking for a sibling `probe_runtime.lua`.
 `probe_runtime.lua` owns fast-headless setup, delayed hook registration,
 output teardown, hook removal, and emulator exit. Probe files must not perform
 those operations directly. Existing diagnostics elsewhere under
-`tools/bizhawk/`, production recorders, and Lua libraries are intentionally
+`bizhawk/`, production recorders, and Lua libraries are intentionally
 outside this contract.
 
 Hooks default to `kind = "execute"`. `kind = "write"` observes a ROM memory
@@ -28,13 +28,14 @@ music driver without changing emulated state. Run its short callback proof
 before a full capture:
 
 ```bash
-mkdir -p "$PWD/target/audio-parity"
+mkdir -p /absolute/external/trace-output/audio-parity
 OGGF_AUDIO_CALLBACK_VALIDATE_ONLY=1 \
-OGGF_OUT="$PWD/target/audio-parity/s1-callback-validation.jsonl" \
-BIZHAWK_HOME=/absolute/path/to/BizHawk-2.11-linux-x64 \
-tools/bizhawk/run_bizhawk_lua.sh \
-  tools/bizhawk/probes/s1_audio_driver_parity_probe.lua \
-  src/test/resources/audio/parity/s1/s1-soundtest-ghz.bk2 \
+OGGF_OUT=/absolute/external/trace-output/audio-parity/s1-callback-validation.jsonl \
+BIZHAWK_HOME=/absolute/TraceChaser/.dependencies/BizHawk-2.11-linux-x64 \
+OGGF_INPUT_REPOSITORY_ROOT=/absolute/OpenGGF \
+../run_bizhawk_lua.sh \
+  ./s1_audio_driver_parity_probe.lua \
+  /absolute/OpenGGF/src/test/resources/audio/parity/s1/s1-soundtest-ghz.bk2 \
   /absolute/path/to/Sonic-1-World-REV01.gen
 ```
 
