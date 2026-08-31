@@ -28,6 +28,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TraceCli rejects unknown mode values",
                 RejectsUnknownModeValues));
             tests.Add(new TestMain.TestCase(
+                "TraceCli complete-audio uses only the pinned games and absolute create-new inputs",
+                CompleteAudioUsesOnlyPinnedGamesAndAbsoluteCreateNewInputs));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli trace mode rejects smoke-only arguments",
                 TraceModeRejectsSmokeOnlyArguments));
             tests.Add(new TestMain.TestCase(
@@ -212,6 +215,118 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         "--credits-raw-observation-id", identity
                     }, fixtureRoot), "printable ASCII");
             }
+        }
+
+        /// <summary>
+        /// This protects the production boundary from drifting into the trace
+        /// command's broad option surface: complete-audio accepts just the
+        /// two reviewed game selectors and explicit existing inputs, and its
+        /// single raw destination is always a no-replace file.
+        /// </summary>
+        private static void CompleteAudioUsesOnlyPinnedGamesAndAbsoluteCreateNewInputs()
+        {
+            string root = TestScratch.CreateRootPath("complete-audio-cli");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string rom = Path.Combine(root, "game.gen");
+                string movie = Path.Combine(root, "movie.bk2");
+                string manifest = Path.Combine(root, "service-manifest.json");
+                string capability = Path.Combine(root, "capability.json");
+                File.WriteAllText(rom, "rom");
+                File.WriteAllText(movie, "movie");
+                File.WriteAllText(manifest, "manifest");
+                File.WriteAllText(capability, "capability");
+
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s1",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "s1.jsonl")
+                }, "must be exactly \"s2\" or \"s3k\"");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", "relative.gen", "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "relative.jsonl")
+                }, "ROM path must be an existing absolute file");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom,
+                    "--movie", Path.Combine(root, "missing.bk2"),
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "missing-movie.jsonl")
+                }, "movie path must be an existing absolute file");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", Path.Combine(root, "missing-manifest.json"),
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "missing-manifest.jsonl")
+                }, "service-manifest path must be an existing absolute file");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", Path.Combine(root, "missing-capability.json"),
+                    "--output", Path.Combine(root, "missing-capability.jsonl")
+                }, "capability path must be an existing absolute file");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s3k",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "unknown.jsonl"),
+                    "--unreviewed-hook", "0x1234"
+                }, "Unknown complete-audio argument");
+
+                string output = Path.Combine(root, "occupied.jsonl");
+                File.WriteAllText(output, "existing\n");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", output
+                }, "already exists");
+                AssertEx.Equal("existing\n", File.ReadAllText(output));
+
+                string failedOutput = Path.Combine(root, "failed.jsonl");
+                AssertCompleteAudioFailure(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom, "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", failedOutput
+                }, "S2 REV01 ROM identity is not exact");
+                AssertEx.Equal(false, File.Exists(failedOutput));
+                AssertEx.Equal(5, Directory.GetFiles(root).Length);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void AssertCompleteAudioFailure(
+            string[] args, string expectedMessage)
+        {
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            AssertEx.Equal(1, Program.Run(args, stdout, stderr));
+            AssertEx.Equal(string.Empty, stdout.ToString());
+            AssertContains(stderr.ToString(), expectedMessage);
         }
 
         private static void ProducerBoundaryRejectsProcRootAliases()

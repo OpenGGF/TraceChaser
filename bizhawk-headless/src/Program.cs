@@ -795,6 +795,139 @@ namespace BizHawk.Headless.Gpgx
         }
     }
 
+    /// <summary>
+    /// Closed command-line contract for production-owned raw complete-audio
+    /// reference captures. It deliberately does not share the broad trace
+    /// parser: the only selectable behavior is the game-owned pinned runner.
+    /// </summary>
+    internal sealed class CompleteAudioCommandOptions
+    {
+        private CompleteAudioCommandOptions(
+            string game, string romPath, string moviePath,
+            string serviceManifestPath, string capabilityPath,
+            string outputPath)
+        {
+            Game = game;
+            RomPath = romPath;
+            MoviePath = moviePath;
+            ServiceManifestPath = serviceManifestPath;
+            CapabilityPath = capabilityPath;
+            OutputPath = outputPath;
+        }
+
+        internal string Game { get; private set; }
+        internal string RomPath { get; private set; }
+        internal string MoviePath { get; private set; }
+        internal string ServiceManifestPath { get; private set; }
+        internal string CapabilityPath { get; private set; }
+        internal string OutputPath { get; private set; }
+
+        internal static bool IsRequested(string[] args)
+        {
+            if (args == null) return false;
+            foreach (string argument in args)
+            {
+                if (argument == "--complete-audio-game") return true;
+            }
+            return false;
+        }
+
+        internal static CompleteAudioCommandOptions Parse(string[] args)
+        {
+            if (args == null) throw new ArgumentNullException("args");
+            var values = new Dictionary<string, string>(
+                StringComparer.Ordinal);
+            for (int index = 0; index < args.Length; index += 2)
+            {
+                string name = args[index];
+                if (!IsSupported(name))
+                {
+                    throw new ArgumentException(
+                        "Unknown complete-audio argument: " + name + ".");
+                }
+                if (index + 1 >= args.Length
+                    || string.IsNullOrEmpty(args[index + 1]))
+                {
+                    throw new ArgumentException(
+                        "Argument " + name + " requires a value.");
+                }
+                if (values.ContainsKey(name))
+                {
+                    throw new ArgumentException(
+                        "Duplicate complete-audio argument: " + name + ".");
+                }
+                values.Add(name, args[index + 1]);
+            }
+
+            string game = Required(values, "--complete-audio-game");
+            if (game != "s2" && game != "s3k")
+            {
+                throw new ArgumentException(
+                    "Argument --complete-audio-game must be exactly \"s2\" or \"s3k\".");
+            }
+            return new CompleteAudioCommandOptions(
+                game,
+                ExistingAbsoluteFile(Required(values, "--rom"), "ROM"),
+                ExistingAbsoluteFile(Required(values, "--movie"), "movie"),
+                ExistingAbsoluteFile(Required(values, "--service-manifest"),
+                    "service-manifest"),
+                ExistingAbsoluteFile(Required(values, "--capability"),
+                    "capability"),
+                CreateNewAbsoluteFile(Required(values, "--output")));
+        }
+
+        private static bool IsSupported(string name)
+        {
+            return name == "--complete-audio-game"
+                || name == "--rom"
+                || name == "--movie"
+                || name == "--service-manifest"
+                || name == "--capability"
+                || name == "--output";
+        }
+
+        private static string Required(
+            IDictionary<string, string> values, string name)
+        {
+            string value;
+            if (!values.TryGetValue(name, out value))
+            {
+                throw new ArgumentException(
+                    "Required complete-audio argument is missing: "
+                    + name + ".");
+            }
+            return value;
+        }
+
+        private static string ExistingAbsoluteFile(string path, string label)
+        {
+            if (!Path.IsPathRooted(path) || !File.Exists(path))
+            {
+                throw new ArgumentException(
+                    label + " path must be an existing absolute file.");
+            }
+            return Path.GetFullPath(path);
+        }
+
+        private static string CreateNewAbsoluteFile(string path)
+        {
+            if (!Path.IsPathRooted(path)
+                || string.IsNullOrEmpty(Path.GetFileName(path)))
+            {
+                throw new ArgumentException(
+                    "Output path must be an absolute file path.");
+            }
+            string fullPath = Path.GetFullPath(path);
+            if (LinuxPathEntry.Exists(fullPath))
+            {
+                throw new IOException(
+                    "Complete-audio output already exists and will not be"
+                    + " replaced: " + fullPath);
+            }
+            return fullPath;
+        }
+    }
+
     public static class Program
     {
         public static int Main(string[] args)
@@ -820,6 +953,10 @@ namespace BizHawk.Headless.Gpgx
             TextWriter stderr,
             string fixtureRoot = null)
         {
+            if (CompleteAudioCommandOptions.IsRequested(args))
+            {
+                return RunCompleteAudio(args, stdout, stderr);
+            }
             return Run(
                 args,
                 stdout,
@@ -835,6 +972,10 @@ namespace BizHawk.Headless.Gpgx
             Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost,
             string fixtureRoot = null)
         {
+            if (CompleteAudioCommandOptions.IsRequested(args))
+            {
+                return RunCompleteAudio(args, stdout, stderr);
+            }
             try
             {
                 CommandLineOptions options =
@@ -1069,6 +1210,62 @@ namespace BizHawk.Headless.Gpgx
                         + "\n"
                         + "Output: " + finalPath + "\n",
                     new NoReplacePublisher());
+            }
+            catch (Exception exception)
+            {
+                ReportFailure(stderr, exception);
+                return 1;
+            }
+        }
+
+        /// <summary>
+        /// Runs the sole public raw complete-audio producer shape. This is
+        /// intentionally separate from trace capture: its closed selectors
+        /// call only the reviewed S2/S3K pinned runners, whose raw sinks own
+        /// staging, validation and no-replace publication beside the requested
+        /// file. No caller-supplied observer, address, profile or test filter
+        /// participates in the capture.
+        /// </summary>
+        private static int RunCompleteAudio(
+            string[] args, TextWriter stdout, TextWriter stderr)
+        {
+            try
+            {
+                CompleteAudioCommandOptions options =
+                    CompleteAudioCommandOptions.Parse(args);
+                int observedRows;
+                int publishedRows;
+                using (new NativeStandardOutputSilencer())
+                {
+                    if (options.Game == "s2")
+                    {
+                        S2CompleteAudioCaptureRunner.CaptureResult result =
+                            S2CompleteAudioCaptureRunner.CaptureRawPinned(
+                                options.RomPath, options.MoviePath,
+                                options.ServiceManifestPath,
+                                options.CapabilityPath, options.OutputPath);
+                        observedRows = result.ObservedRows;
+                        publishedRows = result.PublishedRows;
+                    }
+                    else
+                    {
+                        S3kCompleteAudioCaptureRunner.CaptureResult result =
+                            S3kCompleteAudioCaptureRunner.CaptureRawPinned(
+                                options.RomPath, options.MoviePath,
+                                options.ServiceManifestPath,
+                                options.OutputPath);
+                        observedRows = result.ObservedRows;
+                        publishedRows = result.PublishedRows;
+                    }
+                }
+                stdout.Write("Complete-audio game: " + options.Game + "\n"
+                    + "Observed rows: " + observedRows.ToString(
+                        CultureInfo.InvariantCulture) + "\n"
+                    + "Published rows: " + publishedRows.ToString(
+                        CultureInfo.InvariantCulture) + "\n"
+                    + "Raw audio output: " + options.OutputPath + "\n");
+                stdout.Flush();
+                return 0;
             }
             catch (Exception exception)
             {

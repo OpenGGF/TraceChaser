@@ -176,6 +176,43 @@ Output is published all-or-nothing: files are staged and only linked into
 `--output` once the whole capture succeeds, so a failed run never leaves a
 half-written trace behind.
 
+### Capturing a pinned complete-audio raw stream
+
+The production-owned S2/S3K audio validation path uses a separate, closed raw
+producer command. It selects exactly one reviewed capture runner (`s2` or
+`s3k`); it accepts no trace profile, callback, address, capture bound, or test
+filter. The service manifest and capability fixture below are TraceChaser
+observer evidence, not an OpenGGF complete-run manifest.
+
+```bash
+TRACECHASER_ROOT=/absolute/TraceChaser
+INPUT_REPOSITORY_ROOT=/absolute/OpenGGF
+FIXTURE_ROOT="$INPUT_REPOSITORY_ROOT/src/test/resources/traces"
+BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64 \
+"$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
+  --tracechaser-root "$TRACECHASER_ROOT" \
+  --input-repository-root "$INPUT_REPOSITORY_ROOT" \
+  --fixture-root "$FIXTURE_ROOT" \
+  --complete-audio-game s2 \
+  --rom /absolute/Sonic2Rev01.gen \
+  --movie /absolute/sonic-2-sonic-tails-complete-emeralds.bk2 \
+  --service-manifest /absolute/gpgx-audio-service-manifests-v1.json \
+  --capability /absolute/gpgx-audio-capability-v1.json \
+  --output /absolute/external/s2-complete-audio-raw.jsonl
+```
+
+Use `--complete-audio-game s3k` with the locked-on ROM and its pinned movie.
+The ROM, movie, service manifest, and capability must be existing absolute
+files. `--output` must be an absolute file name that does not already exist and
+remains outside both source trees.
+The selected runner streams into a sibling staging file, closes and validates
+the raw capture, then atomically creates the destination without replacement.
+On a short or otherwise failed capture, neither a partial destination nor a
+replacement is published. The capability argument is mandatory for a stable
+cross-game command shape; the S3K pinned runner continues to validate its
+reviewed service-manifest profile and does not accept caller-configured
+observation behavior.
+
 ### S1 ending credits demos
 
 The eight Sonic 1 ending demos are captured without a BK2 movie. The harness
