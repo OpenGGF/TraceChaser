@@ -31,6 +31,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TraceCli complete-audio uses only the pinned games and absolute create-new inputs",
                 CompleteAudioUsesOnlyPinnedGamesAndAbsoluteCreateNewInputs));
             tests.Add(new TestMain.TestCase(
+                "TraceCli complete-audio dispatches only to the pinned game runners",
+                CompleteAudioDispatchesOnlyToPinnedGameRunners));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli trace mode rejects smoke-only arguments",
                 TraceModeRejectsSmokeOnlyArguments));
             tests.Add(new TestMain.TestCase(
@@ -327,6 +330,149 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(1, Program.Run(args, stdout, stderr));
             AssertEx.Equal(string.Empty, stdout.ToString());
             AssertContains(stderr.ToString(), expectedMessage);
+        }
+
+        private static void CompleteAudioDispatchesOnlyToPinnedGameRunners()
+        {
+            string root = TestScratch.CreateRootPath("complete-audio-dispatch");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string rom = Path.Combine(root, "game.gen");
+                string movie = Path.Combine(root, "movie.bk2");
+                string manifest = Path.Combine(root, "service-manifest.json");
+                string capability = Path.Combine(root, "capability.json");
+                File.WriteAllText(rom, "rom");
+                File.WriteAllText(movie, "movie");
+                File.WriteAllText(manifest, "manifest");
+                File.WriteAllText(capability, "capability");
+
+                int s2Calls = 0;
+                int s3kCalls = 0;
+                string s2Forwarded = null;
+                string s3kForwarded = null;
+                string s2Output = Path.Combine(root, "s2.jsonl");
+                var stdout = new StringWriter(CultureInfo.InvariantCulture);
+                var stderr = new StringWriter(CultureInfo.InvariantCulture);
+                AssertEx.Equal(0, Program.RunCompleteAudioForTesting(
+                    CompleteAudioArguments("s2", rom, movie, manifest,
+                        capability, s2Output), stdout, stderr,
+                    (actualRom, actualMovie, actualManifest, actualCapability,
+                        actualOutput) =>
+                    {
+                        s2Calls++;
+                        s2Forwarded = actualRom + "|" + actualMovie + "|"
+                            + actualManifest + "|" + actualCapability + "|"
+                            + actualOutput;
+                        S2CompleteAudioCaptureRunner.PublishRawForTesting(
+                            actualOutput, writer => writer.Write("s2\n"));
+                        return new CompleteAudioCaptureOutcome(10, 2);
+                    },
+                    (actualRom, actualMovie, actualManifest, actualOutput) =>
+                    {
+                        throw new InvalidOperationException(
+                            "S3K runner selected for S2 command.");
+                    }));
+                AssertEx.Equal(string.Empty, stderr.ToString());
+                AssertEx.Equal(Path.GetFullPath(rom) + "|"
+                    + Path.GetFullPath(movie) + "|" + Path.GetFullPath(manifest)
+                    + "|" + Path.GetFullPath(capability) + "|"
+                    + Path.GetFullPath(s2Output), s2Forwarded);
+                AssertEx.Equal("s2\n", File.ReadAllText(s2Output));
+                AssertContains(stdout.ToString(), "Complete-audio game: s2");
+
+                string s3kOutput = Path.Combine(root, "s3k.jsonl");
+                stdout.GetStringBuilder().Length = 0;
+                AssertEx.Equal(0, Program.RunCompleteAudioForTesting(
+                    CompleteAudioArguments("s3k", rom, movie, manifest,
+                        null, s3kOutput), stdout, stderr,
+                    (actualRom, actualMovie, actualManifest, actualCapability,
+                        actualOutput) =>
+                    {
+                        throw new InvalidOperationException(
+                            "S2 runner selected for S3K command.");
+                    },
+                    (actualRom, actualMovie, actualManifest, actualOutput) =>
+                    {
+                        s3kCalls++;
+                        s3kForwarded = actualRom + "|" + actualMovie + "|"
+                            + actualManifest + "|" + actualOutput;
+                        S3kCompleteAudioCaptureRunner.PublishRawForTesting(
+                            actualOutput, writer => writer.Write("s3k\n"));
+                        return new CompleteAudioCaptureOutcome(12, 3);
+                    }));
+                AssertEx.Equal(Path.GetFullPath(rom) + "|"
+                    + Path.GetFullPath(movie) + "|" + Path.GetFullPath(manifest)
+                    + "|" + Path.GetFullPath(s3kOutput), s3kForwarded);
+                AssertEx.Equal("s3k\n", File.ReadAllText(s3kOutput));
+                AssertEx.Equal(1, s2Calls);
+                AssertEx.Equal(1, s3kCalls);
+
+                string forbiddenOutput = Path.Combine(root, "forbidden.jsonl");
+                stdout.GetStringBuilder().Length = 0;
+                stderr.GetStringBuilder().Length = 0;
+                AssertEx.Equal(1, Program.RunCompleteAudioForTesting(
+                    CompleteAudioArguments("s3k", rom, movie, manifest,
+                        capability, forbiddenOutput), stdout, stderr,
+                    (actualRom, actualMovie, actualManifest, actualCapability,
+                        actualOutput) => new CompleteAudioCaptureOutcome(0, 0),
+                    (actualRom, actualMovie, actualManifest, actualOutput) =>
+                        new CompleteAudioCaptureOutcome(0, 0)));
+                AssertContains(stderr.ToString(), "only supported with s2");
+                AssertEx.Equal(1, s2Calls);
+                AssertEx.Equal(1, s3kCalls);
+                AssertEx.Equal(false, File.Exists(forbiddenOutput));
+
+                string shortOutput = Path.Combine(root, "short.jsonl");
+                stdout.GetStringBuilder().Length = 0;
+                stderr.GetStringBuilder().Length = 0;
+                AssertEx.Equal(1, Program.RunCompleteAudioForTesting(
+                    CompleteAudioArguments("s2", rom, movie, manifest,
+                        capability, shortOutput), stdout, stderr,
+                    ThrowsAfterStagingS2Raw,
+                    (actualRom, actualMovie, actualManifest, actualOutput) =>
+                        new CompleteAudioCaptureOutcome(0, 0)));
+                AssertContains(stderr.ToString(), "short capture");
+                AssertEx.Equal(false, File.Exists(shortOutput));
+                AssertEx.Equal(6, Directory.GetFiles(root).Length);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static string[] CompleteAudioArguments(
+            string game, string rom, string movie, string manifest,
+            string capability, string output)
+        {
+            var values = new List<string>
+            {
+                "--complete-audio-game", game,
+                "--rom", rom,
+                "--movie", movie,
+                "--service-manifest", manifest
+            };
+            if (capability != null)
+            {
+                values.Add("--capability");
+                values.Add(capability);
+            }
+            values.Add("--output");
+            values.Add(output);
+            return values.ToArray();
+        }
+
+        private static CompleteAudioCaptureOutcome ThrowsAfterStagingS2Raw(
+            string rom, string movie, string manifest, string capability,
+            string output)
+        {
+            S2CompleteAudioCaptureRunner.PublishRawForTesting(output, writer =>
+            {
+                writer.Write("partial\n");
+                throw new InvalidDataException("short capture");
+            });
+            throw new InvalidOperationException("Unreachable after short capture.");
         }
 
         private static void ProducerBoundaryRejectsProcRootAliases()

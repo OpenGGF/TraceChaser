@@ -865,14 +865,25 @@ namespace BizHawk.Headless.Gpgx
                 throw new ArgumentException(
                     "Argument --complete-audio-game must be exactly \"s2\" or \"s3k\".");
             }
+            string capabilityPath = null;
+            if (game == "s2")
+            {
+                capabilityPath = ExistingAbsoluteFile(
+                    Required(values, "--capability"), "capability");
+            }
+            else if (values.ContainsKey("--capability"))
+            {
+                throw new ArgumentException(
+                    "Argument --capability is only supported with s2"
+                    + " complete-audio captures.");
+            }
             return new CompleteAudioCommandOptions(
                 game,
                 ExistingAbsoluteFile(Required(values, "--rom"), "ROM"),
                 ExistingAbsoluteFile(Required(values, "--movie"), "movie"),
                 ExistingAbsoluteFile(Required(values, "--service-manifest"),
                     "service-manifest"),
-                ExistingAbsoluteFile(Required(values, "--capability"),
-                    "capability"),
+                capabilityPath,
                 CreateNewAbsoluteFile(Required(values, "--output")));
         }
 
@@ -926,6 +937,24 @@ namespace BizHawk.Headless.Gpgx
             }
             return fullPath;
         }
+    }
+
+    /// <summary>
+    /// The fixed result shape returned by the private complete-audio command
+    /// boundary. The test-visible runner delegates below can exercise only the
+    /// same two game-owned argument lists; callers cannot register a runner
+    /// through the public CLI.
+    /// </summary>
+    internal sealed class CompleteAudioCaptureOutcome
+    {
+        internal CompleteAudioCaptureOutcome(int observedRows, int publishedRows)
+        {
+            ObservedRows = observedRows;
+            PublishedRows = publishedRows;
+        }
+
+        internal int ObservedRows { get; private set; }
+        internal int PublishedRows { get; private set; }
     }
 
     public static class Program
@@ -1229,39 +1258,85 @@ namespace BizHawk.Headless.Gpgx
         private static int RunCompleteAudio(
             string[] args, TextWriter stdout, TextWriter stderr)
         {
+            return RunCompleteAudioCore(args, stdout, stderr, true,
+                (romPath, moviePath, manifestPath, capabilityPath, outputPath) =>
+                {
+                    S2CompleteAudioCaptureRunner.CaptureResult result =
+                        S2CompleteAudioCaptureRunner.CaptureRawPinned(
+                            romPath, moviePath, manifestPath, capabilityPath,
+                            outputPath);
+                    return new CompleteAudioCaptureOutcome(
+                        result.ObservedRows, result.PublishedRows);
+                },
+                (romPath, moviePath, manifestPath, outputPath) =>
+                {
+                    S3kCompleteAudioCaptureRunner.CaptureResult result =
+                        S3kCompleteAudioCaptureRunner.CaptureRawPinned(
+                            romPath, moviePath, manifestPath, outputPath);
+                    return new CompleteAudioCaptureOutcome(
+                        result.ObservedRows, result.PublishedRows);
+                });
+        }
+
+        /// <summary>
+        /// Narrow test-only composition boundary for the closed command. It
+        /// is internal to the test assembly and accepts exactly the reviewed
+        /// S2/S3K runner signatures; the public CLI has no callback, runner,
+        /// profile, address, or test-filter option.
+        /// </summary>
+        internal static int RunCompleteAudioForTesting(
+            string[] args, TextWriter stdout, TextWriter stderr,
+            Func<string, string, string, string, string,
+                CompleteAudioCaptureOutcome> captureS2,
+            Func<string, string, string, string,
+                CompleteAudioCaptureOutcome> captureS3k)
+        {
+            return RunCompleteAudioCore(args, stdout, stderr, false,
+                captureS2, captureS3k);
+        }
+
+        private static int RunCompleteAudioCore(
+            string[] args, TextWriter stdout, TextWriter stderr,
+            bool silenceNativeOutput,
+            Func<string, string, string, string, string,
+                CompleteAudioCaptureOutcome> captureS2,
+            Func<string, string, string, string,
+                CompleteAudioCaptureOutcome> captureS3k)
+        {
             try
             {
+                if (captureS2 == null) throw new ArgumentNullException("captureS2");
+                if (captureS3k == null) throw new ArgumentNullException("captureS3k");
                 CompleteAudioCommandOptions options =
                     CompleteAudioCommandOptions.Parse(args);
-                int observedRows;
-                int publishedRows;
-                using (new NativeStandardOutputSilencer())
+                CompleteAudioCaptureOutcome result;
+                if (silenceNativeOutput)
                 {
-                    if (options.Game == "s2")
+                    using (new NativeStandardOutputSilencer())
                     {
-                        S2CompleteAudioCaptureRunner.CaptureResult result =
-                            S2CompleteAudioCaptureRunner.CaptureRawPinned(
-                                options.RomPath, options.MoviePath,
+                        result = options.Game == "s2"
+                            ? captureS2(options.RomPath, options.MoviePath,
                                 options.ServiceManifestPath,
-                                options.CapabilityPath, options.OutputPath);
-                        observedRows = result.ObservedRows;
-                        publishedRows = result.PublishedRows;
-                    }
-                    else
-                    {
-                        S3kCompleteAudioCaptureRunner.CaptureResult result =
-                            S3kCompleteAudioCaptureRunner.CaptureRawPinned(
-                                options.RomPath, options.MoviePath,
-                                options.ServiceManifestPath,
-                                options.OutputPath);
-                        observedRows = result.ObservedRows;
-                        publishedRows = result.PublishedRows;
+                                options.CapabilityPath, options.OutputPath)
+                            : captureS3k(options.RomPath, options.MoviePath,
+                                options.ServiceManifestPath, options.OutputPath);
                     }
                 }
+                else
+                {
+                    result = options.Game == "s2"
+                        ? captureS2(options.RomPath, options.MoviePath,
+                            options.ServiceManifestPath,
+                            options.CapabilityPath, options.OutputPath)
+                        : captureS3k(options.RomPath, options.MoviePath,
+                            options.ServiceManifestPath, options.OutputPath);
+                }
+                if (result == null) throw new InvalidDataException(
+                    "Complete-audio runner returned no capture result.");
                 stdout.Write("Complete-audio game: " + options.Game + "\n"
-                    + "Observed rows: " + observedRows.ToString(
+                    + "Observed rows: " + result.ObservedRows.ToString(
                         CultureInfo.InvariantCulture) + "\n"
-                    + "Published rows: " + publishedRows.ToString(
+                    + "Published rows: " + result.PublishedRows.ToString(
                         CultureInfo.InvariantCulture) + "\n"
                     + "Raw audio output: " + options.OutputPath + "\n");
                 stdout.Flush();

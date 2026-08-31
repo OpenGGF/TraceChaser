@@ -201,15 +201,17 @@ BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64 \
   --output /absolute/external/s2-complete-audio-raw.jsonl
 ```
 
-Use `--complete-audio-game s3k` with the locked-on ROM and its pinned movie.
-The ROM, movie, service manifest, and capability must be existing absolute
-files. `--output` must be an absolute file name that does not already exist and
-remains outside both source trees.
+Use `--complete-audio-game s3k` with the locked-on ROM and its pinned movie,
+but omit `--capability`: the pinned S3K runner/profile has no capability input,
+and the command rejects one rather than accepting an unused file. S2 requires
+an existing absolute ROM, movie, service manifest, and capability file. S3K
+requires the first three existing absolute files. For both games, `--output`
+must be an absolute file name that does not already exist and remains outside
+both source trees.
 The selected runner streams into a sibling staging file, closes and validates
 the raw capture, then atomically creates the destination without replacement.
 On a short or otherwise failed capture, neither a partial destination nor a
-replacement is published. The capability argument is mandatory for a stable
-cross-game command shape; the S3K pinned runner continues to validate its
+replacement is published. The S3K pinned runner continues to validate its
 reviewed service-manifest profile and does not accept caller-configured
 observation behavior.
 

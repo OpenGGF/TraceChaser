@@ -78,8 +78,42 @@ do
 done
 
 for name in "path-a" "path with spaces"; do
+  destination="$OUTPUT_ROOT/$name/bizhawk-headless"
+  validation_tool="$OUTPUT_ROOT/$name/tools/bizhawk-headless"
+  mkdir -p "$validation_tool"
+  cp -a "$destination/bin" "$validation_tool/"
+  cp -a "$destination/fixtures" "$validation_tool/"
+  cmp "$destination/bin/Release/BizHawk.Headless.Gpgx.exe" \
+    "$validation_tool/bin/Release/BizHawk.Headless.Gpgx.exe"
+
+  capability="$validation_tool/fixtures/gpgx-audio-capability-v1.json"
+  sed -i 's/"task8_harness_executable_sha256": "[0-9a-f]\{64\}"/"task8_harness_executable_sha256": "0000000000000000000000000000000000000000000000000000000000000000"/' \
+    "$capability"
+  stale_log="$OUTPUT_ROOT/$name/stale-capability.log"
+  if BIZHAWK_HOME="$BIZHAWK_HOME_ARG" \
+    MONO_PATH="$BIZHAWK_HOME_ARG/dll" \
+    LD_LIBRARY_PATH="$BIZHAWK_HOME_ARG/dll${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    mono "$validation_tool/bin/Release/BizHawk.Headless.Gpgx.Tests.exe" \
+    --filter 'S2AudioObserverProfileTests configure' --jobs 1 \
+    >"$stale_log" 2>&1
+  then
+    echo "Stale copied capability executable identity unexpectedly passed." >&2
+    exit 1
+  fi
+  grep -F "capability executable identity changed" "$stale_log" >/dev/null
+  cp -a "$destination/fixtures/gpgx-audio-capability-v1.json" \
+    "$capability"
+
   (
-    cd "$OUTPUT_ROOT/$name/bizhawk-headless"
+    cd "$validation_tool"
+    BIZHAWK_HOME="$BIZHAWK_HOME_ARG" \
+      MONO_PATH="$BIZHAWK_HOME_ARG/dll" \
+      LD_LIBRARY_PATH="$BIZHAWK_HOME_ARG/dll${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      mono bin/Release/BizHawk.Headless.Gpgx.Tests.exe \
+      --filter 'S2AudioObserverProfileTests configure' --jobs 1
+  )
+  (
+    cd "$destination"
     BIZHAWK_HOME="$BIZHAWK_HOME_ARG" \
       MONO_PATH="$BIZHAWK_HOME_ARG/dll" \
       LD_LIBRARY_PATH="$BIZHAWK_HOME_ARG/dll${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
