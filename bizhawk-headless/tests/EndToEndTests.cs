@@ -62,6 +62,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "Cli run script invokes only harness Mono with DISPLAY absent",
                 RunScriptInvokesHarnessHeadlessly));
             tests.Add(new TestMain.TestCase(
+                "Cli complete-audio launcher forwards only the closed argv to Mono",
+                CompleteAudioLauncherForwardsOnlyClosedArguments));
+            tests.Add(new TestMain.TestCase(
                 "EndToEnd shell validates an explicit ROM before missing BizHawk skip",
                 TestScriptValidatesExplicitRomBeforeMissingBizHawkSkip));
             tests.Add(new TestMain.TestCase(
@@ -491,6 +494,122 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 Directory.Delete(root, true);
             }
+        }
+
+        private static void CompleteAudioLauncherForwardsOnlyClosedArguments()
+        {
+            string launcher = Path.Combine(
+                ToolDirectory, "run-complete-audio.sh");
+            string launcherText = File.ReadAllText(launcher);
+            AssertContains(
+                launcherText,
+                "source \"$BIZHAWK_TOOL_DIR/common-env.sh\"");
+            AssertContains(launcherText, "[[ -f \"$HARNESS_EXE\" ]]");
+            AssertContains(launcherText, "unset DISPLAY");
+            AssertContains(
+                launcherText,
+                "exec mono \"$HARNESS_EXE\" \"$@\"");
+            AssertEx.Equal(false, launcherText.IndexOf("build.sh",
+                StringComparison.OrdinalIgnoreCase) >= 0);
+            AssertEx.Equal(false, launcherText.IndexOf("output_policy.py",
+                StringComparison.OrdinalIgnoreCase) >= 0);
+
+            string root = Path.Combine(
+                Path.GetTempPath(),
+                "openggf-complete-audio-launcher-"
+                + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                string fakeMono = Path.Combine(root, "mono");
+                string capturedEnvironment = Path.Combine(root, "display.txt");
+                string capturedArguments = Path.Combine(root, "arguments.txt");
+                File.WriteAllText(
+                    fakeMono,
+                    "#!/usr/bin/env bash\n"
+                    + "set -euo pipefail\n"
+                    + "if [[ -v DISPLAY ]]; then\n"
+                    + "  printf 'present\\n' > \"$CAPTURE_ENV\"\n"
+                    + "else\n"
+                    + "  printf 'absent\\n' > \"$CAPTURE_ENV\"\n"
+                    + "fi\n"
+                    + "printf '%s\\n' \"$@\" > \"$CAPTURE_ARGS\"\n"
+                    + "exit \"${FAKE_MONO_EXIT:-0}\"\n",
+                    new UTF8Encoding(false));
+                MakeExecutable(fakeMono);
+
+                string[] completeAudioArguments =
+                {
+                    "--complete-audio-game", "s3k",
+                    "--rom", "/absolute/rom.gen",
+                    "--movie", "/absolute/movie.bk2",
+                    "--service-manifest", "/absolute/service-manifest.json",
+                    "--output", "/absolute/raw.jsonl"
+                };
+                ProcessResult successful = RunCompleteAudioLauncher(
+                    launcher, root, capturedEnvironment, capturedArguments,
+                    completeAudioArguments, "0");
+                AssertEx.Equal(0, successful.ExitCode);
+                AssertEx.Equal(string.Empty, successful.StandardOutput);
+                AssertEx.Equal(string.Empty, successful.StandardError);
+                AssertEx.Equal("absent\n", NormalizeLf(
+                    File.ReadAllText(capturedEnvironment)));
+                string[] forwarded = File.ReadAllLines(capturedArguments);
+                AssertEx.Equal(completeAudioArguments.Length + 1,
+                    forwarded.Length);
+                AssertEx.Equal(Path.Combine(ToolDirectory, "bin", "Release",
+                    "BizHawk.Headless.Gpgx.exe"), forwarded[0]);
+                for (int i = 0; i < completeAudioArguments.Length; i++)
+                {
+                    AssertEx.Equal(completeAudioArguments[i], forwarded[i + 1]);
+                }
+
+                ProcessResult failing = RunCompleteAudioLauncher(
+                    launcher, root, capturedEnvironment, capturedArguments,
+                    completeAudioArguments, "47");
+                AssertEx.Equal(47, failing.ExitCode);
+
+                var rejectedStart = new ProcessStartInfo
+                {
+                    FileName = "/bin/bash",
+                    Arguments = Quote(launcher) + " --mode smoke",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                ProcessResult rejected = RunProcess(rejectedStart);
+                AssertEx.Equal(2, rejected.ExitCode);
+                AssertContains(rejected.StandardError,
+                    "requires --complete-audio-game");
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
+        }
+
+        private static ProcessResult RunCompleteAudioLauncher(
+            string launcher, string fakePath, string capturedEnvironment,
+            string capturedArguments, string[] completeAudioArguments,
+            string fakeMonoExit)
+        {
+            var start = new ProcessStartInfo
+            {
+                FileName = "/bin/bash",
+                Arguments = Quote(launcher) + " " + string.Join(" ",
+                    completeAudioArguments.Select(Quote).ToArray()),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            start.EnvironmentVariables["PATH"] = fakePath + ":"
+                + Environment.GetEnvironmentVariable("PATH");
+            start.EnvironmentVariables["BIZHAWK_HOME"] = ResolveBizHawkHome();
+            start.EnvironmentVariables["DISPLAY"] = ":99";
+            start.EnvironmentVariables["CAPTURE_ENV"] = capturedEnvironment;
+            start.EnvironmentVariables["CAPTURE_ARGS"] = capturedArguments;
+            start.EnvironmentVariables["FAKE_MONO_EXIT"] = fakeMonoExit;
+            return RunProcess(start);
         }
 
         private static void TestScriptValidatesExplicitRomBeforeMissingBizHawkSkip()

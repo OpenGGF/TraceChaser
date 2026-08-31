@@ -185,14 +185,8 @@ filter. The service manifest and capability fixture below are TraceChaser
 observer evidence, not an OpenGGF complete-run manifest.
 
 ```bash
-TRACECHASER_ROOT=/absolute/TraceChaser
-INPUT_REPOSITORY_ROOT=/absolute/OpenGGF
-FIXTURE_ROOT="$INPUT_REPOSITORY_ROOT/src/test/resources/traces"
 BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64 \
-"$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
-  --tracechaser-root "$TRACECHASER_ROOT" \
-  --input-repository-root "$INPUT_REPOSITORY_ROOT" \
-  --fixture-root "$FIXTURE_ROOT" \
+"/absolute/TraceChaser/bizhawk-headless/run-complete-audio.sh" \
   --complete-audio-game s2 \
   --rom /absolute/Sonic2Rev01.gen \
   --movie /absolute/sonic-2-sonic-tails-complete-emeralds.bk2 \
@@ -206,8 +200,10 @@ but omit `--capability`: the pinned S3K runner/profile has no capability input,
 and the command rejects one rather than accepting an unused file. S2 requires
 an existing absolute ROM, movie, service manifest, and capability file. S3K
 requires the first three existing absolute files. For both games, `--output`
-must be an absolute file name that does not already exist and remains outside
-both source trees.
+must be an absolute file name that does not already exist. The dedicated Linux
+launcher accepts only this closed complete-audio argument surface, verifies the
+fixed built harness assembly, clears `DISPLAY`, and executes it through Mono;
+it neither builds nor accepts generic producer boundary roots.
 The selected runner streams into a sibling staging file, closes and validates
 the raw capture, then atomically creates the destination without replacement.
 On a short or otherwise failed capture, neither a partial destination nor a

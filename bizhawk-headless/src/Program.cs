@@ -963,6 +963,10 @@ namespace BizHawk.Headless.Gpgx
         {
             try
             {
+                if (CompleteAudioCommandOptions.IsRequested(args))
+                {
+                    return RunCompleteAudio(args, Console.Out, Console.Error);
+                }
                 string tracechaserRoot, inputRoot, fixtureRoot;
                 args = ExtractBoundaryArguments(args, out tracechaserRoot,
                     out inputRoot, out fixtureRoot);

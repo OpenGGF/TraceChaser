@@ -34,6 +34,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TraceCli complete-audio dispatches only to the pinned game runners",
                 CompleteAudioDispatchesOnlyToPinnedGameRunners));
             tests.Add(new TestMain.TestCase(
+                "TraceCli Main rejects generic boundary arguments for complete-audio",
+                MainRejectsGenericBoundaryArgumentsForCompleteAudio));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli trace mode rejects smoke-only arguments",
                 TraceModeRejectsSmokeOnlyArguments));
             tests.Add(new TestMain.TestCase(
@@ -438,6 +441,51 @@ namespace OpenGGF.BizHawk.Headless.Tests
             }
             finally
             {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void MainRejectsGenericBoundaryArgumentsForCompleteAudio()
+        {
+            string root = TestScratch.CreateRootPath("complete-audio-main");
+            Directory.CreateDirectory(root);
+            TextWriter originalError = Console.Error;
+            try
+            {
+                string rom = Path.Combine(root, "game.gen");
+                string movie = Path.Combine(root, "movie.bk2");
+                string manifest = Path.Combine(root, "service-manifest.json");
+                string capability = Path.Combine(root, "capability.json");
+                string source = Path.Combine(root, "source");
+                string consumer = Path.Combine(root, "consumer");
+                string fixture = Path.Combine(consumer, "fixtures");
+                File.WriteAllText(rom, "rom");
+                File.WriteAllText(movie, "movie");
+                File.WriteAllText(manifest, "manifest");
+                File.WriteAllText(capability, "capability");
+                Directory.CreateDirectory(source);
+                Directory.CreateDirectory(fixture);
+
+                var stderr = new StringWriter(CultureInfo.InvariantCulture);
+                Console.SetError(stderr);
+                AssertEx.Equal(1, Program.Main(new[]
+                {
+                    "--complete-audio-game", "s2",
+                    "--rom", rom,
+                    "--movie", movie,
+                    "--service-manifest", manifest,
+                    "--capability", capability,
+                    "--output", Path.Combine(root, "raw.jsonl"),
+                    "--tracechaser-root", source,
+                    "--input-repository-root", consumer,
+                    "--fixture-root", fixture
+                }));
+                AssertContains(stderr.ToString(),
+                    "Unknown complete-audio argument: --tracechaser-root");
+            }
+            finally
+            {
+                Console.SetError(originalError);
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
         }
