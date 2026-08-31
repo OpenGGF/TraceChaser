@@ -33,11 +33,22 @@ fi
 FIRST_ROOT="$OUTPUT_ROOT/path-a"
 SECOND_ROOT="$OUTPUT_ROOT/path with spaces"
 mkdir -p "$FIRST_ROOT/bizhawk-headless" \
-  "$SECOND_ROOT/bizhawk-headless"
+  "$FIRST_ROOT/bizhawk" \
+  "$FIRST_ROOT/dependencies" \
+  "$SECOND_ROOT/bizhawk-headless" \
+  "$SECOND_ROOT/bizhawk" \
+  "$SECOND_ROOT/dependencies"
 
 for name in "path-a" "path with spaces"; do
   destination="$OUTPUT_ROOT/$name/bizhawk-headless"
   cp -a "$TOOL_DIR/." "$destination/"
+  cp -a \
+    "$TRACECHASER_ROOT/bizhawk/preflight_bizhawk_2_11.sh" \
+    "$TRACECHASER_ROOT/bizhawk/bizhawk_2_11.py" \
+    "$TRACECHASER_ROOT/bizhawk/lua_source.py" \
+    "$OUTPUT_ROOT/$name/bizhawk/"
+  cp -a "$TRACECHASER_ROOT/dependencies/bizhawk-2.11-linux-x64.lock.json" \
+    "$OUTPUT_ROOT/$name/dependencies/"
   rm -rf -- "$destination/bin" "$destination/obj" "$destination/.scratch"
   if [[ "$name" == "path with spaces" ]]; then
     CscToolPath=/hostile/compiler \
