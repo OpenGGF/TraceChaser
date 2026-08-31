@@ -504,7 +504,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertContains(
                 launcherText,
                 "source \"$BIZHAWK_TOOL_DIR/common-env.sh\"");
-            AssertContains(launcherText, "[[ -f \"$HARNESS_EXE\" ]]");
+            AssertContains(launcherText, "if [[ ! -f \"$HARNESS_EXE\" ]]");
             AssertContains(launcherText, "unset DISPLAY");
             AssertContains(
                 launcherText,
@@ -557,8 +557,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 string[] forwarded = File.ReadAllLines(capturedArguments);
                 AssertEx.Equal(completeAudioArguments.Length + 1,
                     forwarded.Length);
-                AssertEx.Equal(Path.Combine(ToolDirectory, "bin", "Release",
-                    "BizHawk.Headless.Gpgx.exe"), forwarded[0]);
+                AssertEx.Equal(Path.Combine(
+                    LinuxPathEntry.ResolveExistingAncestor(ToolDirectory),
+                    "bin", "Release", "BizHawk.Headless.Gpgx.exe"),
+                    forwarded[0]);
                 for (int i = 0; i < completeAudioArguments.Length; i++)
                 {
                     AssertEx.Equal(completeAudioArguments[i], forwarded[i + 1]);
