@@ -86,6 +86,8 @@
     <Compile Include="src/Program.cs" />
     <Compile Include="src/Recording/NoReplacePublisher.cs" />
     <Compile Include="src/Recording/OverrideResumeFirstDivergenceContract.cs" />
+    <Compile Include="src/Recording/OverrideResumeFirstDivergenceExtractor.cs" />
+    <Compile Include="src/Recording/OverrideResumeFirstDivergencePublisher.cs" />
     <Compile Include="src/Recording/TracePayloadCompressor.cs" />
     <Compile Include="src/Recording/TraceContract.cs" />
     <Compile Include="src/Recording/S3kCompleteAudioCaptureRunner.cs" />

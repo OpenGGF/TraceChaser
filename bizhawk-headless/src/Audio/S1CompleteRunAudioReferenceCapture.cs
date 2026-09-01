@@ -23,6 +23,8 @@ namespace OpenGGF.BizHawk.Headless
         internal const string ManifestFileName =
             "s1-audio-service-manifest-v1.json";
         internal const string RawFileName = "audio_reference_raw.jsonl";
+        internal const string AttestationFileName =
+            "override-resume.attestation.json";
         private const string ManifestSchema =
             "openggf.s1-audio-service-manifest.v1";
         private const string RawSchema =

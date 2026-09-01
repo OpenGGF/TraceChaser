@@ -6,6 +6,7 @@ using System.Text;
 using System.Security.Cryptography;
 using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
 using OpenGGF.BizHawk.Headless;
+using Newtonsoft.Json;
 
 namespace BizHawk.Headless.Gpgx
 {
@@ -575,13 +576,17 @@ namespace BizHawk.Headless.Gpgx
                         + " publishes one fixed uncompressed staging stream;"
                         + " compression arguments are not supported.");
                 }
-                string rawPath = Path.Combine(fullOutputDirectory,
-                    S1CompleteRunAudioReferenceCapture.RawFileName);
-                if (LinuxPathEntry.Exists(rawPath))
+                foreach (string name in new[]
                 {
-                    throw new IOException(
-                        "Final output already exists and will not be replaced: "
-                        + rawPath);
+                    S1CompleteRunAudioReferenceCapture.RawFileName,
+                    S1CompleteRunAudioReferenceCapture.AttestationFileName
+                })
+                {
+                    string finalPath=Path.Combine(fullOutputDirectory,name);
+                    if (LinuxPathEntry.Exists(finalPath))
+                        throw new IOException(
+                            "Final output already exists and will not be replaced: "
+                            + finalPath);
                 }
                 return new CommandLineOptions(
                     CaptureMode.Trace, Path.GetFullPath(romPath),
@@ -963,6 +968,19 @@ namespace BizHawk.Headless.Gpgx
         {
             try
             {
+                if (OverrideResumePublisherCommandOptions.IsRequested(args))
+                {
+                    OverrideResumePublisherCommandOptions options =
+                        OverrideResumePublisherCommandOptions.Parse(args);
+                    new OverrideResumeFirstDivergencePublisher(
+                        new OverrideResumeFirstDivergenceExtractor(),
+                        new NoReplacePublisher()).Publish(options.Inputs,
+                            options.TracechaserRoot, options.InputRoot,
+                            options.FixtureRoot);
+                    Console.Out.WriteLine(
+                        "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED");
+                    return 0;
+                }
                 if (CompleteAudioCommandOptions.IsRequested(args))
                 {
                     return RunCompleteAudio(args, Console.Out, Console.Error);
@@ -1495,9 +1513,19 @@ namespace BizHawk.Headless.Gpgx
                     S1CompleteRunAudioReferenceCapture.Manifest manifest =
                         S1CompleteRunAudioReferenceCapture.LoadManifest(
                             manifestPath, romBytes);
-                    return S1CompleteRunAudioReferenceCapture.Capture(
+                    var hashing=new OverrideResumeRawDigestTextWriter(writers[0]);
+                    S1CompleteRunAudioReferenceCapture.CaptureResult result=
+                        S1CompleteRunAudioReferenceCapture.Capture(
                         movie, host, registers,
-                        concrete.CreateAudioTraceApi(), manifest, writers[0]);
+                        concrete.CreateAudioTraceApi(), manifest, hashing);
+                    OverrideResumeRawDigestTextWriter.Evidence evidence=
+                        hashing.Finish();
+                    writers[1].Write(OverrideResumeFirstDivergenceAttestation
+                        .Create("s1",evidence,
+                            "s1-proberuntime-native-correlation-abi4",
+                            DateTime.UtcNow).ToString(Formatting.None));
+                    writers[1].Write('\n');
+                    return result;
                 },
                 result =>
                     "BizHawk: " + installation.ManagedVersion + "\n"
@@ -1511,7 +1539,11 @@ namespace BizHawk.Headless.Gpgx
                         CultureInfo.InvariantCulture) + "\n"
                     + "Raw audio JSONL: " + outputPath + "\n",
                 new NoReplacePublisher(),
-                new[] { S1CompleteRunAudioReferenceCapture.RawFileName });
+                new[]
+                {
+                    S1CompleteRunAudioReferenceCapture.RawFileName,
+                    S1CompleteRunAudioReferenceCapture.AttestationFileName
+                });
         }
 
         private static int RunS1CreditsDemo(

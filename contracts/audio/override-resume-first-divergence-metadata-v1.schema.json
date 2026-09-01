@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openggf.override-resume-first-divergence-metadata.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "game", "raw_sha256", "raw_byte_count", "attestation_sha256",
+    "record_count", "logical_byte_count", "logical_sha256", "stored_byte_count",
+    "stored_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "openggf.override-resume-first-divergence-metadata.v1"},
+    "game": {"enum": ["s1", "s2"]},
+    "raw_sha256": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "raw_byte_count": {"type": "integer", "minimum": 1},
+    "attestation_sha256": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "record_count": {"const": 1},
+    "logical_byte_count": {"type": "integer", "minimum": 1},
+    "logical_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stored_byte_count": {"type": "integer", "minimum": 1},
+    "stored_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -19,6 +19,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2CompleteAudioRawSinkTests publish a create-new file transactionally",
                 PublishesCreateNewFileTransactionally));
             tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests publish raw and attestation atomically",
+                PublishesRawAndAttestationAtomically));
+            tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests remove staging after capture failure",
                 RemovesStagingAfterCaptureFailure));
             tests.Add(new TestMain.TestCase(
@@ -77,6 +80,27 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        private static void PublishesRawAndAttestationAtomically()
+        {
+            string root=TestScratch.CreateRootPath("s2-raw-attestation");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string output=Path.Combine(root,"run-1.raw.jsonl");
+                S2CompleteAudioCaptureRunner.PublishRawWithAttestationForTesting(
+                    output,writer=>writer.Write("raw\n"));
+                string attestation=Path.Combine(root,"run-1.attestation.json");
+                AssertEx.Equal(true,File.Exists(output));
+                AssertEx.Equal(true,File.Exists(attestation));
+                JObject value=JObject.Parse(File.ReadAllText(attestation));
+                AssertEx.Equal("s2",(string)value["game"]);
+                AssertEx.Equal(4,(int)value["raw_byte_count"]);
+                AssertEx.Equal(2,Directory.GetFiles(root).Length);
+            }
+            finally
+            {if(Directory.Exists(root))Directory.Delete(root,true);}
         }
 
         private static void RemovesStagingAfterCaptureFailure()

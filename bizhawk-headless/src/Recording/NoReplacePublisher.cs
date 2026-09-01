@@ -165,6 +165,32 @@ namespace OpenGGF.BizHawk.Headless
         }
 
         /// <summary>
+        /// Binary counterpart to StageAll for already-normalized fixture
+        /// payloads such as deterministic gzip members. All bytes stage
+        /// before the returned set may publish any final path.
+        /// </summary>
+        internal StagedPublicationSet StageAllBytes(
+            string outputDirectory, string[] fileNames, byte[][] contents)
+        {
+            if(fileNames==null||contents==null||fileNames.Length==0
+                ||fileNames.Length!=contents.Length)
+                throw new ArgumentException(
+                    "Binary publication names and contents must have equal nonzero length.");
+            IncrementalStagingSession session=OpenSession(outputDirectory);
+            try
+            {
+                for(int index=0;index<fileNames.Length;index++)
+                    session.StageBytes(fileNames[index],contents[index]);
+                return session.Complete();
+            }
+            catch
+            {
+                session.Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>
         /// As <see cref="StageAll(string,string[],Action{TextWriter[]})"/>,
         /// with a tail of CONDITIONAL file names. Their writers arrive
         /// after the unconditional ones in the same array, but each opens
@@ -380,6 +406,33 @@ namespace OpenGGF.BizHawk.Headless
                     finalPath,
                     linkOperation,
                     deleteFile));
+            }
+
+            internal void StageBytes(string fileName,byte[] content)
+            {
+                if(finished)throw new InvalidOperationException(
+                    "The staging session is already finalized.");
+                if(string.IsNullOrEmpty(fileName))throw new ArgumentException(
+                    "An output file name is required.","fileName");
+                if(content==null)throw new ArgumentNullException("content");
+                string finalPath=Path.Combine(outputDirectory,fileName);
+                string finalDirectory=Path.GetDirectoryName(finalPath);
+                Directory.CreateDirectory(finalDirectory);
+                string temporaryPath=Path.Combine(finalDirectory,
+                    CreateTemporaryName(Path.GetFileName(fileName)));
+                try
+                {
+                    using(var stream=new FileStream(temporaryPath,FileMode.CreateNew,
+                        FileAccess.Write,FileShare.None))
+                    {stream.Write(content,0,content.Length);stream.Flush(true);}
+                }
+                catch
+                {
+                    try{deleteFile(temporaryPath);}catch(Exception){}
+                    throw;
+                }
+                staged.Add(new StagedPublication(temporaryPath,finalPath,
+                    linkOperation,deleteFile));
             }
 
             /// <summary>

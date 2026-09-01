@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openggf.override-resume-first-divergence-reference.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "game", "boundary", "pcm"],
+  "properties": {
+    "schema": {"const": "openggf.override-resume-first-divergence-reference.v1"},
+    "game": {"enum": ["s1", "s2"]},
+    "boundary": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "request", "admission", "request_frame", "admission_frame", "frame", "pc", "service_token", "native_ordinal", "fix_bugs", "writes_dac_disable_zero", "writes"],
+          "properties": {
+            "type": {"const": "override_resume"},
+            "request": {"const": "cfFadeInToPrevious"},
+            "admission": {"const": "native_restore_entry"},
+            "request_frame": {"type": "integer", "minimum": 0},
+            "admission_frame": {"type": "integer", "minimum": 0},
+            "frame": {"type": "integer", "minimum": 0},
+            "pc": {"const": 469780},
+            "service_token": {"type": "integer", "minimum": 1},
+            "native_ordinal": {"type": "integer", "minimum": 1},
+            "fix_bugs": {"const": 0},
+            "writes_dac_disable_zero": {"const": false},
+            "writes": {"$ref": "#/$defs/writes"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request", "admission", "request_pc", "pc", "service_token", "service_begin_ordinal", "native_ordinal", "frame", "fix_driver_bugs", "restores_saved_priority", "restores_psg_noise", "writes"],
+          "properties": {
+            "request": {"const": "cfFadeInToPrevious"},
+            "admission": {"const": "native_service_completion"},
+            "request_pc": {"const": 3381},
+            "pc": {"const": 3508},
+            "service_token": {"type": "integer", "minimum": 1},
+            "service_begin_ordinal": {"type": "integer", "minimum": 1},
+            "native_ordinal": {"type": "integer", "minimum": 1},
+            "frame": {"type": "integer", "minimum": 0},
+            "fix_driver_bugs": {"const": 0},
+            "restores_saved_priority": {"const": true},
+            "restores_psg_noise": {"const": false},
+            "writes": {"$ref": "#/$defs/writes"}
+          }
+        }
+      ]
+    },
+    "pcm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection", "row", "offset", "sample_rate", "channels", "format", "stereo_frames", "byte_count", "pcm_hex", "sha256"],
+      "properties": {
+        "type": {"const": "native_pcm_packet"},
+        "selection": {"enum": ["service_frame", "following_row"]},
+        "row": {"type": "integer", "minimum": 0},
+        "offset": {"enum": [0, 1]},
+        "sample_rate": {"type": "integer", "minimum": 1},
+        "channels": {"const": 2},
+        "format": {"const": "s16le-interleaved-stereo"},
+        "stereo_frames": {"type": "integer", "minimum": 1},
+        "byte_count": {"type": "integer", "minimum": 4},
+        "pcm_hex": {"type": "string", "pattern": "^(?:[0-9a-f]{2})+$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "$defs": {
+    "writes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["native_ordinal", "event_kind", "subject", "value", "pc", "source_cpu", "data", "port", "register"],
+        "properties": {
+          "native_ordinal": {"type": "integer", "minimum": 1},
+          "event_kind": {"type": "integer", "minimum": 0},
+          "subject": {"type": "integer", "minimum": 0},
+          "value": {"type": "integer", "minimum": 0, "maximum": 255},
+          "pc": {"type": "integer", "minimum": 0},
+          "source_cpu": {"type": "integer", "minimum": 0},
+          "data": {"type": "boolean"},
+          "port": {"type": "integer", "minimum": 0, "maximum": 1},
+          "register": {"type": "integer", "minimum": 0, "maximum": 255}
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,9 @@
 using System;
 using System.IO;
+using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
+using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless
 {
@@ -113,6 +116,78 @@ namespace OpenGGF.BizHawk.Headless
                 result[index * 2 + 1] = alphabet[value[index] & 15];
             }
             return new string(result);
+        }
+    }
+
+    /// <summary>Hashes the exact UTF-8 characters forwarded to a raw sink.</summary>
+    internal sealed class OverrideResumeRawDigestTextWriter : TextWriter
+    {
+        internal sealed class Evidence
+        {
+            internal Evidence(long byteCount,string sha256)
+            {ByteCount=byteCount;Sha256=sha256;}
+            internal long ByteCount {get;private set;}
+            internal string Sha256 {get;private set;}
+        }
+        private readonly TextWriter inner;
+        private readonly SHA256 digest=SHA256.Create();
+        private readonly Encoding encoding=new UTF8Encoding(false,true);
+        private long byteCount;
+        private bool finished;
+
+        internal OverrideResumeRawDigestTextWriter(TextWriter value)
+        {inner=value??throw new ArgumentNullException("value");NewLine="\n";}
+        public override Encoding Encoding {get{return encoding;}}
+        public override void Write(char value){Write(new[]{value},0,1);}
+        public override void Write(string value)
+        {if(value==null)return;Write(value.ToCharArray(),0,value.Length);}
+        public override void Write(char[] buffer,int index,int count)
+        {
+            if(finished)throw new InvalidOperationException(
+                "The raw digest writer is already finalized.");
+            if(buffer==null)throw new ArgumentNullException("buffer");
+            byte[] bytes=encoding.GetBytes(buffer,index,count);
+            if(bytes.Length!=0)digest.TransformBlock(bytes,0,bytes.Length,bytes,0);
+            byteCount=checked(byteCount+bytes.Length);
+            inner.Write(buffer,index,count);
+        }
+        public override void Flush(){inner.Flush();}
+        internal Evidence Finish()
+        {
+            if(finished)throw new InvalidOperationException(
+                "The raw digest writer is already finalized.");
+            inner.Flush();digest.TransformFinalBlock(new byte[0],0,0);
+            finished=true;
+            return new Evidence(byteCount,Hex(digest.Hash));
+        }
+        private static string Hex(byte[] value)
+        {var result=new char[value.Length*2];const string alphabet="0123456789abcdef";
+            for(int i=0;i<value.Length;i++){result[i*2]=alphabet[value[i]>>4];
+                result[i*2+1]=alphabet[value[i]&15];}return new string(result);}
+    }
+
+    internal static class OverrideResumeFirstDivergenceAttestation
+    {
+        internal static JObject Create(string game,
+            OverrideResumeRawDigestTextWriter.Evidence evidence,
+            string authorityId,DateTime timestampUtc)
+        {
+            if(game!="s1"&&game!="s2")throw new ArgumentException(
+                "Attestation game must be s1 or s2.","game");
+            if(evidence==null)throw new ArgumentNullException("evidence");
+            if(string.IsNullOrEmpty(authorityId))throw new ArgumentException(
+                "Attestation authority identity is required.","authorityId");
+            DateTime utc=timestampUtc.ToUniversalTime();
+            return new JObject
+            {
+                ["schema"]="openggf.override-resume-first-divergence-attestation.v1",
+                ["capture_timestamp_utc"]=utc.ToString(
+                    "yyyy-MM-dd'T'HH:mm:ss'Z'",CultureInfo.InvariantCulture),
+                ["game"]=game,["raw_sha256"]=evidence.Sha256,
+                ["raw_byte_count"]=evidence.ByteCount,["status"]="ok",
+                ["fault_count"]=0,["overflow_count"]=0,
+                ["authority_id"]=authorityId
+            };
         }
     }
 }

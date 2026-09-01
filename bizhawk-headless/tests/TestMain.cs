@@ -216,6 +216,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             S3KHookAbsenceTests.Register(tests);
             SmokeCaptureRunnerTests.Register(tests);
             NoReplacePublisherTests.Register(tests);
+            OverrideResumeFirstDivergenceExtractorTests.Register(tests);
+            OverrideResumeFirstDivergencePublisherTests.Register(tests);
             TracePayloadCompressorTests.Register(tests);
             // These two classes drive the CLI in-process, and the CLI
             // wraps its capture in NativeStandardOutputSilencer, which

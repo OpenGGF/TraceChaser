@@ -22,6 +22,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
             tests.Add(new TestMain.TestCase(
+                "TraceCli override-resume publisher accepts only the closed eight-input shape",
+                OverrideResumePublisherAcceptsOnlyClosedShape));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli mode defaults to smoke and accepts explicit values",
                 ModeDefaultsToSmokeAndAcceptsExplicitValues));
             tests.Add(new TestMain.TestCase(
@@ -147,6 +150,47 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 S3kCompleteRunAcceptsNonOutputEnvironment,
                 game: "s3k",
                 serial: true));
+        }
+
+        private static void OverrideResumePublisherAcceptsOnlyClosedShape()
+        {
+            string root=TestScratch.CreateRootPath("override-resume-cli");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string trace=Path.Combine(root,"tools","tracechaser");
+                Directory.CreateDirectory(trace);
+                string[] files=new string[8];
+                for(int index=0;index<files.Length;index++)
+                {
+                    files[index]=Path.Combine(root,"input-"+index+".json");
+                    File.WriteAllText(files[index],"{}\n",new UTF8Encoding(false));
+                }
+                string[] args=
+                {
+                    OverrideResumePublisherCommandOptions.Mode,
+                    "--tracechaser-root",trace,
+                    "--input-repository-root",root,
+                    "--s1-raw-1",files[0],"--s1-attestation-1",files[1],
+                    "--s1-raw-2",files[2],"--s1-attestation-2",files[3],
+                    "--s2-raw-1",files[4],"--s2-attestation-1",files[5],
+                    "--s2-raw-2",files[6],"--s2-attestation-2",files[7],
+                    "--fixture-root",Path.Combine(root,"src","test","resources",
+                        "audio","parity")
+                };
+                OverrideResumePublisherCommandOptions parsed=
+                    OverrideResumePublisherCommandOptions.Parse(args);
+                AssertEx.Equal(root,parsed.InputRoot);
+                var changed=(string[])args.Clone();
+                changed[changed.Length-2]="--frame";
+                AssertEx.Throws<ArgumentException>(() =>
+                    OverrideResumePublisherCommandOptions.Parse(changed),
+                    "Unknown override-resume publisher argument");
+            }
+            finally
+            {
+                if(Directory.Exists(root))Directory.Delete(root,true);
+            }
         }
 
         private static void CreditsDemoSelectorsAreStrict()
@@ -307,7 +351,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 }, "already exists");
                 AssertEx.Equal("existing\n", File.ReadAllText(output));
 
-                string failedOutput = Path.Combine(root, "failed.jsonl");
+                string failedOutput = Path.Combine(root, "failed.raw.jsonl");
                 AssertCompleteAudioFailure(new[]
                 {
                     "--complete-audio-game", "s2",

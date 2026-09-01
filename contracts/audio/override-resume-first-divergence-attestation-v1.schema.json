@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openggf.override-resume-first-divergence-attestation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "capture_timestamp_utc", "game", "raw_sha256",
+    "raw_byte_count", "status", "fault_count", "overflow_count", "authority_id"
+  ],
+  "properties": {
+    "schema": {"const": "openggf.override-resume-first-divergence-attestation.v1"},
+    "capture_timestamp_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "game": {"enum": ["s1", "s2"]},
+    "raw_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "raw_byte_count": {"type": "integer", "minimum": 1},
+    "status": {"const": "ok"},
+    "fault_count": {"const": 0},
+    "overflow_count": {"const": 0},
+    "authority_id": {"type": "string", "minLength": 1}
+  }
+}

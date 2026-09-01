@@ -453,10 +453,20 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     new UTF8Encoding(false));
                 MakeExecutable(fakeMono);
 
+                string[] runArguments =
+                {
+                    "--tracechaser-root", Path.Combine(ToolDirectory, ".."),
+                    "--input-repository-root", RepositoryRoot,
+                    "--fixture-root", Path.Combine(
+                        RepositoryRoot, "src", "test", "resources"),
+                    "--output", Path.Combine(root, "capture"),
+                    "--probe", "value"
+                };
                 var start = new ProcessStartInfo
                 {
                     FileName = "/bin/bash",
-                    Arguments = Quote(runScript) + " --probe value",
+                    Arguments = Quote(runScript) + " " + string.Join(" ",
+                        runArguments.Select(Quote).ToArray()),
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
@@ -474,12 +484,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ProcessResult result = RunProcess(start);
                 AssertEx.Equal(0, result.ExitCode);
                 AssertEx.Equal(string.Empty, result.StandardOutput);
-                AssertEx.Equal(string.Empty, result.StandardError);
+                AssertContains(result.StandardError,
+                    "Configuration: Release Platform: AnyCPU");
                 AssertEx.Equal(
                     "absent\n",
                     NormalizeLf(File.ReadAllText(capturedEnvironment)));
                 string[] arguments = File.ReadAllLines(capturedArguments);
-                AssertEx.Equal(3, arguments.Length);
+                AssertEx.Equal(runArguments.Length + 1, arguments.Length);
                 AssertEx.Equal(
                     Path.Combine(
                         ToolDirectory,
@@ -487,8 +498,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         "Release",
                         "BizHawk.Headless.Gpgx.exe"),
                     arguments[0]);
-                AssertEx.Equal("--probe", arguments[1]);
-                AssertEx.Equal("value", arguments[2]);
+                for (int i = 0; i < runArguments.Length; i++)
+                {
+                    AssertEx.Equal(runArguments[i], arguments[i + 1]);
+                }
             }
             finally
             {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Newtonsoft.Json;
 
 namespace OpenGGF.BizHawk.Headless
 {
@@ -45,7 +46,7 @@ namespace OpenGGF.BizHawk.Headless
             string capabilityPath, string outputPath)
         {
             CaptureResult result = null;
-            PublishRaw(outputPath, output =>
+            PublishRawWithAttestation(outputPath, output =>
             {
                 result = CaptureRawPinnedCore(romPath, moviePath, manifestPath,
                     capabilityPath, output, S2AudioObserverProfile.ExclusiveEnd,
@@ -67,6 +68,47 @@ namespace OpenGGF.BizHawk.Headless
             string outputPath, Action<TextWriter> capture)
         {
             PublishRaw(outputPath, capture);
+        }
+
+        internal static void PublishRawWithAttestationForTesting(
+            string outputPath,Action<TextWriter> capture)
+        {
+            PublishRawWithAttestation(outputPath,capture);
+        }
+
+        private static void PublishRawWithAttestation(
+            string outputPath,Action<TextWriter> capture)
+        {
+            if(string.IsNullOrEmpty(outputPath)||!Path.IsPathRooted(outputPath))
+                throw new ArgumentException(
+                    "The S2 raw staging output path must be absolute.","outputPath");
+            if(capture==null)throw new ArgumentNullException("capture");
+            string fullPath=Path.GetFullPath(outputPath);
+            string fileName=Path.GetFileName(fullPath);
+            const string suffix=".raw.jsonl";
+            if(string.IsNullOrEmpty(fileName)
+                ||!fileName.EndsWith(suffix,StringComparison.Ordinal))
+                throw new ArgumentException(
+                    "The S2 authoritative raw output must end in .raw.jsonl.",
+                    "outputPath");
+            string attestationName=fileName.Substring(0,
+                fileName.Length-suffix.Length)+".attestation.json";
+            var publisher=new NoReplacePublisher();
+            using(NoReplacePublisher.StagedPublicationSet staged=
+                publisher.StageAll(Path.GetDirectoryName(fullPath),
+                    new[]{fileName,attestationName},writers=>
+                    {
+                        var hashing=new OverrideResumeRawDigestTextWriter(writers[0]);
+                        capture(hashing);
+                        OverrideResumeRawDigestTextWriter.Evidence evidence=
+                            hashing.Finish();
+                        writers[1].Write(OverrideResumeFirstDivergenceAttestation
+                            .Create("s2",evidence,
+                                "s2-native-gpgx-observer-abi4",DateTime.UtcNow)
+                            .ToString(Formatting.None));
+                        writers[1].Write('\n');
+                    }))
+            {staged.Publish();}
         }
 
         private static void PublishRaw(

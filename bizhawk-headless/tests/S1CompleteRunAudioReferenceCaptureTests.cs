@@ -4648,6 +4648,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Throws<IOException>(
                     () => CommandLineOptions.Parse(args),
                     S1CompleteRunAudioReferenceCapture.RawFileName);
+                File.Delete(Path.Combine(scratch,
+                    S1CompleteRunAudioReferenceCapture.RawFileName));
+                File.WriteAllText(Path.Combine(scratch,
+                    S1CompleteRunAudioReferenceCapture.AttestationFileName),
+                    "occupied");
+                AssertEx.Throws<IOException>(
+                    () => CommandLineOptions.Parse(args),
+                    S1CompleteRunAudioReferenceCapture.AttestationFileName);
             }
             finally
             {

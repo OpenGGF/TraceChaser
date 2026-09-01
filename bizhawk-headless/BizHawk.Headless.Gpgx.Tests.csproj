@@ -64,6 +64,8 @@
     <Compile Include="tests/GpgxS3kAudioParityManifestTests.cs" />
     <Compile Include="tests/S3kSfxLifecycleReferenceCaptureTests.cs" />
     <Compile Include="tests/NoReplacePublisherTests.cs" />
+    <Compile Include="tests/OverrideResumeFirstDivergenceExtractorTests.cs" />
+    <Compile Include="tests/OverrideResumeFirstDivergencePublisherTests.cs" />
     <Compile Include="tests/EndToEndTests.cs" />
     <Compile Include="tests/RunSegmentCollector.cs" />
     <Compile Include="tests/S1AuxEventEngineTests.cs" />
