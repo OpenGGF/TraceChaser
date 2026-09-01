@@ -197,7 +197,10 @@ namespace OpenGGF.BizHawk.Headless
                         sink.Begin(observer.CaptureBoundaryFrontierAndResetPublication());
                     S1TraceCaptureRunner.ApplyFrame(rows.Current, host);
                     CompleteRunAudioObserver.FrameCapture capture =
-                        observer.CaptureCanonicalFrame(host.Advance);
+                        observer.CaptureCanonicalFrame(row, host.Advance);
+                    if (capture.Bk2Row != row)
+                        throw new InvalidDataException(
+                            "The S2 observer frame origin does not match the BK2 loop row.");
                     if (row >= firstRow)
                     {
                         sink.Frame(row, capture);

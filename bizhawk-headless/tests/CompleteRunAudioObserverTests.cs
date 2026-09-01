@@ -77,6 +77,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 RestartsPublishedCoordinatesAtCarriedBoundary,
                 serial: true));
             tests.Add(new TestMain.TestCase(
+                "CompleteRunAudioObserverTests retain authoritative carried service origins",
+                RetainsAuthoritativeCarriedServiceOrigins,
+                serial: true));
+            tests.Add(new TestMain.TestCase(
                 "CompleteRunAudioObserverTests report bounded native tail on end failure",
                 ReportsBoundedNativeTailOnEndFailure,
                 serial: true));
@@ -1388,6 +1392,32 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.CaptureCanonicalFrame(()=>{});
             AssertEx.Equal(0L,capture.FlattenedChipOrdinals[0]);
             AssertEx.Equal((byte)0x2a,observer.YmPort0Address);
+        }
+
+        private static void RetainsAuthoritativeCarriedServiceOrigins()
+        {
+            var api=new FakeTraceApi{Events=new[]{
+                new GpgxAudioTraceEvent{Ordinal=0,Kind=8,ServiceToken=9,
+                    ServiceKindId=2,SourceCpu=3},
+                new GpgxAudioTraceEvent{Ordinal=1,Kind=9,ServiceToken=9,
+                    ServiceKindId=2,SourceCpu=3},
+                Canonical(2,1,1,0,2,0,1,0x100,0)}};
+            CompleteRunAudioObserver observer=CreateCanonical(api);
+
+            CompleteRunAudioObserver.FrameCapture frame=
+                observer.CaptureCanonicalFrame(37,()=>{});
+            AssertEx.Equal(37,frame.Bk2Row);
+            AssertEx.Equal(37,frame.Services[0].BeginRow);
+            AssertEx.Equal((uint)0,frame.Services[0].BeginNativeOrdinal);
+            CompleteRunAudioObserver.CutoffFrontier boundary=
+                observer.CaptureBoundaryFrontierAndResetPublication();
+            AssertEx.Equal(37,boundary.ActiveServices[0].BeginRow);
+            AssertEx.Equal((uint)2,boundary.ActiveServices[0].BeginNativeOrdinal);
+
+            CompleteRunAudioObserver.CutoffFrontier afterReset=
+                observer.CaptureCutoffFrontier();
+            AssertEx.Equal(37,afterReset.ActiveServices[0].BeginRow);
+            AssertEx.Equal((uint)2,afterReset.ActiveServices[0].BeginNativeOrdinal);
         }
 
         private static GpgxAudioTraceEvent Event(uint ordinal, byte kind,

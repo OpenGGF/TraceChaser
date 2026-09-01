@@ -295,6 +295,7 @@ namespace OpenGGF.BizHawk.Headless
                 BeginCoordinate=b.BeginCoordinate;EndCoordinate=b.EndCoordinate;
                 BeginPc=b.BeginPc;EndPc=b.EndPc;Cancelled=b.Cancelled;
                 BeginHookToken=b.BeginHookToken;BeginSourceCpu=b.BeginSourceCpu;
+                BeginRow=b.BeginRow;BeginNativeOrdinal=b.BeginNativeOrdinal;
                 EndHookToken=b.EndHookToken;
                 IsComplete=complete;
                 chip0=b.Chip0;chip1=b.Chip1;chip2=b.Chip2;chip3=b.Chip3;
@@ -308,6 +309,7 @@ namespace OpenGGF.BizHawk.Headless
             public long BeginCoordinate{get;private set;} public long EndCoordinate{get;private set;}
             public uint BeginPc{get;private set;} public uint EndPc{get;private set;}
             public ushort BeginHookToken{get;private set;} public byte BeginSourceCpu{get;private set;}
+            public int BeginRow{get;private set;} public uint BeginNativeOrdinal{get;private set;}
             public bool Cancelled{get;private set;}
             public bool IsComplete{get;private set;}
             public ushort EndHookToken{get;private set;}
@@ -368,15 +370,22 @@ namespace OpenGGF.BizHawk.Headless
             private readonly ReadOnlyCollection<DeferredBeginEvidence> deferredBeginsView;
             internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
                 List<ResetRecord> resets,long frameBase)
-                :this(raw,completed,resets,frameBase,(DeferredBeginReservation)null){}
+                :this(raw,completed,resets,frameBase,(DeferredBeginReservation)null,-1){}
             internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
                 List<ResetRecord> resets,long frameBase,DeferredBeginReservation deferred)
+                :this(raw,completed,resets,frameBase,deferred,-1){}
+            internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
+                List<ResetRecord> resets,long frameBase,DeferredBeginReservation deferred,int bk2Row)
             {RawEvents=Array.AsReadOnly(raw);this.completed=completed.ToArray();resetRecords=resets.ToArray();this.frameBase=frameBase;
                 deferredBegins=deferred==null?new DeferredBeginEvidence[0]:new[]{new DeferredBeginEvidence(deferred)};
-                deferredBeginsView=Array.AsReadOnly(deferredBegins);}
+                deferredBeginsView=Array.AsReadOnly(deferredBegins);Bk2Row=bk2Row;}
             internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
                 List<ResetRecord> resets,long frameBase,
                 List<DeferredBeginReservation> deferred)
+                :this(raw,completed,resets,frameBase,deferred,-1){}
+            internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
+                List<ResetRecord> resets,long frameBase,
+                List<DeferredBeginReservation> deferred,int bk2Row)
             {
                 RawEvents=Array.AsReadOnly(raw);this.completed=completed.ToArray();
                 resetRecords=resets.ToArray();this.frameBase=frameBase;
@@ -384,8 +393,10 @@ namespace OpenGGF.BizHawk.Headless
                 for(int i=0;i<deferredBegins.Length;i++)
                     deferredBegins[i]=new DeferredBeginEvidence(deferred[i]);
                 deferredBeginsView=Array.AsReadOnly(deferredBegins);
+                Bk2Row=bk2Row;
             }
             public IReadOnlyList<GpgxAudioTraceEvent> RawEvents{get;private set;}
+            public int Bk2Row{get;private set;}
             public bool RawEventsRetained{get{return RawEvents.Count!=0;}}
             public IReadOnlyList<DeferredBeginEvidence> DeferredBegins{get{return deferredBeginsView;}}
             public IReadOnlyList<DriverService> Services
@@ -408,6 +419,7 @@ namespace OpenGGF.BizHawk.Headless
         internal sealed class ServiceBuilder
         {
             internal ushort Token,ParentToken; internal byte Kind,Depth; internal long BeginCoordinate,EndCoordinate;
+            internal int BeginRow=-1; internal uint BeginNativeOrdinal;
             internal ushort CurrentParentToken; internal byte CurrentDepth;
             internal ushort RootToken;
             internal uint BeginPc,EndPc; internal ushort BeginHookToken;internal byte BeginSourceCpu;
@@ -525,16 +537,23 @@ namespace OpenGGF.BizHawk.Headless
 
         public FrameCapture CaptureCanonicalFrame(Action frameAdvance)
         {
-            CaptureFrameCore(frameAdvance, (buffer, count) => { },true);
+            CaptureFrameCore(frameAdvance, (buffer, count) => { },true,-1);
+            return LastCapture;
+        }
+
+        public FrameCapture CaptureCanonicalFrame(int bk2Row,Action frameAdvance)
+        {
+            if(bk2Row<0)throw new ArgumentOutOfRangeException("bk2Row");
+            CaptureFrameCore(frameAdvance, (buffer, count) => { },true,bk2Row);
             return LastCapture;
         }
 
         public void CaptureFrame(Action frameAdvance,
             Action<GpgxAudioTraceEvent[], int> consume)
-        {CaptureFrameCore(frameAdvance,consume,false);}
+        {CaptureFrameCore(frameAdvance,consume,false,-1);}
 
         private void CaptureFrameCore(Action frameAdvance,
-            Action<GpgxAudioTraceEvent[], int> consume,bool retainRaw)
+            Action<GpgxAudioTraceEvent[], int> consume,bool retainRaw,int bk2Row)
         {
             if (frameAdvance == null) throw new ArgumentNullException("frameAdvance");
             if (consume == null) throw new ArgumentNullException("consume");
@@ -629,7 +648,7 @@ namespace OpenGGF.BizHawk.Headless
                     drainedFrame = true;
                     if (drained != 0) throw new InvalidOperationException("An empty drain returned events.");
                     var emptyCapture = new FrameCapture(EmptyEvents,new List<ServiceBuilder>(),
-                        new List<ResetRecord>(),globalEventCoordinate,pendingDeferredBegin);
+                        new List<ResetRecord>(),globalEventCoordinate,pendingDeferredBegin,bk2Row);
                     consume(EmptyEvents, 0);
                     LastCapture=retainRaw?emptyCapture:null;
                     return;
@@ -640,7 +659,7 @@ namespace OpenGGF.BizHawk.Headless
                 RequireOk(api.Drain(drainBuffer, count, out copied), "drain");
                 drainedFrame = true;
                 if (copied != count) throw new InvalidOperationException("The native audio observer returned a short drain.");
-                ProjectionResult projected = Project(drainBuffer,checked((int)count),retainRaw);
+                ProjectionResult projected = Project(drainBuffer,checked((int)count),retainRaw,bk2Row);
                 consume(drainBuffer, checked((int)count));
                 CommitProjection(projected);
             }
@@ -671,7 +690,7 @@ namespace OpenGGF.BizHawk.Headless
             internal byte Kind,Depth;
         }
 
-        private ProjectionResult Project(GpgxAudioTraceEvent[] events,int count,bool retainRaw)
+        private ProjectionResult Project(GpgxAudioTraceEvent[] events,int count,bool retainRaw,int bk2Row)
         {
             var active=projectionActive;active.Clear();
             for(int i=0;i<activeServices.Count;i++)active.Add(Clone(activeServices[i]));
@@ -725,6 +744,7 @@ namespace OpenGGF.BizHawk.Headless
                     var b=new ServiceBuilder{Token=e.ServiceToken,ParentToken=e.ParentToken,Kind=e.ServiceKindId,
                         Depth=e.Depth,CurrentParentToken=e.ParentToken,CurrentDepth=e.Depth,
                         BeginCoordinate=coordinate,BeginPc=e.Pc,EventCount=1,
+                        BeginRow=bk2Row,BeginNativeOrdinal=e.Ordinal,
                         BeginHookToken=e.Subject,BeginSourceCpu=e.SourceCpu,
                         RootToken=active.Count==0?e.ServiceToken:active[0].RootToken};
                     active.Add(b);
@@ -879,6 +899,7 @@ namespace OpenGGF.BizHawk.Headless
                         throw Invalid("reset begin fields");
                     reset=new ServiceBuilder{Token=e.ServiceToken,Kind=e.ServiceKindId,Depth=0,CurrentDepth=0,
                         BeginCoordinate=coordinate,BeginPc=0,IsReset=true,ResetPower=(e.Flags&1)!=0,EventCount=1,
+                        BeginRow=bk2Row,BeginNativeOrdinal=e.Ordinal,
                         RootToken=e.ServiceToken};
                     port0=port1=0;nowArmed=armHookToken==0;epoch++;
                     break;
@@ -1055,7 +1076,7 @@ namespace OpenGGF.BizHawk.Headless
             if(retainRaw){raw=new GpgxAudioTraceEvent[count];Array.Copy(events,raw,count);}
             if(deferred!=null)deferredBegins.Add(Clone(deferred));
             return new ProjectionResult{Capture=retainRaw?new FrameCapture(raw,complete,resets,
-                    globalEventCoordinate,deferredBegins):null,
+                    globalEventCoordinate,deferredBegins,bk2Row):null,
                 Active=active,Completed=complete,Pending=pending,
                 Port0=port0,Port1=port1,Epoch=epoch,Armed=nowArmed,
                 Deferred=deferred,EventCount=count};
@@ -1304,6 +1325,7 @@ namespace OpenGGF.BizHawk.Headless
                 CurrentParentToken=b.CurrentParentToken,CurrentDepth=b.CurrentDepth,
                 RootToken=b.RootToken,
                 BeginCoordinate=b.BeginCoordinate,EndCoordinate=b.EndCoordinate,BeginPc=b.BeginPc,EndPc=b.EndPc,
+                BeginRow=b.BeginRow,BeginNativeOrdinal=b.BeginNativeOrdinal,
                 BeginHookToken=b.BeginHookToken,BeginSourceCpu=b.BeginSourceCpu,
                 Cancelled=b.Cancelled,IsReset=b.IsReset,ResetPower=b.ResetPower,ActiveRange=b.ActiveRange,
                 EventCount=b.EventCount,

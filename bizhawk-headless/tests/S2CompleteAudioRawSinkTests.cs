@@ -107,6 +107,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 Token = 9, Kind = 1, Depth = 0,
                 CurrentParentToken = 0, CurrentDepth = 0,
                 BeginCoordinate = 1, EndCoordinate = 2,
+                BeginRow = 0, BeginNativeOrdinal = 0,
                 BeginPc = 0, EndPc = 0,
                 BeginHookToken = 0, BeginSourceCpu = 0,
                 EndHookToken = 0
@@ -163,7 +164,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(4, lines.Length);
             JObject metadata = JObject.Parse(lines[0]);
             AssertEx.Equal("metadata", (string)metadata["type"]);
-            AssertEx.Equal("openggf.s2-complete-run-audio-raw.v1",
+            AssertEx.Equal("openggf.s2-complete-run-audio-raw.v2",
                 (string)metadata["schema"]);
             AssertEx.Equal(S2AudioObserverProfile.RomSha1,
                 (string)metadata["rom_sha1"]);

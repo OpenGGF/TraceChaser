@@ -50,7 +50,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
             AssertEx.Equal(true, observer != null);
             AssertEx.Equal(1, api.ConfigureCalls);
-            AssertEx.Equal((ushort)2, api.Config.AbiVersion);
+            AssertEx.Equal((ushort)4, api.Config.AbiVersion);
             AssertEx.Equal(1u, api.Config.Flags);
             AssertEx.Equal((byte)2, FindHook(api.Hooks, 9).Flags);
             AssertEx.Equal((byte)3, FindHook(api.Hooks, 10).Flags);
@@ -308,7 +308,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             internal GpgxAudioObserverAdapter.ServiceKind[] Kinds;
             internal GpgxAudioObserverAdapter.ServiceHook[] Hooks;
             internal GpgxAudioObserverAdapter.SnapshotRange[] Ranges;
-            public uint AbiVersion { get { return 2; } }
+            public uint AbiVersion { get { return 4; } }
             public uint EventSize { get { return 32; } }
             public uint Capacity { get { return 65536; } }
             public int Configure(ref GpgxAudioObserverAdapter.Config config,

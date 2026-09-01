@@ -58,6 +58,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(3, sink.FrameCalls);
             AssertEx.Equal(2, sink.FirstRow);
             AssertEx.Equal(4, sink.LastRow);
+            AssertEx.Equal(2, sink.FirstFrame.Bk2Row);
             AssertEx.Equal(1, sink.BoundaryCalls);
             AssertEx.Equal(1, sink.CutoffCalls);
             AssertEx.Equal(1, api.PublicationCalls);
@@ -107,6 +108,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(769, sink.FirstRow);
             AssertEx.Equal(769, sink.LastRow);
             AssertEx.Equal(1491, sink.FirstFrame.RawEvents.Count);
+            AssertEx.Equal(769, sink.FirstFrame.Bk2Row);
             Console.WriteLine("S2 audio row769 boundary: active="
                 + sink.Boundary.ActiveServices.Count + " pending="
                 + sink.Boundary.PendingServices.Count + " ym="

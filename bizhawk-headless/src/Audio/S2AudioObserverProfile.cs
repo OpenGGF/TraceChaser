@@ -430,7 +430,7 @@ namespace OpenGGF.BizHawk.Headless
                     hooks[index] = hook;
                 }
                 if (!beginSeen || !completionSeen) throw InvalidUploadChain();
-                config.AbiVersion = 2;
+                config.AbiVersion = 4;
                 config.Flags = 1;
                 return inner.Configure(ref config, mask, kinds, hooks, ranges);
             }

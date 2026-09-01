@@ -37,7 +37,7 @@ namespace OpenGGF.BizHawk.Headless
     /// </summary>
     internal sealed class S2CompleteAudioRawSink : IS2CompleteAudioCaptureSink
     {
-        internal const string Schema = "openggf.s2-complete-run-audio-raw.v1";
+        internal const string Schema = "openggf.s2-complete-run-audio-raw.v2";
         private readonly IS2CompleteAudioStateSource state;
         private readonly TextWriter output;
         private int lastRow = -1;
@@ -177,6 +177,8 @@ namespace OpenGGF.BizHawk.Headless
                 ["current_parent_token"]=service.CurrentParentToken,
                 ["current_depth"]=service.CurrentDepth,
                 ["begin_coordinate"]=service.BeginCoordinate,
+                ["begin_row"]=service.BeginRow,
+                ["begin_native_ordinal"]=service.BeginNativeOrdinal,
                 ["end_coordinate"]=service.EndCoordinate,
                 ["begin_pc"]=service.BeginPc, ["end_pc"]=service.EndPc,
                 ["begin_hook_token"]=service.BeginHookToken,
