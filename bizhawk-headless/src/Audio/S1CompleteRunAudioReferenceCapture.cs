@@ -27,6 +27,8 @@ namespace OpenGGF.BizHawk.Headless
             "openggf.s1-audio-service-manifest.v1";
         private const string RawSchema =
             "openggf.s1-complete-run-audio-raw.v1";
+        internal const string MovieSha256 =
+            "f2e817936d07b2b1f2b80d61451f174189509a2817da2b2349ce0e19b8a5567b";
 
         internal sealed class DeferredPublicationLimits
         {
@@ -214,6 +216,89 @@ namespace OpenGGF.BizHawk.Headless
 
             internal int RowCount { get; private set; }
             internal int CompletedFrames { get; private set; }
+        }
+
+        internal sealed class OverrideResumeEvidence
+        {
+            internal OverrideResumeEvidence(JObject boundary, JObject pcm)
+            { Boundary=boundary; Pcm=pcm; }
+            internal JObject Boundary { get; private set; }
+            internal JObject Pcm { get; private set; }
+        }
+
+        internal static OverrideResumeEvidence BuildOverrideResumeEvidence(
+            int requestFrame,int admissionFrame,int serviceFrame,
+            ushort serviceToken,uint nativeOrdinal,
+            IEnumerable<GpgxAudioTraceEvent> events,
+            OverrideResumeDiagnosticAudio.Packet packet,string selection)
+        {
+            if(requestFrame<0||admissionFrame<requestFrame
+                ||serviceFrame<admissionFrame)
+                throw new InvalidDataException(
+                    "The S1 override-resume semantic frame order is invalid.");
+            if(serviceToken==0||events==null||packet==null
+                ||(selection!="service_frame"&&selection!="following_row"))
+                throw new InvalidDataException(
+                    "The S1 override-resume evidence identity is incomplete.");
+            var writes=new JArray();
+            uint previous=0;bool first=true;
+            byte port0=0,port1=0;bool dacDisableZero=false;
+            foreach(GpgxAudioTraceEvent value in events)
+            {
+                if(value.ServiceToken!=serviceToken
+                    ||(value.Kind!=3&&value.Kind!=4))continue;
+                if(!first&&value.Ordinal<=previous)
+                    throw new InvalidDataException(
+                        "The S1 override-resume chip-write order regressed.");
+                first=false;previous=value.Ordinal;
+                byte port=value.Subject<2?(byte)0:(byte)1;
+                byte register=port==0?port0:port1;
+                bool data=value.Kind==4||value.Kind==3
+                    &&(value.Subject==1||value.Subject==3);
+                if(value.Kind==3&&value.Subject==0)port0=value.Value;
+                else if(value.Kind==3&&value.Subject==2)port1=value.Value;
+                else if(value.Kind==3&&data&&register==0x2B
+                    &&value.Value==0)dacDisableZero=true;
+                writes.Add(new JObject
+                {
+                    ["native_ordinal"]=value.Ordinal,
+                    ["event_kind"]=value.Kind,["subject"]=value.Subject,
+                    ["value"]=value.Value,["pc"]=value.Pc,
+                    ["source_cpu"]=value.SourceCpu,["data"]=data,
+                    ["port"]=port,["register"]=register
+                });
+            }
+            if(writes.Count==0)
+                throw new InvalidDataException(
+                    "The S1 resumed service owns no chip writes.");
+            if(dacDisableZero)
+                throw new InvalidDataException(
+                    "The shipped FixBugs=0 S1 restore unexpectedly wrote YM $2B=$00.");
+            var boundary=new JObject
+            {
+                ["request"]="cfFadeInToPrevious",
+                ["admission"]="native_restore_entry",
+                ["request_frame"]=requestFrame,
+                ["admission_frame"]=admissionFrame,
+                ["frame"]=serviceFrame,["pc"]=0x072B14,
+                ["service_token"]=serviceToken,
+                ["native_ordinal"]=nativeOrdinal,
+                ["fix_bugs"]=0,["writes_dac_disable_zero"]=false,
+                ["writes"]=writes
+            };
+            var pcm=new JObject
+            {
+                ["selection"]=selection,
+                ["row"]=selection=="service_frame"
+                    ?serviceFrame:serviceFrame+1,
+                ["offset"]=selection=="service_frame"?0:1,
+                ["sample_rate"]=packet.SampleRate,["channels"]=2,
+                ["format"]="s16le-interleaved-stereo",
+                ["stereo_frames"]=packet.StereoFrames,
+                ["byte_count"]=packet.ByteCount,
+                ["pcm_hex"]=packet.PcmHex,["sha256"]=packet.Sha256
+            };
+            return new OverrideResumeEvidence(boundary,pcm);
         }
 
         internal static bool IsManagedCorrelationEventKind(byte kind)
@@ -883,6 +968,9 @@ namespace OpenGGF.BizHawk.Headless
             Manifest manifest, TextWriter output)
         {
             if (movie == null) throw new ArgumentNullException("movie");
+            if (!(host is IOverrideResumeDiagnosticAudioHost))
+                throw new InvalidOperationException(
+                    "The S1 override-resume producer requires native diagnostic audio.");
             if (movie.FrameCount < manifest.ExclusiveEnd)
                 throw new InvalidDataException("The BK2 ends before S1 audio row 225100.");
             int row = 0;
@@ -900,7 +988,6 @@ namespace OpenGGF.BizHawk.Headless
                     session.ObservePreEpochFrame(observedRow, frame, () =>
                     {
                         S1TraceCaptureRunner.ApplyFrame(frame, host);
-                        host.Advance();
                     });
                     row++;
                 }
@@ -914,7 +1001,6 @@ namespace OpenGGF.BizHawk.Headless
                     session.CaptureFrame(capturedRow, frame, () =>
                     {
                         S1TraceCaptureRunner.ApplyFrame(frame, host);
-                        host.Advance();
                     });
                     row++;
                 }
@@ -927,6 +1013,29 @@ namespace OpenGGF.BizHawk.Headless
 
         internal sealed class Session : IDisposable
         {
+            private sealed class PendingOverrideResume
+            {
+                internal int RequestFrame,AdmissionFrame,ServiceFrame;
+                internal ushort ServiceToken;
+                internal uint NativeOrdinal;
+                internal GpgxAudioTraceEvent[] Events;
+            }
+
+            private sealed class ObserverDiagnosticAudioHost
+                : IOverrideResumeDiagnosticAudioHost
+            {
+                private readonly IOverrideResumeDiagnosticAudioHost inner;
+                private readonly Action advance;
+                internal ObserverDiagnosticAudioHost(
+                    IOverrideResumeDiagnosticAudioHost value,Action action)
+                {inner=value;advance=action;}
+                public int DiagnosticAudioSampleRate
+                {get{return inner.DiagnosticAudioSampleRate;}}
+                public void AdvanceDiagnosticAudio(){advance();}
+                public short[] DrainDiagnosticAudio(out int stereoFrames)
+                {return inner.DrainDiagnosticAudio(out stereoFrames);}
+            }
+
             private sealed class PendingManagedOccurrence
             {
                 internal ManagedHook Hook;
@@ -991,6 +1100,7 @@ namespace OpenGGF.BizHawk.Headless
             private readonly TextWriter output;
             private readonly DeferredPublicationLimits limits;
             private readonly CompleteRunAudioObserver observer;
+            private readonly IOverrideResumeDiagnosticAudioHost diagnosticAudio;
             private readonly List<IDisposable> callbacks = new List<IDisposable>();
             private readonly Queue<PendingManagedOccurrence> pendingManaged =
                 new Queue<PendingManagedOccurrence>();
@@ -1028,6 +1138,14 @@ namespace OpenGGF.BizHawk.Headless
             private byte cyclePreexistingSound;
             private long? cycleRequestId;
             private long? selectedRequestId;
+            private long? pendingOneUpRequestId;
+            private int pendingOneUpRequestFrame=-1;
+            private int pendingOneUpAdmissionFrame=-1;
+            private JObject frameRestoreEntry;
+            private List<GpgxAudioTraceEvent> frameNativeEvents;
+            private PendingOverrideResume pendingOverrideResume;
+            private bool overrideResumeSelected;
+            private bool overrideResumePcmSelected;
             private bool capturing;
             private bool publishing;
             private bool epochStarted;
@@ -1085,6 +1203,7 @@ namespace OpenGGF.BizHawk.Headless
                     ?? throw new ArgumentNullException("manifest");
                 this.output = output ?? throw new ArgumentNullException("output");
                 this.limits=limits??throw new ArgumentNullException("limits");
+                diagnosticAudio=host as IOverrideResumeDiagnosticAudioHost;
                 observer = manifest.CreateObserver(api);
                 try
                 {
@@ -1138,6 +1257,7 @@ namespace OpenGGF.BizHawk.Headless
                     {
                         ["type"]="metadata", ["schema"]=RawSchema,
                         ["rom_sha1"]=manifest.RomSha1,
+                        ["bk2_sha256"]=MovieSha256,
                         ["first_row"]=manifest.FirstRow,
                         ["exclusive_end"]=manifest.ExclusiveEnd,
                         ["native_abi"]=api.AbiVersion,
@@ -1153,6 +1273,12 @@ namespace OpenGGF.BizHawk.Headless
                     boundaryDeferredBegin=null;
                     for (int i=0;i<pendingRequestIds.Length;i++) pendingRequestIds[i]=null;
                     cycleQueue=-1;cycleRequestId=null;selectedRequestId=null;
+                    pendingOneUpRequestId=null;
+                    pendingOneUpRequestFrame=-1;
+                    pendingOneUpAdmissionFrame=-1;
+                    pendingOverrideResume=null;
+                    overrideResumeSelected=false;
+                    overrideResumePcmSelected=false;
                     nextRequestId=1;nextManagedCorrelationOrdinal=0;lastRow=-1;
                     epochStarted=true;
                 }
@@ -1254,6 +1380,12 @@ namespace OpenGGF.BizHawk.Headless
                 uint resetCancellationOrdinalBefore=expectedResetCancellationOrdinal;
                 bool serviceOpenBeforeAdvanceBefore=frameServiceOpenBeforeAdvance;
                 bool resetInputAssertedBefore=resetInputAssertedThisFrame;
+                long? oneUpRequestIdBefore=pendingOneUpRequestId;
+                int oneUpRequestFrameBefore=pendingOneUpRequestFrame;
+                int oneUpAdmissionFrameBefore=pendingOneUpAdmissionFrame;
+                PendingOverrideResume pendingOverrideBefore=pendingOverrideResume;
+                bool overrideSelectedBefore=overrideResumeSelected;
+                bool pcmSelectedBefore=overrideResumePcmSelected;
                 frameTransaction=transaction;
                     currentRow = row;
                     frameRecords = 0;
@@ -1268,6 +1400,8 @@ namespace OpenGGF.BizHawk.Headless
                     frameFinalizedEvidenceCharacters=0;
                     frameManagedCallbackCount=0;frameManagedRecordCount=0;
                     frameConsumedBatchGeneration=0;
+                    frameRestoreEntry=null;
+                    frameNativeEvents=new List<GpgxAudioTraceEvent>();
                 capturing = true;
                 publishing = publish;
                 bool nativeCaptureStarted=false;
@@ -1319,17 +1453,33 @@ namespace OpenGGF.BizHawk.Headless
                         if(publish)managedServices.Clear();
                     }
                     nativeCaptureStarted=true;
-                    observer.CaptureFrame(advance, (events, count) =>
+                    Action<GpgxAudioTraceEvent[],int> consume=(events,count) =>
                     {
                         for (int i = 0; i < count; i++)
                         {
+                            frameNativeEvents.Add(events[i]);
                             WriteNative(events[i]);
                             ApplyNativeLifecycle(events[i]);
                             ApplyDeferredOwnerTransfer(events,i,publish);
                             if (publish) CorrelateManaged(events[i]);
                             else CorrelateBoundaryManaged(events[i]);
                         }
-                    });
+                    };
+                    OverrideResumeDiagnosticAudio.Packet audio=null;
+                    if(diagnosticAudio==null)
+                    {
+                        observer.CaptureFrame(advance,consume);
+                    }
+                    else
+                    {
+                        audio=OverrideResumeDiagnosticAudio.AdvanceAndDrain(
+                            new ObserverDiagnosticAudioHost(diagnosticAudio,
+                                () => observer.CaptureFrame(() =>
+                                {
+                                    advance();
+                                    diagnosticAudio.AdvanceDiagnosticAudio();
+                                },consume)));
+                    }
                     if (pendingResetEvidence != null)
                         throw new InvalidOperationException(
                             "A reset input had no native ordered reset lifecycle.");
@@ -1337,6 +1487,8 @@ namespace OpenGGF.BizHawk.Headless
                         || pendingBoundaryManaged.Count != 0)
                         throw new InvalidOperationException(
                             "A managed S1 callback had no native ordered marker.");
+                    if(publish&&diagnosticAudio!=null)
+                        PublishOverrideResume(row,input,audio);
                     WriteFrame(new JObject { ["type"]="frame_end", ["row"]=row });
                     if(publish)
                     {
@@ -1366,6 +1518,12 @@ namespace OpenGGF.BizHawk.Headless
                     expectedResetCancellationOrdinal=resetCancellationOrdinalBefore;
                     frameServiceOpenBeforeAdvance=serviceOpenBeforeAdvanceBefore;
                     resetInputAssertedThisFrame=resetInputAssertedBefore;
+                    pendingOneUpRequestId=oneUpRequestIdBefore;
+                    pendingOneUpRequestFrame=oneUpRequestFrameBefore;
+                    pendingOneUpAdmissionFrame=oneUpAdmissionFrameBefore;
+                    pendingOverrideResume=pendingOverrideBefore;
+                    overrideResumeSelected=overrideSelectedBefore;
+                    overrideResumePcmSelected=pcmSelectedBefore;
                     if(nativeCaptureStarted||error is InvalidDataException
                         ||error is IOException||error is OverflowException
                         ||error is OutOfMemoryException)faulted=true;
@@ -1386,6 +1544,8 @@ namespace OpenGGF.BizHawk.Headless
                     currentRow = -1;
                     frameTransaction=null;
                     frameDeferredEvidence=null;
+                    frameRestoreEntry=null;
+                    frameNativeEvents=null;
                 }
             }
 
@@ -1404,6 +1564,11 @@ namespace OpenGGF.BizHawk.Headless
                 if(deferredPublicationBatch!=null)
                     throw new InvalidOperationException(
                         "A deferred publication batch remains at the terminal.");
+                if(diagnosticAudio!=null
+                    &&(!overrideResumeSelected||!overrideResumePcmSelected
+                        ||pendingOverrideResume!=null))
+                    throw new InvalidDataException(
+                        "The complete S1 raw capture has no exact override-resume service and PCM packet.");
                 try
                 {
                     output.Write(SerializeFixed(new JObject
@@ -1473,6 +1638,7 @@ namespace OpenGGF.BizHawk.Headless
                         ["action"]=hook.Action, ["registers"]=registerJson
                     };
                     if (returnPc.HasValue) record["return_pc"] = returnPc.Value;
+                    if(hook.Action=="RESTORE_BEGIN")frameRestoreEntry=record;
                     WriteFrame(record);
 
                     if(hook.Action!="SERVICE_BEGIN"
@@ -1532,6 +1698,9 @@ namespace OpenGGF.BizHawk.Headless
                                 : JValue.CreateNull()
                         };
                         WriteFrame(dispatch);
+                        if(sound==0x88&&pendingOneUpRequestId.HasValue
+                            &&selectedRequestId==pendingOneUpRequestId)
+                            pendingOneUpAdmissionFrame=currentRow;
                     }
 
                     captured = true;
@@ -2562,6 +2731,12 @@ namespace OpenGGF.BizHawk.Headless
                 byte sound = (byte)ReadM68kRegister("D0");
                 pendingRequestIds[queue] = requestId;
                 pendingRequestSounds[queue] = sound;
+                if(sound==0x88)
+                {
+                    pendingOneUpRequestId=requestId;
+                    pendingOneUpRequestFrame=currentRow;
+                    pendingOneUpAdmissionFrame=-1;
+                }
                 WriteFrame(new JObject
                 {
                     ["type"]="request", ["row"]=currentRow,
@@ -2621,6 +2796,70 @@ namespace OpenGGF.BizHawk.Headless
                 }
                 cycleQueue = -1;
                 cycleRequestId = null;
+            }
+
+            private void PublishOverrideResume(int row,Bk2Frame input,
+                OverrideResumeDiagnosticAudio.Packet audio)
+            {
+                if(pendingOverrideResume!=null)
+                {
+                    if(row!=pendingOverrideResume.ServiceFrame+1
+                        ||input!=null&&(input.Power||input.Reset)
+                        ||audio==null||audio.IsEmpty)
+                        throw new InvalidDataException(
+                            "The S1 override-resume following row has no PCM packet.");
+                    OverrideResumeEvidence following=BuildOverrideResumeEvidence(
+                        pendingOverrideResume.RequestFrame,
+                        pendingOverrideResume.AdmissionFrame,
+                        pendingOverrideResume.ServiceFrame,
+                        pendingOverrideResume.ServiceToken,
+                        pendingOverrideResume.NativeOrdinal,
+                        pendingOverrideResume.Events,audio,"following_row");
+                    following.Pcm["type"]="native_pcm_packet";
+                    WriteFrame(following.Pcm);
+                    overrideResumePcmSelected=true;
+                    pendingOverrideResume=null;
+                }
+
+                if(frameRestoreEntry==null||overrideResumeSelected)return;
+                if(!pendingOneUpRequestId.HasValue
+                    ||pendingOneUpRequestFrame<0
+                    ||pendingOneUpAdmissionFrame<pendingOneUpRequestFrame)
+                    throw new InvalidDataException(
+                        "The S1 native restore entry has no semantic one-up request/admission.");
+                JToken serviceToken=frameRestoreEntry["native_service_token"];
+                JToken ordinal=frameRestoreEntry["native_ordinal"];
+                if(serviceToken==null||ordinal==null
+                    ||(uint)frameRestoreEntry["pc"]!=0x072B14)
+                    throw new InvalidDataException(
+                        "The S1 restore entry lacks native service ownership.");
+                var pending=new PendingOverrideResume
+                {
+                    RequestFrame=pendingOneUpRequestFrame,
+                    AdmissionFrame=pendingOneUpAdmissionFrame,
+                    ServiceFrame=row,
+                    ServiceToken=(ushort)serviceToken,
+                    NativeOrdinal=(uint)ordinal,
+                    Events=frameNativeEvents.ToArray()
+                };
+                OverrideResumeEvidence evidence=BuildOverrideResumeEvidence(
+                    pending.RequestFrame,pending.AdmissionFrame,
+                    pending.ServiceFrame,pending.ServiceToken,
+                    pending.NativeOrdinal,pending.Events,audio,"service_frame");
+                evidence.Boundary["type"]="override_resume";
+                WriteFrame(evidence.Boundary);
+                overrideResumeSelected=true;
+                if(audio.IsEmpty)
+                    pendingOverrideResume=pending;
+                else
+                {
+                    evidence.Pcm["type"]="native_pcm_packet";
+                    WriteFrame(evidence.Pcm);
+                    overrideResumePcmSelected=true;
+                }
+                pendingOneUpRequestId=null;
+                pendingOneUpRequestFrame=-1;
+                pendingOneUpAdmissionFrame=-1;
             }
 
             private void WriteDecision(

@@ -2,7 +2,7 @@
   "schema": "openggf.gpgx-audio-capability.v1",
   "service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
   "observer_identity_sha256": "815bfde02d78fd6caa1b127ddefe7be28cc84d6fdeef5a75cecc31f186f84d86",
-  "task8_harness_executable_sha256": "65124fec7634c1ef9ca2f1c3dc35bec083dc47aa6fb3ffecbeb477063f97044a",
+  "task8_harness_executable_sha256": "5870d111386fcaa917baaf3aab0894bdc5f5f79d38e09fb9ae38c43399e89c5c",
   "collector_source_sha256": "e0be4819556cf74b82273cba7b748ddd13529f2dcc61029a302f4b0f8acfda89",
   "host_source_sha256": "c45d7de53bd29101d896fadb0a69eda1ae206d1fac43a5733afb3f4bd7f86be7",
   "runs": {

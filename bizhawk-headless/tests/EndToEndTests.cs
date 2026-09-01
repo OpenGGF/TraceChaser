@@ -1425,6 +1425,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "..",
                     "..",
                     "..",
+                    "..",
                     ".."));
             }
         }
@@ -1433,9 +1434,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             get
             {
-                return Path.Combine(
-                    RepositoryRoot,
-                    "tools",
+                return Path.Combine(RepositoryRoot, "tools", "tracechaser",
                     "bizhawk-headless");
             }
         }

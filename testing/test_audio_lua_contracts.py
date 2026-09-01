@@ -134,6 +134,8 @@ class S1CompleteRunProbeContractTests(unittest.TestCase):
             "musicRoleByTrackRam",
             "loader_roles",
             "M68K A5",
+            "override_resume_boundary",
+            "can_publish=false",
         ):
             self.assertIn(token, source)
         addresses = (
@@ -159,6 +161,7 @@ class S1CompleteRunProbeContractTests(unittest.TestCase):
             self.assertIn(frame, source)
         self.assertIn("frame < FIRST_FRAME", source)
         self.assertIn("baseline", source)
+        self.assertIn("Contract.overrideResumeBoundary()", source)
         self.assertNotIn("oneTickPerFrame", source)
         for forbidden in (
             "mainmemory.write", "memory.write", "joypad.set", "savestate.",

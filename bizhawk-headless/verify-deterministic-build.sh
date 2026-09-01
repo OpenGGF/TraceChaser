@@ -79,7 +79,7 @@ done
 
 for name in "path-a" "path with spaces"; do
   destination="$OUTPUT_ROOT/$name/bizhawk-headless"
-  validation_tool="$OUTPUT_ROOT/$name/tools/bizhawk-headless"
+  validation_tool="$OUTPUT_ROOT/$name/tools/tracechaser/bizhawk-headless"
   mkdir -p "$validation_tool"
   cp -a "$destination/bin" "$validation_tool/"
   cp -a "$destination/fixtures" "$validation_tool/"

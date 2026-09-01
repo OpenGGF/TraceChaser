@@ -17,6 +17,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioCaptureRunnerTests stop a prefix without consuming the preserved tail",
                 StopsPrefixWithoutConsumingPreservedTail));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioCaptureRunnerTests use one diagnostic advance between exact drains",
+                UsesOneDiagnosticAdvanceBetweenExactDrains));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioCaptureRunnerTests reject nonempty diagnostic carry-over",
+                RejectsNonemptyDiagnosticCarryOver));
             string rom = Environment.GetEnvironmentVariable("S2_ROM_PATH");
             string movie = ReferenceMoviePath();
             if (File.Exists(rom) && File.Exists(movie))
@@ -86,6 +92,32 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(5, result.ObservedRows);
             AssertEx.Equal(3, result.PublishedRows);
             AssertEx.Equal(5, host.CompletedFrame);
+        }
+
+        private static void UsesOneDiagnosticAdvanceBetweenExactDrains()
+        {
+            var audio = new ScriptedDiagnosticAudio(
+                new short[0], new short[] { 1, -2, 0x1234, -0x1234 });
+
+            OverrideResumeDiagnosticAudio.Packet packet =
+                OverrideResumeDiagnosticAudio.AdvanceAndDrain(audio);
+
+            AssertEx.Equal(1, audio.Advances);
+            AssertEx.Equal(2, audio.Drains);
+            AssertEx.Equal(2, packet.StereoFrames);
+            AssertEx.Equal(44100, packet.SampleRate);
+            AssertEx.Equal("0100feff3412cced", packet.PcmHex);
+        }
+
+        private static void RejectsNonemptyDiagnosticCarryOver()
+        {
+            var audio = new ScriptedDiagnosticAudio(
+                new short[] { 1, 2 }, new short[0]);
+            AssertEx.Throws<InvalidDataException>(
+                () => OverrideResumeDiagnosticAudio.AdvanceAndDrain(audio),
+                "carry-over");
+            AssertEx.Equal(0, audio.Advances);
+            AssertEx.Equal(1, audio.Drains);
         }
 
         private static void ProvesRealPowerOnToRow769Publication(
@@ -177,7 +209,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 Boundary = boundary;
             }
 
-            public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame)
+            public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame,
+                OverrideResumeDiagnosticAudio.Packet audio)
             {
                 if (FrameCalls == 0)
                 {
@@ -191,6 +224,34 @@ namespace OpenGGF.BizHawk.Headless.Tests
             public void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff)
             {
                 CutoffCalls++;
+            }
+        }
+
+        private sealed class ScriptedDiagnosticAudio
+            : IOverrideResumeDiagnosticAudioHost
+        {
+            private readonly Queue<short[]> drains = new Queue<short[]>();
+
+            internal ScriptedDiagnosticAudio(params short[][] packets)
+            {
+                foreach (short[] packet in packets) drains.Enqueue(packet);
+            }
+
+            internal int Advances;
+            internal int Drains;
+            public int DiagnosticAudioSampleRate { get { return 44100; } }
+
+            public void AdvanceDiagnosticAudio()
+            {
+                Advances++;
+            }
+
+            public short[] DrainDiagnosticAudio(out int stereoFrames)
+            {
+                Drains++;
+                short[] packet = drains.Dequeue();
+                stereoFrames = packet.Length / 2;
+                return packet;
             }
         }
     }

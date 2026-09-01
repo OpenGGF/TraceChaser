@@ -7,7 +7,8 @@ namespace OpenGGF.BizHawk.Headless
     internal interface IS2CompleteAudioCaptureSink
     {
         void Begin(CompleteRunAudioObserver.CutoffFrontier boundary);
-        void Frame(int row, CompleteRunAudioObserver.FrameCapture frame);
+        void Frame(int row, CompleteRunAudioObserver.FrameCapture frame,
+            OverrideResumeDiagnosticAudio.Packet audio);
         void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff);
     }
 
@@ -196,14 +197,31 @@ namespace OpenGGF.BizHawk.Headless
                     if (row == firstRow)
                         sink.Begin(observer.CaptureBoundaryFrontierAndResetPublication());
                     S1TraceCaptureRunner.ApplyFrame(rows.Current, host);
-                    CompleteRunAudioObserver.FrameCapture capture =
-                        observer.CaptureCanonicalFrame(row, host.Advance);
+                    IOverrideResumeDiagnosticAudioHost diagnostic =
+                        host as IOverrideResumeDiagnosticAudioHost;
+                    OverrideResumeDiagnosticAudio.Packet audio;
+                    CompleteRunAudioObserver.FrameCapture capture;
+                    if (diagnostic == null)
+                    {
+                        capture = observer.CaptureCanonicalFrame(row, host.Advance);
+                        audio = new OverrideResumeDiagnosticAudio.Packet(
+                            44100, 0, new byte[0]);
+                    }
+                    else
+                    {
+                        capture = null;
+                        audio = OverrideResumeDiagnosticAudio.AdvanceAndDrain(
+                            new ObserverAdvanceDiagnosticAudioHost(
+                                diagnostic, () => capture =
+                                    observer.CaptureCanonicalFrame(
+                                        row, diagnostic.AdvanceDiagnosticAudio)));
+                    }
                     if (capture.Bk2Row != row)
                         throw new InvalidDataException(
                             "The S2 observer frame origin does not match the BK2 loop row.");
                     if (row >= firstRow)
                     {
-                        sink.Frame(row, capture);
+                        sink.Frame(row, capture, audio);
                         published++;
                     }
                 }
@@ -213,6 +231,32 @@ namespace OpenGGF.BizHawk.Headless
             }
             sink.Complete(observer.CaptureCutoffFrontier());
             return new CaptureResult(exclusiveEnd, published);
+        }
+
+        /// <summary>
+        /// Makes the shared pre/post drain rule own the single call while the
+        /// observer still brackets that call with native BeginFrame/EndFrame.
+        /// </summary>
+        private sealed class ObserverAdvanceDiagnosticAudioHost
+            : IOverrideResumeDiagnosticAudioHost
+        {
+            private readonly IOverrideResumeDiagnosticAudioHost inner;
+            private readonly Action advance;
+
+            internal ObserverAdvanceDiagnosticAudioHost(
+                IOverrideResumeDiagnosticAudioHost value, Action action)
+            {
+                inner = value;
+                advance = action;
+            }
+
+            public int DiagnosticAudioSampleRate
+            { get { return inner.DiagnosticAudioSampleRate; } }
+
+            public void AdvanceDiagnosticAudio() { advance(); }
+
+            public short[] DrainDiagnosticAudio(out int stereoFrames)
+            { return inner.DrainDiagnosticAudio(out stereoFrames); }
         }
     }
 }

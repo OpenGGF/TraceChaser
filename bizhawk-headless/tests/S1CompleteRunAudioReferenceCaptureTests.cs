@@ -69,6 +69,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S1CompleteRunAudioReferenceCaptureTests correlate requests to later decisions",
                 CorrelatesRequestsToLaterDecisions));
             tests.Add(new TestMain.TestCase(
+                "S1CompleteRunAudioReferenceCaptureTests serialize exact restore service and PCM",
+                SerializesExactRestoreServiceAndPcm));
+            tests.Add(new TestMain.TestCase(
                 "S1CompleteRunAudioReferenceCaptureTests close with full state and native-only chip writes",
                 ClosesWithFullStateAndNativeOnlyChipWrites));
             tests.Add(new TestMain.TestCase(
@@ -203,6 +206,43 @@ namespace OpenGGF.BizHawk.Headless.Tests
             internal int RetainedCharacterCount;
         }
 
+        private static void SerializesExactRestoreServiceAndPcm()
+        {
+            var events = new[]
+            {
+                new GpgxAudioTraceEvent
+                {
+                    Ordinal=31,ServiceToken=9,ParentToken=0,Kind=3,
+                    ServiceKindId=4,Depth=0,SourceCpu=2,Pc=0x72B3A,
+                    Subject=0,Value=0x40
+                },
+                new GpgxAudioTraceEvent
+                {
+                    Ordinal=32,ServiceToken=9,ParentToken=0,Kind=3,
+                    ServiceKindId=4,Depth=0,SourceCpu=2,Pc=0x72B3E,
+                    Subject=1,Value=0x7F
+                }
+            };
+            S1CompleteRunAudioReferenceCapture.OverrideResumeEvidence evidence =
+                S1CompleteRunAudioReferenceCapture.BuildOverrideResumeEvidence(
+                    3698, 3699, 3910, 9, 30, events,
+                    new OverrideResumeDiagnosticAudio.Packet(
+                        44100, 1, new byte[] { 1, 0, 0xff, 0xff }),
+                    "service_frame");
+
+            AssertEx.Equal("cfFadeInToPrevious",
+                (string)evidence.Boundary["request"]);
+            AssertEx.Equal(3698, (int)evidence.Boundary["request_frame"]);
+            AssertEx.Equal(3699, (int)evidence.Boundary["admission_frame"]);
+            AssertEx.Equal(9, (int)evidence.Boundary["service_token"]);
+            AssertEx.Equal(30, (int)evidence.Boundary["native_ordinal"]);
+            AssertEx.Equal(2, ((JArray)evidence.Boundary["writes"]).Count);
+            AssertEx.Equal(0, (int)evidence.Boundary["fix_bugs"]);
+            AssertEx.Equal(false,
+                (bool)evidence.Boundary["writes_dac_disable_zero"]);
+            AssertEx.Equal("0100ffff", (string)evidence.Pcm["pcm_hex"]);
+        }
+
         private sealed class SelectiveJsonlProofWriter : TextWriter
         {
             private static readonly HashSet<string> RowRecordTypes=
@@ -211,7 +251,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "baseline", "frame_begin", "input_reset",
                     "managed_reset_service_snapshot", "request", "decision",
                     "managed_service_snapshot", "native_event",
-                    "managed_hook_evidence", "dispatch", "frame_end"
+                    "managed_hook_evidence", "dispatch", "override_resume",
+                    "native_pcm_packet", "frame_end"
                 };
             private static readonly HashSet<string> RecordTypes=
                 new HashSet<string>(RowRecordTypes,StringComparer.Ordinal)
@@ -2136,6 +2177,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     ["type"]="metadata",
                     ["schema"]="openggf.s1-complete-run-audio-raw.v1",
                     ["rom_sha1"]=RomIdentity.Sonic1Rev01Sha1,
+                    ["bk2_sha256"]="f2e817936d07b2b1f2b80d61451f174189509a2817da2b2349ce0e19b8a5567b",
                     ["first_row"]=860,["exclusive_end"]=225101,
                     ["native_abi"]=4,["native_event_size"]=32,
                     ["native_capacity"]=65536

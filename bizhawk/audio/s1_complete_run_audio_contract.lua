@@ -233,6 +233,19 @@ function Contract.extraLifeOracle()
     }
 end
 
+-- Reachability-only coordinates for the canonical movie.  ProbeRuntime may prove that
+-- these reviewed source sites execute; only the authenticated native capture owns the
+-- service/write/PCM evidence which can be published.
+function Contract.overrideResumeBoundary()
+    return {
+        request_frame = 3698,
+        admission_frame = 3699,
+        restore_frame = 3910,
+        writes_dac_disable_zero = false, -- shipped FixBugs=0 path at $072B24
+        can_publish = false
+    }
+end
+
 function Contract.deriveMusicRoles(fmDacCount, psgCount)
     local fmCount = integer(fmDacCount, "FM/DAC header count")
     local toneCount = integer(psgCount, "PSG header count")

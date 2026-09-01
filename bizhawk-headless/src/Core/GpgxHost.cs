@@ -8,7 +8,8 @@ using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
 
 namespace OpenGGF.BizHawk.Headless
 {
-    public sealed partial class GpgxHost : IGpgxHost, ICpuRegisterReader, IMainRamWriter
+    public sealed partial class GpgxHost : IGpgxHost, ICpuRegisterReader,
+        IMainRamWriter, IOverrideResumeDiagnosticAudioHost
     {
         private readonly GPGX core;
         private readonly MutableController controller;
@@ -287,6 +288,25 @@ namespace OpenGGF.BizHawk.Headless
         {
             core.FrameAdvance(controller, false, true);
             ThrowPendingExecuteCallbackException();
+        }
+
+        // BizHawk's synchronous sound-provider contract is fixed at 44.1 kHz;
+        // retain it on the native observation boundary instead of asking a
+        // Java consumer to infer it from packet length or video cadence.
+        int IOverrideResumeDiagnosticAudioHost.DiagnosticAudioSampleRate
+        {
+            get { return 44100; }
+        }
+
+        void IOverrideResumeDiagnosticAudioHost.AdvanceDiagnosticAudio()
+        {
+            AdvanceDiagnosticAudio();
+        }
+
+        short[] IOverrideResumeDiagnosticAudioHost.DrainDiagnosticAudio(
+            out int stereoFrames)
+        {
+            return DrainDiagnosticAudio(out stereoFrames);
         }
 
         private void ThrowPendingExecuteCallbackException()

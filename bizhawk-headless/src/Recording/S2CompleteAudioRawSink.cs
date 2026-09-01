@@ -43,6 +43,10 @@ namespace OpenGGF.BizHawk.Headless
         private int lastRow = -1;
         private bool begun;
         private bool complete;
+        private bool resumeSelected;
+        private bool pcmSelected;
+        private bool awaitingFollowingRowPcm;
+        private int resumeRow = -1;
 
         internal S2CompleteAudioRawSink(IS2CompleteAudioStateSource stateSource,
             TextWriter writer)
@@ -72,10 +76,12 @@ namespace OpenGGF.BizHawk.Headless
             begun = true;
         }
 
-        public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame)
+        public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame,
+            OverrideResumeDiagnosticAudio.Packet audio)
         {
             RequireActive();
             if (frame == null) throw new ArgumentNullException("frame");
+            if (audio == null) throw new ArgumentNullException("audio");
             int expected = lastRow < 0 ? S2AudioObserverProfile.FirstRow : lastRow + 1;
             if (row != expected || row >= S2AudioObserverProfile.ExclusiveEnd)
                 throw new InvalidDataException("The S2 raw rows are not contiguous and in range.");
@@ -94,10 +100,14 @@ namespace OpenGGF.BizHawk.Headless
                     ["payload"]=value.Payload.ToString(CultureInfo.InvariantCulture)
                 });
             }
+            JObject boundary = SelectBoundary(row, frame);
+            JObject pcm = SelectPcm(row, boundary != null, audio);
             Write(new JObject
             {
                 ["type"]="frame", ["row"]=row, ["lag"]=state.IsLagged,
-                ["state_hex"]=StateHex(), ["events"]=events
+                ["state_hex"]=StateHex(), ["events"]=events,
+                ["override_resume"]=(JToken)boundary ?? JValue.CreateNull(),
+                ["pcm"]=(JToken)pcm ?? JValue.CreateNull()
             });
             lastRow = row;
         }
@@ -110,7 +120,130 @@ namespace OpenGGF.BizHawk.Headless
             value["exclusive_end"] = lastRow < 0
                 ? S2AudioObserverProfile.FirstRow : lastRow + 1;
             Write(value);
+            if (lastRow == S2AudioObserverProfile.ExclusiveEnd - 1
+                && (!resumeSelected || !pcmSelected))
+                throw new InvalidDataException(
+                    "The complete S2 raw capture has no exact override-resume service and PCM packet.");
             complete = true;
+        }
+
+        private JObject SelectBoundary(int row,
+            CompleteRunAudioObserver.FrameCapture frame)
+        {
+            CompleteRunAudioObserver.DriverService selected = null;
+            foreach (CompleteRunAudioObserver.DriverService service
+                in frame.Services)
+            {
+                if (service.Kind != 9 || service.Cancelled
+                    || !service.IsComplete || service.BeginPc != 0x0110
+                    || service.BeginHookToken != 21
+                    || service.EndPc != 0x0DB4
+                    || service.EndHookToken != 23
+                    || service.BeginSourceCpu != 1)
+                    continue;
+                if (selected != null)
+                    throw new InvalidDataException(
+                        "The S2 override-resume frame is ambiguous.");
+                selected = service;
+            }
+            if (selected == null || resumeSelected) return null;
+
+            GpgxAudioTraceEvent? completion = null;
+            foreach (GpgxAudioTraceEvent value in frame.RawEvents)
+            {
+                if (value.Kind != 2 || value.Subject != 23
+                    || value.Pc != 0x0DB4
+                    || value.ServiceToken != selected.Token
+                    || value.ServiceKindId != 9 || value.SourceCpu != 1)
+                    continue;
+                if (completion.HasValue)
+                    throw new InvalidDataException(
+                        "The S2 override-resume completion is ambiguous.");
+                completion = value;
+            }
+            if (!completion.HasValue)
+                throw new InvalidDataException(
+                    "The S2 override-resume service lacks its native completion.");
+
+            var writes = new JArray();
+            uint previous = 0;
+            bool first = true;
+            foreach (CompleteRunAudioObserver.OwnedChipEvent chip
+                in selected.OwnedChipEvents)
+            {
+                if (!first && chip.NativeOrdinal <= previous)
+                    throw new InvalidDataException(
+                        "The S2 override-resume chip-write order regressed.");
+                first = false;
+                previous = chip.NativeOrdinal;
+                writes.Add(new JObject
+                {
+                    ["native_ordinal"]=chip.NativeOrdinal,
+                    ["event_kind"]=chip.EventKind,
+                    ["subject"]=chip.Subject,
+                    ["value"]=chip.Value,
+                    ["pc"]=chip.Pc,
+                    ["source_cpu"]=chip.SourceCpu,
+                    ["data"]=chip.IsData,
+                    ["port"]=chip.Port,
+                    ["register"]=chip.Register
+                });
+            }
+            if (writes.Count == 0)
+                throw new InvalidDataException(
+                    "The S2 resumed service owns no chip writes.");
+            resumeSelected = true;
+            resumeRow = row;
+            return new JObject
+            {
+                ["request"]="cfFadeInToPrevious",
+                ["admission"]="native_service_completion",
+                ["request_pc"]=0x0D35,
+                ["pc"]=0x0DB4,
+                ["service_token"]=selected.Token,
+                ["service_begin_ordinal"]=selected.BeginNativeOrdinal,
+                ["native_ordinal"]=completion.Value.Ordinal,
+                ["frame"]=row,
+                ["fix_driver_bugs"]=0,
+                ["restores_saved_priority"]=true,
+                ["restores_psg_noise"]=false,
+                ["writes"]=writes
+            };
+        }
+
+        private JObject SelectPcm(int row, bool boundary,
+            OverrideResumeDiagnosticAudio.Packet audio)
+        {
+            string selection = null;
+            if (boundary)
+            {
+                if (audio.IsEmpty)
+                    awaitingFollowingRowPcm = true;
+                else selection = "service_frame";
+            }
+            else if (awaitingFollowingRowPcm)
+            {
+                awaitingFollowingRowPcm = false;
+                if (row != resumeRow + 1 || audio.IsEmpty)
+                    throw new InvalidDataException(
+                        "The S2 override-resume following row has no PCM packet.");
+                selection = "following_row";
+            }
+            if (selection == null) return null;
+            pcmSelected = true;
+            return new JObject
+            {
+                ["selection"]=selection,
+                ["row"]=row,
+                ["offset"]=row-resumeRow,
+                ["sample_rate"]=audio.SampleRate,
+                ["channels"]=2,
+                ["format"]="s16le-interleaved-stereo",
+                ["stereo_frames"]=audio.StereoFrames,
+                ["byte_count"]=audio.ByteCount,
+                ["pcm_hex"]=audio.PcmHex,
+                ["sha256"]=audio.Sha256
+            };
         }
 
         private JObject Boundary(string type, CompleteRunAudioObserver.CutoffFrontier frontier)

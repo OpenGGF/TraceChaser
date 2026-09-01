@@ -126,6 +126,8 @@ local function acceptTypedZ80Service(event)
 end
 
 local lifecycle = Contract.newInvocationLifecycle()
+local overrideResumeBoundary = Contract.overrideResumeBoundary()
+local overrideResumeReachability = {request = false, admission = false, restore = false}
 local sawPlaySegaInsideEpoch = false
 local emittedHeader = false
 local baseline = nil
@@ -140,6 +142,13 @@ local loader_roles = {}
 
 local function executeSite(site, context)
     local frame = emu.framecount()
+    if site.address == 0x138E and frame == overrideResumeBoundary.request_frame then
+        overrideResumeReachability.request = true
+    elseif site.address == 0x71FD2 and frame == overrideResumeBoundary.admission_frame then
+        overrideResumeReachability.admission = true
+    elseif site.address == 0x72B14 and frame == overrideResumeBoundary.restore_frame then
+        overrideResumeReachability.restore = true
+    end
     if site.address == 0x71B4C and frame >= FIRST_FRAME and frame < EXCLUSIVE_END then
         frame_service_counts[frame] = (frame_service_counts[frame] or 0) + 1
         lifecycle:entry((emu.getregister("M68K A7") or 0) & 0xffffffff, frame)
@@ -198,12 +207,19 @@ ProbeRuntime.run({
             local e1Outcome = Contract.playSegaOutcome(sawPlaySegaInsideEpoch)
             assert(baseline and #extraLifeOracleFrames == 4,
                 "baseline and mandatory extra-life oracle frames must be retained")
+            assert(overrideResumeReachability.request and overrideResumeReachability.admission
+                and overrideResumeReachability.restore,
+                "canonical override/resume source sites were not all reached")
             context.log(string.format("baseline_frame=%d;priority=%d;sound_id=%d",
                 baseline.frame, baseline.priority, baseline.soundId))
             context.log("extra_life_oracle_frames=3698,3699,3702,3910")
             context.log("frame_service_counts=zero_or_more")
             context.log("play_sega_outcome=" .. e1Outcome)
             context.log("typed_z80_dac=acceptTypedZ80Service;raw_chip_events;source_cpu=Z80")
+            context.log(string.format(
+                "override_resume_boundary=request:%d;admission:%d;restore:%d;FixBugs=0;can_publish=false",
+                overrideResumeBoundary.request_frame, overrideResumeBoundary.admission_frame,
+                overrideResumeBoundary.restore_frame))
             context.finish()
         end
     end,

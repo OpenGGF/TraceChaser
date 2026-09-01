@@ -24,6 +24,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests preserve reset service absent begin source",
                 PreservesResetServiceAbsentBeginSource));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests select native fade restore and exact PCM",
+                SelectsNativeFadeRestoreAndExactPcm));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject empty following-row PCM",
+                RejectsEmptyFollowingRowPcm));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject restore service without owned writes",
+                RejectsRestoreServiceWithoutOwnedWrites));
             if (Environment.GetEnvironmentVariable(
                 "OPENGGF_S2_COMPLETE_AUDIO_REFERENCE") == "1")
             {
@@ -127,6 +136,115 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0, (int)service["begin_hook_token"]);
         }
 
+        private static void SelectsNativeFadeRestoreAndExactPcm()
+        {
+            var source = new FakeStateSource(new byte[0x2000]);
+            var output = new StringWriter();
+            var sink = new S2CompleteAudioRawSink(source, output);
+            sink.Begin(EmptyFrontier());
+
+            CompleteRunAudioObserver.FrameCapture restore = RestoreFrame(3910);
+            sink.Frame(S2AudioObserverProfile.FirstRow, restore,
+                new OverrideResumeDiagnosticAudio.Packet(
+                    44100, 2, new byte[] { 1, 0, 2, 0, 3, 0, 4, 0 }));
+            sink.Complete(EmptyFrontier());
+
+            string[] lines = output.ToString().Split(
+                new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            JObject row = JObject.Parse(lines[2]);
+            JObject boundary = (JObject)row["override_resume"];
+            AssertEx.Equal("cfFadeInToPrevious", (string)boundary["request"]);
+            AssertEx.Equal("native_service_completion", (string)boundary["admission"]);
+            AssertEx.Equal(7, (int)boundary["service_token"]);
+            AssertEx.Equal(42, (int)boundary["native_ordinal"]);
+            AssertEx.Equal(0x0DB4, (int)boundary["pc"]);
+            JObject pcm = (JObject)row["pcm"];
+            AssertEx.Equal("service_frame", (string)pcm["selection"]);
+            AssertEx.Equal(44100, (int)pcm["sample_rate"]);
+            AssertEx.Equal(2, (int)pcm["stereo_frames"]);
+            AssertEx.Equal("0100020003000400", (string)pcm["pcm_hex"]);
+            AssertEx.Equal(false, ((string)pcm["sha256"]).Length == 0);
+        }
+
+        private static void RejectsEmptyFollowingRowPcm()
+        {
+            var source = new FakeStateSource(new byte[0x2000]);
+            var sink = new S2CompleteAudioRawSink(source, new StringWriter());
+            sink.Begin(EmptyFrontier());
+            sink.Frame(S2AudioObserverProfile.FirstRow, RestoreFrame(3910),
+                EmptyPacket());
+            AssertEx.Throws<InvalidDataException>(
+                () => sink.Frame(S2AudioObserverProfile.FirstRow + 1,
+                    EmptyFrame(S2AudioObserverProfile.FirstRow + 1),
+                    EmptyPacket()), "following row");
+        }
+
+        private static void RejectsRestoreServiceWithoutOwnedWrites()
+        {
+            var sink = new S2CompleteAudioRawSink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            AssertEx.Throws<InvalidDataException>(() => sink.Frame(
+                S2AudioObserverProfile.FirstRow, RestoreFrame(3910, false),
+                EmptyPacket()), "owns no chip writes");
+        }
+
+        private static CompleteRunAudioObserver.CutoffFrontier EmptyFrontier()
+        {
+            return new CompleteRunAudioObserver.CutoffFrontier(
+                new List<CompleteRunAudioObserver.ServiceBuilder>(),
+                new List<CompleteRunAudioObserver.ServiceBuilder>(),
+                0, 0, 1, true);
+        }
+
+        private static OverrideResumeDiagnosticAudio.Packet EmptyPacket()
+        {
+            return new OverrideResumeDiagnosticAudio.Packet(
+                44100, 0, new byte[0]);
+        }
+
+        private static CompleteRunAudioObserver.FrameCapture EmptyFrame(int row)
+        {
+            return new CompleteRunAudioObserver.FrameCapture(
+                new GpgxAudioTraceEvent[0],
+                new List<CompleteRunAudioObserver.ServiceBuilder>(),
+                new List<CompleteRunAudioObserver.ResetRecord>(), 0,
+                (CompleteRunAudioObserver.DeferredBeginReservation)null, row);
+        }
+
+        private static CompleteRunAudioObserver.FrameCapture RestoreFrame(
+            int row, bool includeWrite = true)
+        {
+            var service = new CompleteRunAudioObserver.ServiceBuilder
+            {
+                Token = 7, ParentToken = 3, Kind = 9, Depth = 1,
+                CurrentParentToken = 3, CurrentDepth = 1,
+                BeginCoordinate = 100, EndCoordinate = 200,
+                BeginRow = row, BeginNativeOrdinal = 10,
+                BeginPc = 0x0110, EndPc = 0x0DB4,
+                BeginHookToken = 21, EndHookToken = 23,
+                BeginSourceCpu = 1
+            };
+            if (includeWrite)
+                service.AddChip(new CompleteRunAudioObserver.WriteRecord
+                {
+                    Coordinate = 150, Ordinal = 41, Token = 7,
+                    Kind = 3, Subject = 0, Port = 0, Register = 0x28,
+                    Value = 0x40, SourceCpu = 1, Pc = 0x0D70
+                });
+            var completion = new GpgxAudioTraceEvent
+            {
+                Ordinal = 42, ServiceToken = 7, ParentToken = 3,
+                Pc = 0x0DB4, Subject = 23, Kind = 2,
+                ServiceKindId = 9, Depth = 1, SourceCpu = 1
+            };
+            return new CompleteRunAudioObserver.FrameCapture(
+                new[] { completion },
+                new List<CompleteRunAudioObserver.ServiceBuilder> { service },
+                new List<CompleteRunAudioObserver.ResetRecord>(), 200,
+                (CompleteRunAudioObserver.DeferredBeginReservation)null, row);
+        }
+
         private static void StreamsExactBoundedRawEnvelope()
         {
             byte[] state = new byte[0x2000];
@@ -153,7 +271,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 new[] { raw },
                 new List<CompleteRunAudioObserver.ServiceBuilder>(),
                 new List<CompleteRunAudioObserver.ResetRecord>(), 0);
-            sink.Frame(S2AudioObserverProfile.FirstRow, frame);
+            sink.Frame(S2AudioObserverProfile.FirstRow, frame, EmptyPacket());
             sink.Complete(new CompleteRunAudioObserver.CutoffFrontier(
                 new List<CompleteRunAudioObserver.ServiceBuilder>(),
                 new List<CompleteRunAudioObserver.ServiceBuilder>(),

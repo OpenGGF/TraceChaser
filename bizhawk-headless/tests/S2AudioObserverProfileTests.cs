@@ -293,7 +293,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             public void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
             { throw new InvalidOperationException("sink must not be called"); }
-            public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame)
+            public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame,
+                OverrideResumeDiagnosticAudio.Packet audio)
             { throw new InvalidOperationException("sink must not be called"); }
             public void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff)
             { throw new InvalidOperationException("sink must not be called"); }

@@ -141,6 +141,14 @@ assertRoles(oracle[3699].effective_roles, {"FM3", "FM4", "FM5", "PSG1", "PSG2", 
     "3699 oracle")
 assertEqual("one_up", oracle[3702].normal_sfx_blocked_by, "3702 oracle")
 assertEqual(0x87, oracle[3910].restored_music_id, "3910 oracle")
+local boundary = Contract.overrideResumeBoundary()
+assertEqual(3698, boundary.request_frame, "override request frame")
+assertEqual(3699, boundary.admission_frame, "override admission frame")
+assertEqual(3910, boundary.restore_frame, "override restore frame")
+assertEqual(false, boundary.writes_dac_disable_zero,
+    "FixBugs=0 restore must omit invented DAC-disable zero")
+assertEqual(false, boundary.can_publish,
+    "ProbeRuntime diagnostics cannot publish reference evidence")
 
 -- Song ownership comes from header loop counts, including DAC/FM6 and zero-PSG songs.
 assertRoles(Contract.deriveMusicRoles(7, 3),
