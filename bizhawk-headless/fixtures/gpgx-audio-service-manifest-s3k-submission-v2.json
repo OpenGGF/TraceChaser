@@ -1,0 +1,33 @@
+{
+  "schema": "openggf.gpgx-audio-service-manifests.v1",
+  "games": {
+    "s3k": {
+      "rom_sha1": "cfbf98c36c776677290a872547ac47c53d2761d6",
+      "watch_mask_bytes": 8192,
+      "z80_watch_pc_union": [56, 69, 132, 283, 289, 4432, 4453],
+      "ranges": [
+        {"id": 1, "subject": "Z80_RAM", "start": 0, "exclusive_end": 1},
+        {"id": 2, "subject": "Z80_RAM", "start": 7178, "exclusive_end": 7179}
+      ],
+      "kinds": [
+        {"id": 1, "name": "Reset", "flags": [], "canonical_ranges": [1]},
+        {"id": 3, "name": "VInt", "flags": ["ALLOW_CONTINUATION", "ALLOW_CHILDREN"], "canonical_ranges": [1]},
+        {"id": 8, "name": "SegaPcmIteration", "flags": ["TYPED_ASYNC", "ALLOW_CONTINUATION", "ALLOW_CHILDREN"], "canonical_ranges": [1]},
+        {"id": 11, "name": "UpdateEverything", "flags": ["ALLOW_CONTINUATION"], "canonical_ranges": [1]},
+        {"id": 12, "name": "UpdateMusic", "flags": ["ALLOW_CONTINUATION"], "canonical_ranges": [1]},
+        {"id": 13, "name": "MusicMailboxSubmission", "flags": [], "canonical_ranges": [2]}
+      ],
+      "hooks": [
+        {"token": 14, "cpu": "Z80", "pc": 4432, "action": "PUSH_BEGIN", "kind": 8, "expected_kind": 0, "opcode": "7e32", "ranges": [], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zPlaySEGAPCM byte iteration", "completion_proof": "One byte fetch/write starts the bounded parent iteration."},
+        {"token": 16, "cpu": "Z80", "pc": 4453, "action": "POP_END_AT_PC", "kind": 0, "expected_kind": 8, "opcode": "20e9", "ranges": [1], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zPlaySEGAPCM byte-loop branch", "completion_proof": "The parent iteration is final before its loop branch."},
+        {"token": 2, "cpu": "Z80", "pc": 56, "action": "PUSH_BEGIN", "kind": 3, "expected_kind": 0, "opcode": "f3", "ranges": [], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zVInt", "completion_proof": "Interrupt entry precedes the following update work."},
+        {"token": 23, "cpu": "Z80", "pc": 283, "action": "PUSH_BEGIN", "kind": 11, "expected_kind": 3, "opcode": "cdff07", "ranges": [], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zUpdateEverything", "completion_proof": "The call begins queue and SFX update work under VInt."},
+        {"token": 24, "cpu": "Z80", "pc": 289, "action": "TAIL_POP_PUSH", "kind": 12, "expected_kind": 11, "opcode": "cdcc09", "ranges": [1], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zUpdateMusic normal tail", "completion_proof": "UpdateEverything is final before UpdateMusic consumes the submitted FE stop-SEGA-PCM request."},
+        {"token": 25, "cpu": "Z80", "pc": 69, "action": "POP_END_AT_PC", "kind": 0, "expected_kind": 12, "opcode": "3a021c", "ranges": [1], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zVInt music return", "completion_proof": "Nested music state is final before VInt continues."},
+        {"token": 3, "cpu": "Z80", "pc": 132, "action": "POP_END_AT_PC", "kind": 0, "expected_kind": 3, "opcode": "c9", "ranges": [1], "flags": [], "source_file": "docs/skdisasm/Sound/Z80 Sound Driver.asm", "source_label": "zVInt return", "completion_proof": "All VInt work is committed before the common return."},
+        {"token": 27, "cpu": "M68K", "pc": 4952, "action": "PUSH_BEGIN", "kind": 13, "expected_kind": 8, "opcode": "33fc010000a11100", "ranges": [], "flags": [], "source_file": "docs/skdisasm/sonic3k.asm", "source_label": "Play_Music stopZ80", "completion_proof": "The bounded child begins before move.b d0,zMusicNumber can publish the mailbox request."},
+        {"token": 28, "cpu": "M68K", "pc": 4980, "action": "POP_END_AT_PC", "kind": 0, "expected_kind": 13, "opcode": "33fc000000a11100", "ranges": [2], "flags": [], "source_file": "docs/skdisasm/sonic3k.asm", "source_label": "Play_Music startZ80", "completion_proof": "The mailbox bytes are final after move.b d0,zMusicNumber and before the Z80 is released."}
+      ]
+    }
+  }
+}

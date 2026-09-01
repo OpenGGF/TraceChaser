@@ -40,34 +40,61 @@ namespace OpenGGF.BizHawk.Headless
         internal const string Schema = "openggf.s3k-complete-run-audio-raw.v1";
         private readonly IS3kCompleteAudioStateSource state;
         private readonly TextWriter output;
+        private readonly S3kRawAudioAuthority authority;
         private int lastRow = -1;
         private bool begun;
         private bool complete;
 
         internal S3kCompleteAudioRawSink(IS3kCompleteAudioStateSource stateSource,
             TextWriter writer)
+            : this(stateSource, writer, S3kRawAudioAuthority.ProductionV1)
+        {
+        }
+
+        internal S3kCompleteAudioRawSink(IS3kCompleteAudioStateSource stateSource,
+            TextWriter writer, S3kRawAudioAuthority rawAuthority)
         {
             state = stateSource ?? throw new ArgumentNullException("stateSource");
             output = writer ?? throw new ArgumentNullException("writer");
+            authority = rawAuthority ?? throw new ArgumentNullException("rawAuthority");
+            if (!object.ReferenceEquals(authority, S3kRawAudioAuthority.ProductionV1)
+                && !object.ReferenceEquals(authority,
+                    S3kSubmissionAudioObserverProfile.UnboundAuthorityForTesting))
+                throw new ArgumentException(
+                    "The S3K raw authority is not a closed production or test-only profile.",
+                    "rawAuthority");
         }
 
         public void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
         {
             if (begun) throw new InvalidOperationException("The S3K raw epoch already began.");
             if (boundary == null) throw new ArgumentNullException("boundary");
-            Write(new JObject
-            {
-                ["type"]="metadata", ["schema"]=Schema,
-                ["rom_sha1"]=S3kAudioObserverProfile.RomSha1,
-                ["bk2_sha256"]=S3kAudioObserverProfile.MovieSha256,
-                ["service_manifest_sha256"]=S3kAudioObserverProfile.ManifestSha256,
-                ["first_row"]=S3kAudioObserverProfile.FirstRow,
-                ["exclusive_end"]=S3kAudioObserverProfile.ExclusiveEnd,
-                ["state_start"]=S3kAudioObserverProfile.DriverStateStart,
-                ["state_exclusive_end"]=S3kAudioObserverProfile.DriverStateExclusiveEnd
-            });
+            JObject metadata = authority.IsProductionBound
+                ? new JObject
+                {
+                    ["type"]="metadata", ["schema"]=Schema,
+                    ["rom_sha1"]=S3kAudioObserverProfile.RomSha1,
+                    ["bk2_sha256"]=S3kAudioObserverProfile.MovieSha256,
+                    ["service_manifest_sha256"]=S3kAudioObserverProfile.ManifestSha256,
+                    ["first_row"]=S3kAudioObserverProfile.FirstRow,
+                    ["exclusive_end"]=S3kAudioObserverProfile.ExclusiveEnd,
+                    ["state_start"]=S3kAudioObserverProfile.DriverStateStart,
+                    ["state_exclusive_end"]=S3kAudioObserverProfile.DriverStateExclusiveEnd
+                }
+                : new JObject
+                {
+                    ["type"]="metadata", ["schema"]=authority.Schema,
+                    ["authority"]="UNBOUND_TEST_ONLY",
+                    ["rom_sha1"]=authority.RomSha1,
+                    ["service_manifest_sha256"]=authority.ManifestSha256,
+                    ["first_row"]=authority.FirstRow,
+                    ["exclusive_end"]=authority.ExclusiveEnd,
+                    ["state_start"]=authority.StateStart,
+                    ["state_exclusive_end"]=authority.StateExclusiveEnd
+                };
+            Write(metadata);
             JObject baseline = Boundary("baseline", boundary);
-            baseline["row"] = S3kAudioObserverProfile.FirstRow;
+            baseline["row"] = authority.FirstRow;
             Write(baseline);
             begun = true;
         }
@@ -76,8 +103,8 @@ namespace OpenGGF.BizHawk.Headless
         {
             RequireActive();
             if (frame == null) throw new ArgumentNullException("frame");
-            int expected = lastRow < 0 ? S3kAudioObserverProfile.FirstRow : lastRow + 1;
-            if (row != expected || row >= S3kAudioObserverProfile.ExclusiveEnd)
+            int expected = lastRow < 0 ? authority.FirstRow : lastRow + 1;
+            if (row != expected || row >= authority.ExclusiveEnd)
                 throw new InvalidDataException("The S3K raw rows are not contiguous and in range.");
             var events = new JArray();
             foreach (GpgxAudioTraceEvent value in frame.RawEvents)
@@ -94,11 +121,14 @@ namespace OpenGGF.BizHawk.Headless
                     ["payload"]=value.Payload.ToString(CultureInfo.InvariantCulture)
                 });
             }
-            Write(new JObject
+            var frameValue = new JObject
             {
                 ["type"]="frame", ["row"]=row, ["lag"]=state.IsLagged,
                 ["state_hex"]=StateHex(), ["events"]=events
-            });
+            };
+            if (authority.IncludeSubmissions)
+                frameValue["submissions"] = Submissions(frame);
+            Write(frameValue);
             lastRow = row;
         }
 
@@ -108,7 +138,7 @@ namespace OpenGGF.BizHawk.Headless
             if (cutoff == null) throw new ArgumentNullException("cutoff");
             JObject value = Boundary("cutoff", cutoff);
             value["exclusive_end"] = lastRow < 0
-                ? S3kAudioObserverProfile.FirstRow : lastRow + 1;
+                ? authority.FirstRow : lastRow + 1;
             Write(value);
             complete = true;
         }
@@ -191,11 +221,54 @@ namespace OpenGGF.BizHawk.Headless
         private string StateHex()
         {
             byte[] bytes = state.CaptureDriverState();
-            int expected = S3kAudioObserverProfile.DriverStateExclusiveEnd
-                - S3kAudioObserverProfile.DriverStateStart;
+            int expected = authority.StateExclusiveEnd-authority.StateStart;
             if (bytes == null || bytes.Length != expected)
                 throw new InvalidDataException("The S3K raw state snapshot is not exactly $1C00..$1FFF.");
             return Hex(bytes);
+        }
+
+        private static JArray Submissions(CompleteRunAudioObserver.FrameCapture frame)
+        {
+            var result = new JArray();
+            foreach (CompleteRunAudioObserver.DriverService service in frame.Services)
+            {
+                if (service.Kind != 13) continue;
+                if (!service.IsComplete || service.Cancelled
+                    || service.BeginPc != 0x1358 || service.EndPc != 0x1374
+                    || service.BeginHookToken != 27 || service.EndHookToken != 28
+                    || service.BeginSourceCpu != 2 || service.Snapshots.Count != 1)
+                    throw new InvalidDataException(
+                        "The unbound S3K submission service is not the exact Play_Music boundary.");
+                CompleteRunAudioObserver.SnapshotGroup snapshot = service.Snapshots[0];
+                if (snapshot.RangeId != 2 || snapshot.SourceCpu != 2
+                    || snapshot.Pc != 0x1374 || snapshot.Bytes.Length != 1)
+                    throw new InvalidDataException(
+                        "The unbound S3K submission mailbox snapshot is not exact.");
+                GpgxAudioTraceEvent completion = default(GpgxAudioTraceEvent);
+                bool completionSeen = false;
+                foreach (GpgxAudioTraceEvent native in frame.RawEvents)
+                {
+                    if (native.Kind == 2 && native.ServiceToken == service.Token)
+                    { completion = native; completionSeen = true; }
+                }
+                if (!completionSeen || completion.Ordinal <= service.BeginNativeOrdinal)
+                    throw new InvalidDataException(
+                        "The unbound S3K submission native ordering is not exact.");
+                result.Add(new JObject
+                {
+                    ["service_token"]=service.Token,
+                    ["parent_token"]=service.ParentToken,
+                    ["begin_ordinal"]=service.BeginNativeOrdinal,
+                    ["end_ordinal"]=completion.Ordinal,
+                    ["begin_pc"]=service.BeginPc,
+                    ["end_pc"]=service.EndPc,
+                    ["begin_hook_token"]=service.BeginHookToken,
+                    ["end_hook_token"]=service.EndHookToken,
+                    ["mailbox_hex"]=Hex(snapshot.Bytes),
+                    ["request"]=snapshot.Bytes[0]
+                });
+            }
+            return result;
         }
 
         private static string Hex(byte[] bytes)
@@ -221,5 +294,65 @@ namespace OpenGGF.BizHawk.Headless
             if (!begun || complete)
                 throw new InvalidOperationException("The S3K raw epoch is not active.");
         }
+    }
+
+    internal sealed class S3kRawAudioAuthority
+    {
+        internal static readonly S3kRawAudioAuthority ProductionV1 =
+            new S3kRawAudioAuthority(S3kCompleteAudioRawSink.Schema,
+                S3kAudioObserverProfile.RomSha1,
+                S3kAudioObserverProfile.MovieSha256,
+                S3kAudioObserverProfile.ManifestSha256,
+                S3kAudioObserverProfile.FirstRow,
+                S3kAudioObserverProfile.ExclusiveEnd,
+                S3kAudioObserverProfile.DriverStateStart,
+                S3kAudioObserverProfile.DriverStateExclusiveEnd,
+                true, false);
+
+        internal S3kRawAudioAuthority(string schema, string romSha1,
+            string bk2Sha256, string manifestSha256, int firstRow,
+            int exclusiveEnd, int stateStart, int stateExclusiveEnd,
+            bool productionBound, bool includeSubmissions)
+        {
+            Schema=schema;RomSha1=romSha1;Bk2Sha256=bk2Sha256;
+            ManifestSha256=manifestSha256;FirstRow=firstRow;
+            ExclusiveEnd=exclusiveEnd;StateStart=stateStart;
+            StateExclusiveEnd=stateExclusiveEnd;
+            IsProductionBound=productionBound;IncludeSubmissions=includeSubmissions;
+        }
+
+        internal string Schema{get;private set;}
+        internal string RomSha1{get;private set;}
+        internal string Bk2Sha256{get;private set;}
+        internal string ManifestSha256{get;private set;}
+        internal int FirstRow{get;private set;}
+        internal int ExclusiveEnd{get;private set;}
+        internal int StateStart{get;private set;}
+        internal int StateExclusiveEnd{get;private set;}
+        internal bool IsProductionBound{get;private set;}
+        internal bool IncludeSubmissions{get;private set;}
+    }
+
+    internal sealed class S3kSubmissionAudioRawV2Sink : IS3kCompleteAudioCaptureSink
+    {
+        private readonly S3kCompleteAudioRawSink inner;
+        internal S3kSubmissionAudioRawV2Sink(IS3kCompleteAudioStateSource state,
+            TextWriter output, S3kRawAudioAuthority authority)
+        {
+            if (!object.ReferenceEquals(authority,
+                    S3kSubmissionAudioObserverProfile.UnboundAuthorityForTesting)
+                || authority.IsProductionBound
+                || !authority.IncludeSubmissions)
+                throw new ArgumentException(
+                    "The S3K raw-v2 sink requires explicit unbound submission authority.",
+                    "authority");
+            inner = new S3kCompleteAudioRawSink(state, output, authority);
+        }
+        public void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
+        { inner.Begin(boundary); }
+        public void Frame(int row, CompleteRunAudioObserver.FrameCapture frame)
+        { inner.Frame(row, frame); }
+        public void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff)
+        { inner.Complete(cutoff); }
     }
 }
