@@ -44,6 +44,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "Publisher set rolls back published finals on later link race",
                 SetRollsBackPublishedFinalsOnLaterLinkRace));
             tests.Add(new TestMain.TestCase(
+                "Publisher set rollback preserves a competitor replacement of an earlier final",
+                SetRollbackPreservesCompetitorReplacementOfEarlierFinal));
+            tests.Add(new TestMain.TestCase(
                 "Publisher set stages and publishes subdirectory finals",
                 SetStagesAndPublishesSubdirectoryFinals));
             tests.Add(new TestMain.TestCase(
@@ -558,6 +561,42 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 });
         }
 
+        private static void SetRollbackPreservesCompetitorReplacementOfEarlierFinal()
+        {
+            WithTemporaryDirectory(
+                root =>
+                {
+                    string output = Path.Combine(root, "replacement-race-set");
+                    byte[] replacement = Encoding.UTF8.GetBytes(
+                        "replacement-after-link\n");
+                    byte[] collision = Encoding.UTF8.GetBytes(
+                        "later-collision\n");
+                    var link = new ReplaceEarlierThenCompeteLinkOperation(
+                        "physics.csv", "metadata.json", replacement,
+                        collision);
+                    NoReplacePublisher.StagedPublicationSet staged =
+                        StageTraceSet(new NoReplacePublisher(link), output);
+
+                    AssertEx.Throws<IOException>(
+                        () => staged.Publish(),
+                        "already exists");
+
+                    AssertEx.Equal(3, link.CreateCount);
+                    string[] entries = Directory.GetFileSystemEntries(output)
+                        .Select(Path.GetFileName)
+                        .OrderBy(name => name, StringComparer.Ordinal)
+                        .ToArray();
+                    AssertEx.Equal("metadata.json,physics.csv",
+                        string.Join(",", entries));
+                    AssertBytesEqual(replacement, File.ReadAllBytes(
+                        Path.Combine(output, "physics.csv")));
+                    AssertBytesEqual(collision, File.ReadAllBytes(
+                        Path.Combine(output, "metadata.json")));
+                    AssertEx.Equal(false, entries.Any(name =>
+                        name.Contains(".tmp.")));
+                });
+        }
+
         private static void CreatesMissingNestedDirectory()
         {
             WithTemporaryDirectory(
@@ -786,6 +825,41 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 CreateCount++;
                 FinalPath = finalPath;
                 File.WriteAllBytes(finalPath, competing);
+                LibcLinkOperation.Instance.Create(temporary, finalPath);
+            }
+        }
+
+        private sealed class ReplaceEarlierThenCompeteLinkOperation
+            : ILinkOperation
+        {
+            private readonly string earlierFileName;
+            private readonly string collisionFileName;
+            private readonly byte[] replacement;
+            private readonly byte[] collision;
+
+            internal ReplaceEarlierThenCompeteLinkOperation(
+                string earlierName, string collisionName,
+                byte[] replacementBytes, byte[] collisionBytes)
+            {
+                earlierFileName = earlierName;
+                collisionFileName = collisionName;
+                replacement = replacementBytes;
+                collision = collisionBytes;
+            }
+
+            internal int CreateCount { get; private set; }
+
+            public void Create(string temporary, string finalPath)
+            {
+                CreateCount++;
+                if (Path.GetFileName(finalPath) == collisionFileName)
+                {
+                    string earlier = Path.Combine(
+                        Path.GetDirectoryName(finalPath), earlierFileName);
+                    File.Delete(earlier);
+                    File.WriteAllBytes(earlier, replacement);
+                    File.WriteAllBytes(finalPath, collision);
+                }
                 LibcLinkOperation.Instance.Create(temporary, finalPath);
             }
         }

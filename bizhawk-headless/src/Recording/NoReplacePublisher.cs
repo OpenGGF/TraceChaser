@@ -54,6 +54,242 @@ namespace OpenGGF.BizHawk.Headless
         private static extern int Link(string oldPath, string newPath);
     }
 
+    /// <summary>
+    /// Retains an O_NOFOLLOW directory handle and the staged file's statx
+    /// identity while a multi-file publication is in flight. Rollback moves
+    /// the final name to a private no-replace quarantine and unlinks that
+    /// quarantine only when its inode is the exact regular file the publisher
+    /// linked. Unsupported native identity operations fail before the link;
+    /// rollback never falls back to a pathname-only delete.
+    /// </summary>
+    internal sealed class LinuxOwnedFinalRollback : IDisposable
+    {
+        private const int ENoEnt = 2;
+        private const int ODirectory = 0x10000;
+        private const int ONoFollow = 0x20000;
+        private const int OCloseExec = 0x80000;
+        private const int AtSymlinkNoFollow = 0x100;
+        private const uint RenameNoReplace = 1;
+        private const uint StatxType = 0x0001;
+        private const uint StatxIno = 0x0100;
+        private const int StatxBufferSize = 256;
+        private const int SIfmt = 0xF000;
+        private const int SIfreg = 0x8000;
+
+        private readonly string finalName;
+        private readonly Identity stagedIdentity;
+        private int directoryFd;
+
+        private struct Identity
+        {
+            internal uint DeviceMajor;
+            internal uint DeviceMinor;
+            internal ulong Inode;
+            internal ushort Mode;
+        }
+
+        private LinuxOwnedFinalRollback(int fd,string name,Identity identity)
+        {
+            directoryFd=fd;
+            finalName=name;
+            stagedIdentity=identity;
+        }
+
+        internal static LinuxOwnedFinalRollback Prepare(
+            string temporaryPath,string finalPath)
+        {
+            string temporaryDirectory=Path.GetFullPath(
+                Path.GetDirectoryName(temporaryPath));
+            string finalDirectory=Path.GetFullPath(
+                Path.GetDirectoryName(finalPath));
+            if(temporaryDirectory!=finalDirectory)
+                throw new IOException(
+                    "Identity-checked rollback requires one publication directory.");
+            int fd=Open(finalDirectory,
+                ODirectory|ONoFollow|OCloseExec);
+            if(fd<0)
+                throw NativeFailure("open rollback directory",finalDirectory);
+            try
+            {
+                ProbeRollbackOperations(fd);
+                Identity staged=ReadRequiredIdentity(fd,
+                    Path.GetFileName(temporaryPath),"staged output");
+                if((staged.Mode&SIfmt)!=SIfreg)
+                    throw new IOException(
+                        "Staged output is not a regular file; publication refused.");
+                return new LinuxOwnedFinalRollback(fd,
+                    Path.GetFileName(finalPath),staged);
+            }
+            catch
+            {
+                Close(fd);
+                throw;
+            }
+        }
+
+        private static void ProbeRollbackOperations(int fd)
+        {
+            if(RenameAt2(fd,"",fd,"",RenameNoReplace)==0)
+                throw new IOException(
+                    "renameat2 rollback capability probe unexpectedly mutated a path.");
+            int error=Marshal.GetLastWin32Error();
+            if(error!=ENoEnt)
+                throw NativeFailure("probe renameat2 rollback capability",
+                    "empty relative path",error);
+            if(UnlinkAt(fd,"",0)==0)
+                throw new IOException(
+                    "unlinkat rollback capability probe unexpectedly mutated a path.");
+            error=Marshal.GetLastWin32Error();
+            if(error!=ENoEnt)
+                throw NativeFailure("probe unlinkat rollback capability",
+                    "empty relative path",error);
+        }
+
+        internal void RevokeIfOwned()
+        {
+            EnsureOpen();
+            string quarantine=finalName+".rollback."
+                +Guid.NewGuid().ToString("N");
+            if(RenameAt2(directoryFd,finalName,directoryFd,quarantine,
+                RenameNoReplace)!=0)
+            {
+                int error=Marshal.GetLastWin32Error();
+                if(error==ENoEnt)return;
+                throw NativeFailure("quarantine rollback final",finalName,error);
+            }
+            try
+            {
+                Identity candidate=ReadRequiredIdentity(directoryFd,
+                    quarantine,"quarantined rollback final");
+                if(!SameRegularFile(stagedIdentity,candidate))
+                {
+                    RestoreQuarantine(quarantine);
+                    return;
+                }
+                // The namespace entry being removed is now a private random
+                // quarantine name whose inode has been proved against the
+                // retained staged hardlink. A replacement created at the
+                // public final name after the rename is never touched.
+                if(UnlinkAt(directoryFd,quarantine,0)!=0)
+                    throw NativeFailure("unlink owned rollback quarantine",
+                        quarantine);
+            }
+            catch
+            {
+                // If identity could not be proved, put the exact quarantined
+                // entry back without replacing any newer writer. Failure to
+                // restore leaves the entry intact under the private name;
+                // it never authorizes deleting unknown bytes.
+                RenameAt2(directoryFd,quarantine,directoryFd,finalName,
+                    RenameNoReplace);
+                throw;
+            }
+        }
+
+        private void RestoreQuarantine(string quarantine)
+        {
+            if(RenameAt2(directoryFd,quarantine,directoryFd,finalName,
+                RenameNoReplace)!=0)
+                throw NativeFailure("restore competing rollback final",
+                    finalName);
+        }
+
+        public void Dispose()
+        {
+            if(directoryFd<0)return;
+            int fd=directoryFd;
+            directoryFd=-1;
+            Close(fd);
+        }
+
+        private void EnsureOpen()
+        {
+            if(directoryFd<0)throw new ObjectDisposedException(
+                "LinuxOwnedFinalRollback");
+        }
+
+        private static Identity ReadRequiredIdentity(int fd,string name,
+            string label)
+        {
+            Identity value;int error;
+            if(!TryReadIdentity(fd,name,out value,out error))
+                throw NativeFailure("stat "+label,name,error);
+            return value;
+        }
+
+        private static bool TryReadIdentity(int fd,string name,
+            out Identity identity,out int error)
+        {
+            IntPtr buffer=Marshal.AllocHGlobal(StatxBufferSize);
+            try
+            {
+                if(Statx(fd,name,AtSymlinkNoFollow,StatxType|StatxIno,
+                    buffer)!=0)
+                {
+                    error=Marshal.GetLastWin32Error();
+                    identity=new Identity();
+                    return false;
+                }
+                uint mask=unchecked((uint)Marshal.ReadInt32(buffer,0));
+                if((mask&(StatxType|StatxIno))!=(StatxType|StatxIno))
+                    throw new IOException(
+                        "statx did not return file type and inode identity.");
+                identity=new Identity
+                {
+                    Mode=unchecked((ushort)Marshal.ReadInt16(buffer,28)),
+                    Inode=unchecked((ulong)Marshal.ReadInt64(buffer,32)),
+                    DeviceMajor=unchecked((uint)Marshal.ReadInt32(buffer,136)),
+                    DeviceMinor=unchecked((uint)Marshal.ReadInt32(buffer,140))
+                };
+                error=0;
+                return true;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static bool SameRegularFile(Identity expected,Identity actual)
+        {
+            return (expected.Mode&SIfmt)==SIfreg
+                &&(actual.Mode&SIfmt)==SIfreg
+                &&expected.DeviceMajor==actual.DeviceMajor
+                &&expected.DeviceMinor==actual.DeviceMinor
+                &&expected.Inode==actual.Inode;
+        }
+
+        private static IOException NativeFailure(string operation,string path)
+        {return NativeFailure(operation,path,Marshal.GetLastWin32Error());}
+
+        private static IOException NativeFailure(string operation,string path,
+            int error)
+        {return new IOException(operation+" failed for "+path
+            +" with errno "+error+".");}
+
+        [DllImport("libc",EntryPoint="open",CharSet=CharSet.Ansi,
+            SetLastError=true)]
+        private static extern int Open(string path,int flags);
+
+        [DllImport("libc",EntryPoint="close",SetLastError=true)]
+        private static extern int Close(int fd);
+
+        [DllImport("libc",EntryPoint="statx",CharSet=CharSet.Ansi,
+            SetLastError=true)]
+        private static extern int Statx(int directoryFd,string path,int flags,
+            uint mask,IntPtr buffer);
+
+        [DllImport("libc",EntryPoint="renameat2",CharSet=CharSet.Ansi,
+            SetLastError=true)]
+        private static extern int RenameAt2(int oldDirectoryFd,string oldPath,
+            int newDirectoryFd,string newPath,uint flags);
+
+        [DllImport("libc",EntryPoint="unlinkat",CharSet=CharSet.Ansi,
+            SetLastError=true)]
+        private static extern int UnlinkAt(int directoryFd,string path,
+            int flags);
+    }
+
     public sealed class NoReplacePublisher
     {
         private const string SmokeFileName = "smoke.csv";
@@ -895,6 +1131,8 @@ namespace OpenGGF.BizHawk.Headless
             private readonly Action<string> deleteFile;
             private string temporaryPath;
             private string finalPath;
+            private LinuxOwnedFinalRollback retainedRollback;
+            private bool linked;
             private bool finished;
 
             internal StagedPublication(
@@ -972,7 +1210,39 @@ namespace OpenGGF.BizHawk.Headless
                 }
 
                 linkOperation.Create(temporaryPath, finalPath);
+                linked = true;
                 finished = true;
+                TryDeleteTemporary();
+            }
+
+            internal void PublishRetainingRollbackIdentity()
+            {
+                if(finished||linked)
+                    throw new InvalidOperationException(
+                        "The staged output is already finalized.");
+                retainedRollback=LinuxOwnedFinalRollback.Prepare(
+                    temporaryPath,finalPath);
+                try
+                {
+                    linkOperation.Create(temporaryPath,finalPath);
+                    linked=true;
+                }
+                catch
+                {
+                    retainedRollback.Dispose();
+                    retainedRollback=null;
+                    throw;
+                }
+            }
+
+            internal void CommitRetainedPublication()
+            {
+                if(finished||!linked||retainedRollback==null)
+                    throw new InvalidOperationException(
+                        "The retained publication is not ready to commit.");
+                finished=true;
+                retainedRollback.Dispose();
+                retainedRollback=null;
                 TryDeleteTemporary();
             }
 
@@ -988,14 +1258,24 @@ namespace OpenGGF.BizHawk.Headless
 
             internal void RevokeFinal()
             {
+                if(finished)return;
+                finished=true;
                 try
                 {
-                    deleteFile(finalPath);
+                    if(linked&&retainedRollback!=null)
+                        retainedRollback.RevokeIfOwned();
                 }
                 catch (Exception)
                 {
-                    // Rollback is best-effort; the original multi-file
-                    // publication failure is what gets reported.
+                    // Fail closed: loss of inode authority must never fall
+                    // back to deleting a pathname that another writer may
+                    // now own. The original publication failure is reported.
+                }
+                finally
+                {
+                    if(retainedRollback!=null)retainedRollback.Dispose();
+                    retainedRollback=null;
+                    TryDeleteTemporary();
                 }
             }
 
@@ -1070,9 +1350,12 @@ namespace OpenGGF.BizHawk.Headless
 
                     while (publishedCount < staged.Length)
                     {
-                        staged[publishedCount].Publish();
+                        staged[publishedCount]
+                            .PublishRetainingRollbackIdentity();
                         publishedCount++;
                     }
+                    foreach(StagedPublication file in staged)
+                        file.CommitRetainedPublication();
                 }
                 catch
                 {

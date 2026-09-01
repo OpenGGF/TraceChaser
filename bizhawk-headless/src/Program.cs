@@ -1521,10 +1521,9 @@ namespace BizHawk.Headless.Gpgx
                     OverrideResumeRawDigestTextWriter.Evidence evidence=
                         hashing.Finish();
                     writers[1].Write(OverrideResumeFirstDivergenceAttestation
-                        .Create("s1",evidence,
+                        .Serialize("s1",evidence,
                             "s1-proberuntime-native-correlation-abi4",
-                            DateTime.UtcNow).ToString(Formatting.None));
-                    writers[1].Write('\n');
+                            DateTime.UtcNow));
                     return result;
                 },
                 result =>

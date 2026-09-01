@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json.Linq;
@@ -27,6 +28,36 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergenceExtractorTests reject truncated canonical rows",
                 RejectsTruncatedCanonicalRows));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject open raw metadata contracts",
+                RejectsOpenRawMetadataContracts));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject open selected boundary contracts",
+                RejectsOpenSelectedBoundaryContracts));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject open selected PCM contracts",
+                RejectsOpenSelectedPcmContracts));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests validate every selected write contract",
+                ValidatesEverySelectedWriteContract));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests accept timestamp-value-only attestation differences",
+                AcceptsTimestampValueOnlyAttestationDifferences));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject attestation whitespace differences",
+                RejectsAttestationWhitespaceDifferences));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject attestation member-order differences",
+                RejectsAttestationMemberOrderDifferences));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject attestation terminal-newline differences",
+                RejectsAttestationTerminalNewlineDifferences));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject other attestation byte differences",
+                RejectsOtherAttestationByteDifferences));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject malformed and multi-record attestations",
+                RejectsMalformedAndMultiRecordAttestations));
         }
 
         private static void NormalizesDuplicateAuthenticatedRawsDeterministically()
@@ -59,6 +90,40 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal(true, reference.Contains(
                     "openggf.override-resume-first-divergence-reference.v1"));
                 AssertEx.Equal(true, reference.Contains("\"pcm_hex\":\"0100ffff\""));
+
+                JObject s1Reference = JObject.Parse(reference);
+                AssertExactProperties(s1Reference,
+                    "boundary", "game", "pcm", "schema");
+                AssertExactProperties((JObject)s1Reference["boundary"],
+                    "admission", "admission_frame", "fix_bugs", "frame",
+                    "native_ordinal", "pc", "request", "request_frame",
+                    "service_token", "type", "writes",
+                    "writes_dac_disable_zero");
+                AssertExactProperties((JObject)s1Reference["pcm"],
+                    "byte_count", "channels", "format", "offset", "pcm_hex",
+                    "row", "sample_rate", "selection", "sha256",
+                    "stereo_frames", "type");
+                AssertExactProperties((JObject)((JArray)
+                    s1Reference["boundary"]["writes"])[0],
+                    "data", "event_kind", "native_ordinal", "pc", "port",
+                    "register", "source_cpu", "subject", "value");
+                AssertExactProperties(s1,
+                    "attestation_sha256", "game", "logical_byte_count",
+                    "logical_sha256", "raw_byte_count", "raw_sha256",
+                    "record_count", "schema", "stored_byte_count",
+                    "stored_sha256");
+
+                JObject s2Reference = JObject.Parse(
+                    Gunzip(first.S2.ReferenceGzip));
+                AssertExactProperties((JObject)s2Reference["boundary"],
+                    "admission", "fix_driver_bugs", "frame", "native_ordinal",
+                    "pc", "request", "request_pc", "restores_psg_noise",
+                    "restores_saved_priority", "service_begin_ordinal",
+                    "service_token", "writes");
+                AssertExactProperties((JObject)s2Reference["pcm"],
+                    "byte_count", "channels", "format", "offset", "pcm_hex",
+                    "row", "sample_rate", "selection", "sha256",
+                    "stereo_frames");
             });
         }
 
@@ -119,6 +184,188 @@ namespace OpenGGF.BizHawk.Headless.Tests
             WithInputs((root,inputs)=>AssertEx.Throws<InvalidDataException>(
                 ()=>new OverrideResumeFirstDivergenceExtractor().Extract(inputs),
                 "not contiguous"));
+        }
+
+        private static void RejectsOpenRawMetadataContracts()
+        {
+            AssertRejectsRawMutation("s1", rows =>
+                rows[0]["unexpected"] = 1, "unknown property");
+            AssertRejectsRawMutation("s1", rows =>
+                rows[0].Remove("native_capacity"), "missing property");
+            AssertRejectsRawMutation("s2", rows =>
+                rows[0]["unexpected"] = 1, "unknown property");
+            AssertRejectsRawMutation("s2", rows =>
+                rows[0].Remove("service_manifest_sha256"), "missing property");
+        }
+
+        private static void RejectsOpenSelectedBoundaryContracts()
+        {
+            AssertRejectsRawMutation("s1", rows =>
+                FindBoundary(rows, "s1")["unexpected"] = true,
+                "unknown property");
+            AssertRejectsRawMutation("s1", rows =>
+                FindBoundary(rows, "s1").Remove("admission_frame"),
+                "missing property");
+            AssertRejectsRawMutation("s2", rows =>
+                FindBoundary(rows, "s2")["unexpected"] = true,
+                "unknown property");
+            AssertRejectsRawMutation("s2", rows =>
+                FindBoundary(rows, "s2").Remove("request_pc"),
+                "missing property");
+        }
+
+        private static void RejectsOpenSelectedPcmContracts()
+        {
+            AssertRejectsRawMutation("s1", rows =>
+                FindPcm(rows, "s1")["unexpected"] = true,
+                "unknown property");
+            AssertRejectsRawMutation("s1", rows =>
+                FindPcm(rows, "s1").Remove("format"), "missing property");
+            AssertRejectsRawMutation("s2", rows =>
+                FindPcm(rows, "s2")["unexpected"] = true,
+                "unknown property");
+            AssertRejectsRawMutation("s2", rows =>
+                FindPcm(rows, "s2").Remove("sha256"), "missing property");
+        }
+
+        private static void ValidatesEverySelectedWriteContract()
+        {
+            AssertRejectsRawMutation("s1", rows =>
+            {
+                JArray writes = (JArray)FindBoundary(rows, "s1")["writes"];
+                JObject second = (JObject)writes[0].DeepClone();
+                second["native_ordinal"] = 32;
+                second["unexpected"] = true;
+                writes.Add(second);
+            }, "unknown property");
+            AssertRejectsRawMutation("s2", rows =>
+                ((JObject)((JArray)FindBoundary(rows, "s2")["writes"])[0])
+                    .Remove("register"), "missing property");
+        }
+
+        private static void AcceptsTimestampValueOnlyAttestationDifferences()
+        {
+            WithInputs((root, inputs) =>
+            {
+                OverrideResumeFirstDivergenceExtractor.ForTesting()
+                    .Extract(inputs);
+            });
+        }
+
+        private static void RejectsAttestationWhitespaceDifferences()
+        {
+            AssertRejectsAttestationMutation(text => " " + text,
+                "not canonical");
+        }
+
+        private static void RejectsAttestationMemberOrderDifferences()
+        {
+            AssertRejectsAttestationMutation(text =>
+            {
+                JObject parsed = JObject.Parse(text);
+                var reordered = new JObject();
+                foreach (JProperty property in parsed.Properties().Reverse())
+                    reordered.Add(property.Name, property.Value.DeepClone());
+                return reordered.ToString(Newtonsoft.Json.Formatting.None) + "\n";
+            }, "not canonical");
+        }
+
+        private static void RejectsAttestationTerminalNewlineDifferences()
+        {
+            AssertRejectsAttestationMutation(text => text + "\n",
+                "not canonical");
+        }
+
+        private static void RejectsOtherAttestationByteDifferences()
+        {
+            AssertRejectsAttestationMutation(text =>
+            {
+                JObject parsed = JObject.Parse(text);
+                parsed["authority_id"] = "different-authority";
+                return parsed.ToString(Newtonsoft.Json.Formatting.None) + "\n";
+            }, "timestamp normalization");
+        }
+
+        private static void RejectsMalformedAndMultiRecordAttestations()
+        {
+            AssertRejectsAttestationMutation(text => "{\n", "attestation");
+            AssertRejectsAttestationMutation(text => text + "{}\n",
+                "attestation");
+        }
+
+        private static void AssertRejectsAttestationMutation(
+            Func<string, string> mutation, string message)
+        {
+            WithInputs((root, inputs) =>
+            {
+                Write(inputs.S1Attestation2, mutation(
+                    File.ReadAllText(inputs.S1Attestation2)));
+                AssertEx.Throws<InvalidDataException>(() =>
+                    OverrideResumeFirstDivergenceExtractor.ForTesting()
+                        .Extract(inputs), message);
+            });
+        }
+
+        private static void AssertRejectsRawMutation(string game,
+            Action<IList<JObject>> mutation, string message)
+        {
+            WithInputs((root, inputs) =>
+            {
+                string first = game == "s1" ? inputs.S1Raw1 : inputs.S2Raw1;
+                string second = game == "s1" ? inputs.S1Raw2 : inputs.S2Raw2;
+                IList<JObject> rows = File.ReadAllText(first)
+                    .Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(JObject.Parse).ToList();
+                mutation(rows);
+                string value = string.Concat(rows.Select(Line));
+                Write(first, value);
+                Write(second, value);
+                if (game == "s1")
+                {
+                    WriteAttestation(inputs.S1Attestation1, game, first,
+                        "2026-09-01T00:00:00Z");
+                    WriteAttestation(inputs.S1Attestation2, game, second,
+                        "2026-09-01T00:00:01Z");
+                }
+                else
+                {
+                    WriteAttestation(inputs.S2Attestation1, game, first,
+                        "2026-09-01T00:00:00Z");
+                    WriteAttestation(inputs.S2Attestation2, game, second,
+                        "2026-09-01T00:00:01Z");
+                }
+                AssertEx.Throws<InvalidDataException>(() =>
+                    OverrideResumeFirstDivergenceExtractor.ForTesting()
+                        .Extract(inputs), message);
+            });
+        }
+
+        private static JObject FindBoundary(IList<JObject> rows, string game)
+        {
+            if (game == "s1")
+                return rows.Single(row => (string)row["type"] ==
+                    "override_resume");
+            return (JObject)rows.Single(row => (string)row["type"] == "frame")
+                ["override_resume"];
+        }
+
+        private static JObject FindPcm(IList<JObject> rows, string game)
+        {
+            if (game == "s1")
+                return rows.Single(row => (string)row["type"] ==
+                    "native_pcm_packet");
+            return (JObject)rows.Single(row => (string)row["type"] == "frame")
+                ["pcm"];
+        }
+
+        private static void AssertExactProperties(JObject value,
+            params string[] expected)
+        {
+            string actual = string.Join(",", value.Properties()
+                .Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
+            AssertEx.Equal(string.Join(",", expected.OrderBy(
+                name => name, StringComparer.Ordinal)), actual);
         }
 
         internal static void WithInputs(Action<string,
@@ -203,7 +450,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ["type"]="metadata",["schema"]="openggf.s2-complete-run-audio-raw.v2",
                 ["rom_sha1"]="8bca5dcef1af3e00098666fd892dc1c2a76333f9",
                 ["bk2_sha256"]="e850798f882b8c580aad148bc97cb50f260cae1d336dd649fe2f4dfae6796aa5",
-                ["first_row"]=769,["exclusive_end"]=259590
+                ["service_manifest_sha256"]=S2AudioObserverProfile.ServiceManifestSha256,
+                ["first_row"]=769,["exclusive_end"]=259590,
+                ["state_start"]=S2AudioObserverProfile.DriverStateStart,
+                ["state_exclusive_end"]=S2AudioObserverProfile.DriverStateExclusiveEnd
             }) + Line(new JObject { ["type"]="baseline" }) + Line(new JObject
             {
                 ["type"]="frame",["row"]=4000,["lag"]=false,["state_hex"]="00",

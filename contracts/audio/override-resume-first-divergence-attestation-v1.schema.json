@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "openggf.override-resume-first-divergence-attestation.v1",
+  "$comment": "Canonical bytes are the compact property order shown below, UTF-8 without BOM, plus exactly one LF. Duplicate captures may differ only in the 20 capture_timestamp_utc value bytes; no whitespace, member-order, or newline normalization is permitted.",
   "type": "object",
   "additionalProperties": false,
   "required": [

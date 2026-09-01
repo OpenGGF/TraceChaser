@@ -44,6 +44,24 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual("history audit: PASS\n", result.stdout)
 
+    def test_exact_override_resume_audio_schemas_pass_history_audit(self):
+        schema = (
+            b'{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+            b'"type":"object"}\n'
+        )
+        for path in (
+            "contracts/audio/override-resume-first-divergence-attestation-v1.schema.json",
+            "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json",
+            "contracts/audio/override-resume-first-divergence-reference-v1.schema.json",
+        ):
+            self._write(path, schema)
+        self._commit("add exact override-resume audio schemas")
+
+        result = self._audit()
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("history audit: PASS\n", result.stdout)
+
     def test_deleted_bk2_is_reported_with_commit_object_and_path(self):
         self._write("scratch/movie.bk2", b"PK\x03\x04synthetic movie")
         introducing_commit = self._commit("add prohibited movie")

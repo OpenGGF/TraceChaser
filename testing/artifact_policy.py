@@ -25,6 +25,9 @@ V5_CONTRACT_FILE_SUFFIXES = (
 EXACT_CONTRACT_PATHS = frozenset(
     {
         "contracts/audio/normalization-contract-v1.json",
+        "contracts/audio/override-resume-first-divergence-attestation-v1.schema.json",
+        "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json",
+        "contracts/audio/override-resume-first-divergence-reference-v1.schema.json",
     }
 )
 

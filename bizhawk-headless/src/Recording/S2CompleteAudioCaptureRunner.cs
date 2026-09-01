@@ -103,10 +103,8 @@ namespace OpenGGF.BizHawk.Headless
                         OverrideResumeRawDigestTextWriter.Evidence evidence=
                             hashing.Finish();
                         writers[1].Write(OverrideResumeFirstDivergenceAttestation
-                            .Create("s2",evidence,
-                                "s2-native-gpgx-observer-abi4",DateTime.UtcNow)
-                            .ToString(Formatting.None));
-                        writers[1].Write('\n');
+                            .Serialize("s2",evidence,
+                                "s2-native-gpgx-observer-abi4",DateTime.UtcNow));
                     }))
             {staged.Publish();}
         }

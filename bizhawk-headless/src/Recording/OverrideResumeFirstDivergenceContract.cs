@@ -3,6 +3,7 @@ using System.IO;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless
@@ -168,6 +169,20 @@ namespace OpenGGF.BizHawk.Headless
 
     internal static class OverrideResumeFirstDivergenceAttestation
     {
+        /// <summary>
+        /// Produces the sole accepted attestation byte form: one compact
+        /// object in the field order below, UTF-8 without BOM, followed by
+        /// exactly one LF. Duplicate-capture comparison may replace only the
+        /// 20 timestamp value bytes; every other byte remains authoritative.
+        /// </summary>
+        internal static string Serialize(string game,
+            OverrideResumeRawDigestTextWriter.Evidence evidence,
+            string authorityId,DateTime timestampUtc)
+        {
+            return Create(game,evidence,authorityId,timestampUtc)
+                .ToString(Formatting.None)+"\n";
+        }
+
         internal static JObject Create(string game,
             OverrideResumeRawDigestTextWriter.Evidence evidence,
             string authorityId,DateTime timestampUtc)
@@ -178,13 +193,29 @@ namespace OpenGGF.BizHawk.Headless
             if(string.IsNullOrEmpty(authorityId))throw new ArgumentException(
                 "Attestation authority identity is required.","authorityId");
             DateTime utc=timestampUtc.ToUniversalTime();
+            return CreateCanonicalObject(game,evidence.Sha256,
+                evidence.ByteCount,authorityId,utc.ToString(
+                    "yyyy-MM-dd'T'HH:mm:ss'Z'",CultureInfo.InvariantCulture));
+        }
+
+        internal static byte[] CanonicalBytes(string game,string rawSha256,
+            long rawByteCount,string authorityId,string timestamp)
+        {
+            string value=CreateCanonicalObject(game,rawSha256,rawByteCount,
+                authorityId,timestamp).ToString(Formatting.None)+"\n";
+            return new UTF8Encoding(false,true).GetBytes(value);
+        }
+
+        private static JObject CreateCanonicalObject(string game,
+            string rawSha256,long rawByteCount,string authorityId,
+            string timestamp)
+        {
             return new JObject
             {
                 ["schema"]="openggf.override-resume-first-divergence-attestation.v1",
-                ["capture_timestamp_utc"]=utc.ToString(
-                    "yyyy-MM-dd'T'HH:mm:ss'Z'",CultureInfo.InvariantCulture),
-                ["game"]=game,["raw_sha256"]=evidence.Sha256,
-                ["raw_byte_count"]=evidence.ByteCount,["status"]="ok",
+                ["capture_timestamp_utc"]=timestamp,
+                ["game"]=game,["raw_sha256"]=rawSha256,
+                ["raw_byte_count"]=rawByteCount,["status"]="ok",
                 ["fault_count"]=0,["overflow_count"]=0,
                 ["authority_id"]=authorityId
             };

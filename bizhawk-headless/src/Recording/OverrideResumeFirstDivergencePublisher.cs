@@ -47,12 +47,14 @@ namespace OpenGGF.BizHawk.Headless
             if(expected!=requested)
                 throw new ArgumentException(
                     "Fixture root must be the requested consumer audio/parity subtree.");
+            ValidateGameDirectories(requested);
             foreach(string name in FileNames)
                 if(LinuxPathEntry.Exists(Path.Combine(requested,name)))
                     throw new IOException("Final output already exists and will not be replaced: "
                         +Path.Combine(requested,name));
 
             OverrideResumeFirstDivergenceExtractor.Output output=extractor.Extract(inputs);
+            ValidateGameDirectories(requested);
             byte[][] values=
             {
                 output.S1.ReferenceGzip,output.S1.MetadataUtf8,
@@ -62,6 +64,20 @@ namespace OpenGGF.BizHawk.Headless
                 publisher.StageAllBytes(requested,FileNames,values))
             {
                 staged.Publish();
+            }
+        }
+
+        private static void ValidateGameDirectories(string fixtureRoot)
+        {
+            foreach(string game in new[]{"s1","s2"})
+            {
+                string path=Path.Combine(fixtureRoot,game);
+                if(!LinuxPathEntry.Exists(path))continue;
+                if(LinuxPathEntry.IsSymbolicLink(path))
+                    throw new IOException("Fixture game directory must not be a symbolic link: "
+                        +path);
+                if(!Directory.Exists(path))
+                    throw new IOException("Fixture game path must be a directory: "+path);
             }
         }
     }

@@ -99,6 +99,32 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
         self.assertEqual("repository policy: PASS\n", result.stdout)
         self.assertEqual([], self._find_violations())
 
+    def test_accepts_only_exact_override_resume_audio_schema_paths(self):
+        schema = (
+            b'{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+            b'"type":"object"}\n'
+        )
+        exact_paths = (
+            "contracts/audio/override-resume-first-divergence-attestation-v1.schema.json",
+            "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json",
+            "contracts/audio/override-resume-first-divergence-reference-v1.schema.json",
+        )
+        for path in exact_paths:
+            self._write(path, schema)
+        adjacent_path = "contracts/audio/override-resume-first-divergence-unlisted.json"
+        self._write(adjacent_path, schema)
+        self._git("add", ".")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        for path in exact_paths:
+            self.assertNotIn(f"path={path} ", result.stdout)
+        self.assertIn(
+            f"path={adjacent_path} reason=contract file outside curated exceptions",
+            result.stdout,
+        )
+
     def test_ignores_untracked_artifacts(self):
         self._write("traces/validate.py", b"print('tracked source')\n")
         self._git("add", ".")

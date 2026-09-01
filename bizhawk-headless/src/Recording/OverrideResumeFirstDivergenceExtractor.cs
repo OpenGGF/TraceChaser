@@ -73,7 +73,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             internal byte[] Bytes;
             internal string Sha256;
-            internal string Normalized;
+            internal byte[] Normalized;
         }
 
         internal Output Extract(Inputs inputs)
@@ -102,7 +102,8 @@ namespace OpenGGF.BizHawk.Headless
                 game,attestation1,first);
             AttestationEvidence secondAttestation=ReadAttestation(
                 game,attestation2,second);
-            if(firstAttestation.Normalized!=secondAttestation.Normalized)
+            if(!BytesEqual(firstAttestation.Normalized,
+                secondAttestation.Normalized))
                 throw Invalid("duplicate "+game.ToUpperInvariant()
                     +" attestations differ after timestamp normalization");
 
@@ -112,6 +113,7 @@ namespace OpenGGF.BizHawk.Headless
                 ["game"]=game,["boundary"]=first.Boundary,
                 ["pcm"]=first.Pcm
             };
+            ValidatePublishedReference(game,reference);
             byte[] logical=Utf8(Canonical(reference)+"\n");
             byte[] stored=DeterministicGzip(logical);
             JObject metadata=new JObject
@@ -128,6 +130,7 @@ namespace OpenGGF.BizHawk.Headless
                 ["stored_byte_count"]=stored.LongLength,
                 ["stored_sha256"]=Digest(stored)
             };
+            ValidatePublishedMetadata(game,metadata);
             return new GameOutput(stored,Utf8(Canonical(metadata)+"\n"));
         }
 
@@ -215,6 +218,7 @@ namespace OpenGGF.BizHawk.Headless
             {throw Invalid("raw is not strict UTF-8");}
             if(metadata==null||RequiredString(metadata,"schema")!=expected)
                 throw Invalid("wrong "+game.ToUpperInvariant()+" raw schema");
+            ValidateRawMetadata(game,metadata);
             ValidateIdentity(game,metadata);
             if(boundary==null)throw Invalid("no "+game.ToUpperInvariant()+" resume service");
             if(pcm==null)throw Invalid("no "+game.ToUpperInvariant()+" PCM packet");
@@ -228,7 +232,7 @@ namespace OpenGGF.BizHawk.Headless
                     throw Invalid(game.ToUpperInvariant()+" raw is truncated");
             }
             ValidateBoundary(game,boundary);
-            ValidatePcm(boundary,pcm);
+            ValidatePcm(game,boundary,pcm);
             ValidateTerminal(game,terminal);
             return new RawEvidence
             {ByteCount=file.ByteCount,Sha256=file.Sha256,
@@ -257,28 +261,115 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
+        private static void ValidateRawMetadata(string game,JObject metadata)
+        {
+            if(game=="s1")
+            {
+                ExactProperties(metadata,"S1 raw metadata","type","schema",
+                    "rom_sha1","bk2_sha256","first_row","exclusive_end",
+                    "native_abi","native_event_size","native_capacity");
+                RequireEqual("metadata",RequiredString(metadata,"type"),
+                    "S1 raw metadata type");
+                RequireEqual(4,RequiredInt(metadata,"native_abi"),
+                    "S1 native ABI");
+                RequireEqual(32,RequiredInt(metadata,"native_event_size"),
+                    "S1 native event size");
+                RequireEqual(65536,RequiredInt(metadata,"native_capacity"),
+                    "S1 native capacity");
+                return;
+            }
+            ExactProperties(metadata,"S2 raw metadata","type","schema",
+                "rom_sha1","bk2_sha256","service_manifest_sha256",
+                "first_row","exclusive_end","state_start",
+                "state_exclusive_end");
+            RequireEqual("metadata",RequiredString(metadata,"type"),
+                "S2 raw metadata type");
+            RequireEqual(S2AudioObserverProfile.ServiceManifestSha256,
+                RequiredString(metadata,"service_manifest_sha256"),
+                "S2 service manifest");
+            RequireEqual(S2AudioObserverProfile.DriverStateStart,
+                RequiredInt(metadata,"state_start"),"S2 state start");
+            RequireEqual(S2AudioObserverProfile.DriverStateExclusiveEnd,
+                RequiredInt(metadata,"state_exclusive_end"),
+                "S2 state end");
+        }
+
         private static void ValidateBoundary(string game,JObject boundary)
         {
+            if(game=="s1")
+                ExactProperties(boundary,"S1 selected boundary","type",
+                    "request","admission","request_frame","admission_frame",
+                    "frame","pc","service_token","native_ordinal",
+                    "fix_bugs","writes_dac_disable_zero","writes");
+            else
+                ExactProperties(boundary,"S2 selected boundary","request",
+                    "admission","request_pc","pc","service_token",
+                    "service_begin_ordinal","native_ordinal","frame",
+                    "fix_driver_bugs","restores_saved_priority",
+                    "restores_psg_noise","writes");
             RequireEqual("cfFadeInToPrevious",RequiredString(boundary,"request"),
                 game+" restore request");
+            RequireNonNegative(RequiredInt(boundary,"frame"),game+" frame");
             JArray writes=boundary["writes"] as JArray;
             if(writes==null||writes.Count==0)throw Invalid(game+" resumed service owns no writes");
             long previous=-1;
             foreach(JToken token in writes)
             {
                 JObject write=RequireObject(token,game+" write");
+                ExactProperties(write,game+" selected write","native_ordinal",
+                    "event_kind","subject","value","pc","source_cpu",
+                    "data","port","register");
                 long ordinal=RequiredLong(write,"native_ordinal");
-                if(ordinal<=previous)throw Invalid(game+" chip writes are unordered");
+                if(ordinal<1||ordinal<=previous)
+                    throw Invalid(game+" chip writes are unordered");
                 previous=ordinal;
+                RequireNonNegative(RequiredInt(write,"event_kind"),
+                    game+" write event kind");
+                RequireNonNegative(RequiredInt(write,"subject"),
+                    game+" write subject");
+                RequireRange(RequiredInt(write,"value"),0,255,
+                    game+" write value");
+                RequireNonNegative(RequiredInt(write,"pc"),game+" write PC");
+                RequireNonNegative(RequiredInt(write,"source_cpu"),
+                    game+" write source CPU");
+                RequiredBool(write,"data");
+                RequireRange(RequiredInt(write,"port"),0,1,
+                    game+" write port");
+                RequireRange(RequiredInt(write,"register"),0,255,
+                    game+" write register");
             }
             if(game=="s1")
             {
+                RequireEqual("override_resume",RequiredString(boundary,"type"),
+                    "S1 boundary type");
+                RequireEqual("native_restore_entry",
+                    RequiredString(boundary,"admission"),"S1 admission");
+                RequireNonNegative(RequiredInt(boundary,"request_frame"),
+                    "S1 request frame");
+                RequireNonNegative(RequiredInt(boundary,"admission_frame"),
+                    "S1 admission frame");
+                RequireEqual(0x72B14,RequiredInt(boundary,"pc"),"S1 PC");
+                RequirePositive(RequiredLong(boundary,"service_token"),
+                    "S1 service token");
+                RequirePositive(RequiredLong(boundary,"native_ordinal"),
+                    "S1 native ordinal");
                 RequireEqual(0,RequiredInt(boundary,"fix_bugs"),"FixBugs");
                 if(RequiredBool(boundary,"writes_dac_disable_zero"))
                     throw Invalid("S1 FixBugs=0 invented YM $2B=$00");
             }
             else
             {
+                RequireEqual("native_service_completion",
+                    RequiredString(boundary,"admission"),"S2 admission");
+                RequireEqual(0x0D35,RequiredInt(boundary,"request_pc"),
+                    "S2 request PC");
+                RequireEqual(0x0DB4,RequiredInt(boundary,"pc"),"S2 PC");
+                RequirePositive(RequiredLong(boundary,"service_token"),
+                    "S2 service token");
+                RequirePositive(RequiredLong(boundary,
+                    "service_begin_ordinal"),"S2 service begin ordinal");
+                RequirePositive(RequiredLong(boundary,"native_ordinal"),
+                    "S2 native ordinal");
                 RequireEqual(0,RequiredInt(boundary,"fix_driver_bugs"),
                     "FixDriverBugs");
                 if(!RequiredBool(boundary,"restores_saved_priority")
@@ -287,13 +378,28 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
-        private static void ValidatePcm(JObject boundary,JObject pcm)
+        private static void ValidatePcm(string game,JObject boundary,JObject pcm)
         {
+            if(game=="s1")
+                ExactProperties(pcm,"S1 selected PCM","type","selection",
+                    "row","offset","sample_rate","channels","format",
+                    "stereo_frames","byte_count","pcm_hex","sha256");
+            else
+                ExactProperties(pcm,"S2 selected PCM","selection","row",
+                    "offset","sample_rate","channels","format",
+                    "stereo_frames","byte_count","pcm_hex","sha256");
+            if(game=="s1")
+                RequireEqual("native_pcm_packet",RequiredString(pcm,"type"),
+                    "S1 PCM type");
             string selection=RequiredString(pcm,"selection");
             int offset=RequiredInt(pcm,"offset");
             if((selection!="service_frame"||offset!=0)
                 &&(selection!="following_row"||offset!=1))
                 throw Invalid("PCM packet timing is outside the exact eligible rows");
+            int row=RequiredInt(pcm,"row");
+            RequireNonNegative(row,"PCM row");
+            RequireEqual(checked(RequiredInt(boundary,"frame")+offset),row,
+                "PCM row");
             RequireEqual(44100,RequiredInt(pcm,"sample_rate"),"PCM sample rate");
             RequireEqual(2,RequiredInt(pcm,"channels"),"PCM channels");
             RequireEqual("s16le-interleaved-stereo",RequiredString(pcm,"format"),
@@ -305,6 +411,58 @@ namespace OpenGGF.BizHawk.Headless
             if(frames<=0||byteCount!=frames*4||bytes.Length!=byteCount)
                 throw Invalid("PCM packet byte/frame inventory is inconsistent");
             RequireEqual(Digest(bytes),RequiredString(pcm,"sha256"),"PCM digest");
+        }
+
+        private static void ValidatePublishedReference(string game,JObject value)
+        {
+            ExactProperties(value,"published reference","schema","game",
+                "boundary","pcm");
+            RequireEqual("openggf.override-resume-first-divergence-reference.v1",
+                RequiredString(value,"schema"),"reference schema");
+            RequireEqual(game,RequiredString(value,"game"),"reference game");
+            JObject boundary=RequireObject(value["boundary"],
+                "published boundary");
+            JObject pcm=RequireObject(value["pcm"],"published PCM");
+            ValidateBoundary(game,boundary);
+            ValidatePcm(game,boundary,pcm);
+        }
+
+        private static void ValidatePublishedMetadata(string game,JObject value)
+        {
+            ExactProperties(value,"published metadata","schema","game",
+                "raw_sha256","raw_byte_count","attestation_sha256",
+                "record_count","logical_byte_count","logical_sha256",
+                "stored_byte_count","stored_sha256");
+            RequireEqual("openggf.override-resume-first-divergence-metadata.v1",
+                RequiredString(value,"schema"),"metadata schema");
+            RequireEqual(game,RequiredString(value,"game"),"metadata game");
+            ValidateDigestPair(RequiredArray(value,"raw_sha256"),
+                "raw digest");
+            ValidateDigestPair(RequiredArray(value,"attestation_sha256"),
+                "attestation digest");
+            RequirePositive(RequiredLong(value,"raw_byte_count"),
+                "raw byte count");
+            RequireEqual(1,RequiredInt(value,"record_count"),"record count");
+            RequirePositive(RequiredLong(value,"logical_byte_count"),
+                "logical byte count");
+            ValidateLowerHex(RequiredString(value,"logical_sha256"),64,
+                "logical digest");
+            RequirePositive(RequiredLong(value,"stored_byte_count"),
+                "stored byte count");
+            ValidateLowerHex(RequiredString(value,"stored_sha256"),64,
+                "stored digest");
+        }
+
+        private static void ValidateDigestPair(JArray value,string label)
+        {
+            if(value.Count!=2)throw Invalid(label+" pair must contain two values");
+            for(int index=0;index<value.Count;index++)
+            {
+                JToken item=value[index];
+                if(item.Type!=JTokenType.String)
+                    throw Invalid(label+" must be a string");
+                ValidateLowerHex((string)item,64,label);
+            }
         }
 
         private static void ValidateTerminal(string game,JObject terminal)
@@ -322,7 +480,8 @@ namespace OpenGGF.BizHawk.Headless
             string path,RawEvidence raw)
         {
             byte[] bytes=ReadStrictFile(path,"attestation");
-            JObject value=ParseObject(StrictUtf8(bytes,"attestation").TrimEnd('\n'),
+            string text=StrictUtf8(bytes,"attestation");
+            JObject value=ParseObject(text.Substring(0,text.Length-1),
                 "attestation");
             ExactProperties(value,"attestation","schema","capture_timestamp_utc",
                 "game","raw_sha256","raw_byte_count","status","fault_count",
@@ -337,14 +496,47 @@ namespace OpenGGF.BizHawk.Headless
             RequireEqual("ok",RequiredString(value,"status"),"attestation status");
             RequireEqual(0,RequiredInt(value,"fault_count"),"fault count");
             RequireEqual(0,RequiredInt(value,"overflow_count"),"overflow count");
+            string authorityId=RequiredString(value,"authority_id");
             string timestamp=RequiredString(value,"capture_timestamp_utc");
             DateTime parsed;
             if(!DateTime.TryParseExact(timestamp,"yyyy-MM-dd'T'HH:mm:ss'Z'",
-                CultureInfo.InvariantCulture,DateTimeStyles.AssumeUniversal,
+                CultureInfo.InvariantCulture,DateTimeStyles.AssumeUniversal
+                    |DateTimeStyles.AdjustToUniversal,
                 out parsed))throw Invalid("attestation timestamp is invalid");
-            value.Remove("capture_timestamp_utc");
+            byte[] canonical=OverrideResumeFirstDivergenceAttestation
+                .CanonicalBytes(game,raw.Sha256,raw.ByteCount,authorityId,
+                    timestamp);
+            if(!BytesEqual(bytes,canonical))
+                throw Invalid("attestation bytes are not canonical");
             return new AttestationEvidence
-            {Bytes=bytes,Sha256=Digest(bytes),Normalized=Canonical(value)};
+            {Bytes=bytes,Sha256=Digest(bytes),
+                Normalized=NormalizeTimestampOnly(bytes,timestamp)};
+        }
+
+        private static byte[] NormalizeTimestampOnly(byte[] bytes,
+            string timestamp)
+        {
+            const string prefix="{\"schema\":\"openggf.override-resume-first-divergence-attestation.v1\","
+                +"\"capture_timestamp_utc\":\"";
+            const string replacement="1970-01-01T00:00:00Z";
+            byte[] prefixBytes=Utf8(prefix);
+            byte[] timestampBytes=Utf8(timestamp);
+            byte[] replacementBytes=Utf8(replacement);
+            if(timestampBytes.Length!=replacementBytes.Length
+                ||bytes.Length<prefixBytes.Length+timestampBytes.Length+1)
+                throw Invalid("attestation timestamp bytes are not canonical");
+            for(int index=0;index<prefixBytes.Length;index++)
+                if(bytes[index]!=prefixBytes[index])
+                    throw Invalid("attestation timestamp field is not canonical");
+            for(int index=0;index<timestampBytes.Length;index++)
+                if(bytes[prefixBytes.Length+index]!=timestampBytes[index])
+                    throw Invalid("attestation timestamp value is not canonical");
+            if(bytes[prefixBytes.Length+timestampBytes.Length]!=(byte)'\"')
+                throw Invalid("attestation timestamp terminator is not canonical");
+            byte[] normalized=(byte[])bytes.Clone();
+            Buffer.BlockCopy(replacementBytes,0,normalized,prefixBytes.Length,
+                replacementBytes.Length);
+            return normalized;
         }
 
         internal static byte[] DeterministicGzip(byte[] bytes)
@@ -430,6 +622,14 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
+        private static bool BytesEqual(byte[] first,byte[] second)
+        {
+            if(first==null||second==null||first.Length!=second.Length)return false;
+            for(int index=0;index<first.Length;index++)
+                if(first[index]!=second[index])return false;
+            return true;
+        }
+
         private static string StrictUtf8(byte[] bytes,string label)
         {
             try{return new UTF8Encoding(false,true).GetString(bytes);}
@@ -466,12 +666,26 @@ namespace OpenGGF.BizHawk.Headless
         private static bool RequiredBool(JObject value,string name)
         {JToken token=value[name];if(token==null||token.Type!=JTokenType.Boolean)
             throw Invalid(name+" must be a boolean");return(bool)token;}
+        private static JArray RequiredArray(JObject value,string name)
+        {JToken token=value[name];var array=token as JArray;if(array==null)
+            throw Invalid(name+" must be an array");return array;}
         private static void ExactProperties(JObject value,string label,params string[] names)
         {var expected=new HashSet<string>(names,StringComparer.Ordinal);foreach(JProperty p in value.Properties())
             if(!expected.Remove(p.Name))throw Invalid(label+" has unknown property "+p.Name);
             if(expected.Count!=0)throw Invalid(label+" is missing property "+expected.First());}
+        private static void RequireNonNegative(long value,string label)
+        {if(value<0)throw Invalid(label+" must be nonnegative");}
+        private static void RequirePositive(long value,string label)
+        {if(value<1)throw Invalid(label+" must be positive");}
+        private static void RequireRange(int value,int minimum,int maximum,
+            string label)
+        {if(value<minimum||value>maximum)throw Invalid(label+" is out of range");}
         private static void RequireEqual<T>(T expected,T actual,string label)
         {if(!EqualityComparer<T>.Default.Equals(expected,actual))throw Invalid(label+" identity changed");}
+        private static void ValidateLowerHex(string value,int length,string label)
+        {if(value.Length!=length)throw Invalid(label+" has the wrong length");
+            for(int index=0;index<value.Length;index++)if(Nibble(value[index])<0)
+                throw Invalid(label+" is not lowercase hex");}
         private static byte[] ParseHex(string text,string label)
         {if((text.Length&1)!=0)throw Invalid(label+" is not even lowercase hex");var result=new byte[text.Length/2];
             for(int i=0;i<result.Length;i++){int hi=Nibble(text[i*2]),lo=Nibble(text[i*2+1]);
