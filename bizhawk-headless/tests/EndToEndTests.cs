@@ -1587,14 +1587,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
             public bool Created { get; private set; }
 
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 if (!prerequisitesComplete())
                 {
                     throw new InvalidOperationException(
                         "Publication preceded fallible lifecycle work.");
                 }
-                LibcLinkOperation.Instance.Create(temporary, finalPath);
+                createAnchoredLink();
                 Created = true;
             }
         }

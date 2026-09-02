@@ -643,7 +643,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private sealed class FailingLinkOperation : ILinkOperation
         {
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 throw new IOException("synthetic sidecar seal failure");
             }
@@ -651,7 +652,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private sealed class AlwaysFailLinkOperation : ILinkOperation
         {
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 throw new IOException("synthetic candidate publication failure");
             }

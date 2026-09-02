@@ -269,7 +269,13 @@ namespace OpenGGF.BizHawk.Headless
 
             try
             {
-                linkOperation.Create(spoolPath, finalPath);
+                using (LinuxOwnedFinalRollback authority =
+                    LinuxOwnedFinalRollback.Prepare(spoolPath, finalPath,
+                        null))
+                {
+                    linkOperation.Create(spoolPath, finalPath,
+                        authority.LinkNoReplace);
+                }
             }
             catch
             {

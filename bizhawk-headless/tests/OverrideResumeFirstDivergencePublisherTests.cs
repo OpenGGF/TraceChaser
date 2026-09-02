@@ -15,6 +15,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergencePublisherTests reject s1 and s2 intermediate symlinks",
                 RejectsGameIntermediateSymlinks));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergencePublisherTests reject a validated game directory swap before link",
+                RejectsValidatedGameDirectorySwapBeforeLink));
         }
 
         private static void PublishesExactlyFourFilesOnce()
@@ -84,6 +87,101 @@ namespace OpenGGF.BizHawk.Headless.Tests
                                     + Marshal.GetLastWin32Error() + ".");
                         }
                     });
+            }
+        }
+
+        private static void RejectsValidatedGameDirectorySwapBeforeLink()
+        {
+            OverrideResumeFirstDivergenceExtractorTests.WithInputs(
+                (root, inputs) =>
+                {
+                    string fixtureRoot = Path.Combine(root, "src", "test",
+                        "resources", "audio", "parity");
+                    string tracechaserRoot = Path.Combine(root, "tools",
+                        "tracechaser");
+                    string outsideRoot = Path.Combine(root,
+                        "outside-fixture-root");
+                    Directory.CreateDirectory(tracechaserRoot);
+                    var link = new SwapGameDirectoryThenLinkOperation(
+                        outsideRoot);
+                    try
+                    {
+                        AssertEx.Throws<IOException>(() =>
+                            new OverrideResumeFirstDivergencePublisher(
+                                OverrideResumeFirstDivergenceExtractor
+                                    .ForTesting(),
+                                new NoReplacePublisher(link)).Publish(inputs,
+                                    tracechaserRoot, root, fixtureRoot),
+                            "directory");
+                        AssertEx.Equal(true, link.Swapped);
+                        AssertEx.Equal(false,
+                            link.ExternallyVisibleFinalObserved);
+                        AssertEx.Equal(false, File.Exists(Path.Combine(
+                            link.MovedGameDirectory,
+                            "s1-override-resume-reference.v1.jsonl.gz")));
+                        AssertEx.Equal(false, File.Exists(Path.Combine(
+                            link.MovedGameDirectory,
+                            "s1-override-resume-metadata.v1.json")));
+                    }
+                    finally
+                    {
+                        link.Restore();
+                    }
+                });
+        }
+
+        private sealed class SwapGameDirectoryThenLinkOperation
+            : ILinkOperation
+        {
+            private readonly string outsideRoot;
+            private string gameDirectory;
+
+            internal SwapGameDirectoryThenLinkOperation(string outside)
+            {
+                outsideRoot = outside;
+            }
+
+            internal bool Swapped { get; private set; }
+            internal bool ExternallyVisibleFinalObserved { get; private set; }
+            internal string MovedGameDirectory { get; private set; }
+
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
+            {
+                if (!Swapped && Path.GetFileName(
+                    Path.GetDirectoryName(finalPath)) == "s1")
+                {
+                    gameDirectory = Path.GetDirectoryName(finalPath);
+                    Directory.CreateDirectory(outsideRoot);
+                    MovedGameDirectory = Path.Combine(outsideRoot, "s1");
+                    Directory.Move(gameDirectory, MovedGameDirectory);
+                    if (Symlink(MovedGameDirectory, gameDirectory) != 0)
+                        throw new IOException(
+                            "symlink(2) failed with errno "
+                            + Marshal.GetLastWin32Error() + ".");
+                    Swapped = true;
+                }
+                try
+                {
+                    createAnchoredLink();
+                }
+                finally
+                {
+                    if (Swapped && File.Exists(finalPath))
+                        ExternallyVisibleFinalObserved = true;
+                }
+            }
+
+            internal void Restore()
+            {
+                if (!Swapped)
+                    return;
+                if (LinuxPathEntry.Exists(gameDirectory)
+                    && Unlink(gameDirectory) != 0)
+                    throw new IOException("unlink(2) failed with errno "
+                        + Marshal.GetLastWin32Error() + ".");
+                Directory.Move(MovedGameDirectory, gameDirectory);
+                Swapped = false;
             }
         }
 

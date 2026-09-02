@@ -47,6 +47,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "Publisher set rollback preserves a competitor replacement of an earlier final",
                 SetRollbackPreservesCompetitorReplacementOfEarlierFinal));
             tests.Add(new TestMain.TestCase(
+                "Publisher set rollback preserves a quarantine replacement after identity check",
+                SetRollbackPreservesQuarantineReplacementAfterIdentityCheck));
+            tests.Add(new TestMain.TestCase(
                 "Publisher set stages and publishes subdirectory finals",
                 SetStagesAndPublishesSubdirectoryFinals));
             tests.Add(new TestMain.TestCase(
@@ -597,6 +600,50 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 });
         }
 
+        private static void SetRollbackPreservesQuarantineReplacementAfterIdentityCheck()
+        {
+            WithTemporaryDirectory(
+                root =>
+                {
+                    string output = Path.Combine(root,
+                        "quarantine-replacement-race-set");
+                    byte[] collision = Encoding.UTF8.GetBytes(
+                        "later-collision\n");
+                    byte[] replacement = Encoding.UTF8.GetBytes(
+                        "replacement-after-identity-check\n");
+                    var link = new TargetedCompetingLinkOperation(
+                        "metadata.json", collision);
+                    string replacedQuarantine = null;
+                    var publisher = new NoReplacePublisher(link, File.Delete,
+                        null,
+                        quarantinePath =>
+                        {
+                            if (replacedQuarantine != null
+                                || !Path.GetFileName(quarantinePath)
+                                    .StartsWith("physics.csv.rollback.",
+                                        StringComparison.Ordinal))
+                                return;
+                            File.Delete(quarantinePath);
+                            File.WriteAllBytes(quarantinePath, replacement);
+                            replacedQuarantine = quarantinePath;
+                        });
+                    NoReplacePublisher.StagedPublicationSet staged =
+                        StageTraceSet(publisher, output);
+
+                    AssertEx.Throws<IOException>(
+                        () => staged.Publish(),
+                        "already exists");
+
+                    AssertEx.Equal(false,
+                        string.IsNullOrEmpty(replacedQuarantine));
+                    AssertEx.Equal(true, File.Exists(replacedQuarantine));
+                    AssertBytesEqual(replacement,
+                        File.ReadAllBytes(replacedQuarantine));
+                    AssertBytesEqual(collision, File.ReadAllBytes(
+                        Path.Combine(output, "metadata.json")));
+                });
+        }
+
         private static void CreatesMissingNestedDirectory()
         {
             WithTemporaryDirectory(
@@ -797,14 +844,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
             public int CreateCount { get; private set; }
 
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 CreateCount++;
                 if (Path.GetFileName(finalPath) == targetFileName)
                 {
                     File.WriteAllBytes(finalPath, competing);
                 }
-                LibcLinkOperation.Instance.Create(temporary, finalPath);
+                createAnchoredLink();
             }
         }
 
@@ -820,12 +868,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
             public int CreateCount { get; private set; }
             public string FinalPath { get; private set; }
 
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 CreateCount++;
                 FinalPath = finalPath;
                 File.WriteAllBytes(finalPath, competing);
-                LibcLinkOperation.Instance.Create(temporary, finalPath);
+                createAnchoredLink();
             }
         }
 
@@ -849,7 +898,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
             internal int CreateCount { get; private set; }
 
-            public void Create(string temporary, string finalPath)
+            public void Create(string temporary, string finalPath,
+                Action createAnchoredLink)
             {
                 CreateCount++;
                 if (Path.GetFileName(finalPath) == collisionFileName)
@@ -860,7 +910,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     File.WriteAllBytes(earlier, replacement);
                     File.WriteAllBytes(finalPath, collision);
                 }
-                LibcLinkOperation.Instance.Create(temporary, finalPath);
+                createAnchoredLink();
             }
         }
     }
