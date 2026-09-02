@@ -55,6 +55,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests accept bytes from the closed raw-v3 producer",
                 AcceptsBytesFromClosedRawV3Producer));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept closed raw-v3 zero override and PCM inventory",
+                AcceptsClosedRawV3ZeroOverrideAndPcmInventory));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests accept the reviewed kind-3 request topology",
                 AcceptsReviewedKind3RequestTopology));
             tests.Add(new TestMain.TestCase(
@@ -504,6 +507,45 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 try { Directory.Delete(root, true); } catch { }
             }
+        }
+
+        private static void AcceptsClosedRawV3ZeroOverrideAndPcmInventory()
+        {
+            string root = TestScratch.CreateRootPath(
+                "s2-request-aware-zero-closure-extractor");
+            try
+            {
+                Directory.CreateDirectory(root);
+                byte[] raw = S2CompleteAudioRawSinkTests
+                    .ZeroInventoryRequestAwareRawForTesting();
+                var input = new Inputs
+                {
+                    Extractor = S2RequestAwareOracleV2Extractor.ForTesting(
+                        1, 4, 2, 3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw = Path.Combine(root, "zero.raw.jsonl"),
+                    Capability = Path.Combine(root, "zero.capability.json"),
+                    Attestation = Path.Combine(root, "zero.attestation.json")
+                };
+                File.WriteAllBytes(input.Raw, raw);
+                JObject capability = Capability(raw, 2, 3);
+                string emptySha256 = Digest(new byte[0]);
+                AssertEx.Equal(0, (int)capability["override_resume_count"]);
+                AssertEx.Equal(0, (int)capability["pcm_count"]);
+                AssertEx.Equal(emptySha256,
+                    (string)capability["override_resume_sha256"]);
+                AssertEx.Equal(emptySha256,
+                    (string)capability["pcm_sha256"]);
+                AssertEx.Equal(true, (long)capability["request_count"] > 0);
+                WriteAuthority(input, capability, raw);
+                string output = Path.Combine(root, "window.jsonl");
+
+                input.Extractor.ExtractForTesting(input.Raw, input.Capability,
+                    input.Attestation, output);
+
+                AssertEx.Equal(true, File.Exists(output));
+            }
+            finally { try { Directory.Delete(root, true); } catch { } }
         }
 
         private static void AcceptsReviewedKind3RequestTopology()

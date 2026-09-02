@@ -37,6 +37,12 @@ namespace OpenGGF.BizHawk.Headless
     /// </summary>
     internal sealed class S2CompleteAudioRawSink : IS2CompleteAudioCaptureSink
     {
+        private enum CompletionPurpose
+        {
+            OverrideResume,
+            RequestAwareInventoryOnly
+        }
+
         internal const string Schema = "openggf.s2-complete-run-audio-raw.v2";
         private readonly IS2CompleteAudioStateSource state;
         private readonly TextWriter output;
@@ -126,16 +132,34 @@ namespace OpenGGF.BizHawk.Headless
 
         public void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff)
         {
+            Complete(cutoff, CompletionPurpose.OverrideResume);
+        }
+
+        internal void CompleteRequestAwareInventoryOnly(
+            CompleteRunAudioObserver.CutoffFrontier cutoff)
+        {
+            Complete(cutoff, CompletionPurpose.RequestAwareInventoryOnly);
+        }
+
+        private void Complete(CompleteRunAudioObserver.CutoffFrontier cutoff,
+            CompletionPurpose purpose)
+        {
             RequireActive();
             if (cutoff == null) throw new ArgumentNullException("cutoff");
+            if (awaitingFollowingRowPcm)
+                throw new InvalidDataException(
+                    "The S2 raw capture ended while awaiting following-row PCM.");
+            if (resumeSelected != pcmSelected)
+                throw new InvalidDataException(
+                    "The S2 override-resume and PCM inventory differ.");
+            if (purpose == CompletionPurpose.OverrideResume
+                && lastRow == exclusiveEnd - 1 && !resumeSelected)
+                throw new InvalidDataException(
+                    "The complete S2 raw capture has no exact override-resume service and PCM packet.");
             JObject value = Boundary("cutoff", cutoff);
             value["exclusive_end"] = lastRow < 0
                 ? firstRow : lastRow + 1;
             Write(value);
-            if (lastRow == exclusiveEnd - 1
-                && (!resumeSelected || !pcmSelected))
-                throw new InvalidDataException(
-                    "The complete S2 raw capture has no exact override-resume service and PCM packet.");
             complete = true;
         }
 

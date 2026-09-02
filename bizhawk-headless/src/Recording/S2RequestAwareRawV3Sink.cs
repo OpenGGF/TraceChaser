@@ -71,7 +71,8 @@ namespace OpenGGF.BizHawk.Headless
             if (cutoff == null) throw new ArgumentNullException("cutoff");
             if (lastRow != exclusiveEnd - 1)
                 throw new InvalidDataException("The S2 raw-v3 candidate rejects an early or empty cutoff.");
-            v2.Complete(cutoff); Flush(false, null); complete = true;
+            v2.CompleteRequestAwareInventoryOnly(cutoff);
+            Flush(false, null); complete = true;
         }
 
         private JArray Transfers(int row, IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers)
