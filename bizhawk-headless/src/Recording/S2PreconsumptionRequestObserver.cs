@@ -12,6 +12,10 @@ namespace OpenGGF.BizHawk.Headless
     {
         internal const uint Pc = 0x0010D6;
         internal const ushort MarkerToken = 24;
+        internal const byte MarkerSourceCpu = 2;
+        internal const ushort MarkerServiceToken = 0;
+        internal const byte MarkerServiceKind = 0;
+        internal const byte MarkerDepth = 0;
         private const int MaximumTransfersPerRow = 4;
         private readonly ICpuRegisterReader registers;
         private readonly IDisposable registration;
@@ -81,14 +85,20 @@ namespace OpenGGF.BizHawk.Headless
             var transfers = new List<Transfer>();
             foreach (GpgxAudioTraceEvent value in events)
             {
-                if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc)
-                    continue;
-                if (value.Subject != MarkerToken || value.PayloadLength != 4)
-                    throw new InvalidOperationException(
-                        "The S2 request marker identity differs.");
                 if (pending.Count == 0)
                     throw new InvalidOperationException(
                         "The S2 request marker is orphaned or duplicated.");
+                if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc
+                    || value.Subject != MarkerToken || value.PayloadLength != 4)
+                    throw new InvalidOperationException(
+                        "The S2 request next record is not its exact marker.");
+                if (value.SourceCpu != MarkerSourceCpu
+                    || value.ServiceToken != MarkerServiceToken
+                    || value.ParentToken != MarkerServiceToken
+                    || value.ServiceKindId != MarkerServiceKind
+                    || value.Depth != MarkerDepth)
+                    throw new InvalidOperationException(
+                        "The S2 request marker source/owner differs.");
                 PendingTransfer captured = pending.Dequeue();
                 if (value.Payload != captured.A7)
                     throw new InvalidOperationException(

@@ -84,10 +84,13 @@ namespace OpenGGF.BizHawk.Headless
         internal static IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
             CaptureRequestV3RowForTesting(string candidateManifestPath,
                 IGpgxHost host, int row, Action advance,
-                IEnumerable<GpgxAudioTraceEvent> nativeEvents)
+                CompleteRunAudioObserver.FrameCapture frame)
         {
             if (host == null) throw new ArgumentNullException("host");
             if (advance == null) throw new ArgumentNullException("advance");
+            if (frame == null || frame.Bk2Row != row)
+                throw new InvalidDataException(
+                    "The S2 request marker evidence is not bound to its advanced row.");
             S2PreconsumptionRequestProfile.Candidate candidate =
                 S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
             using (var requests = S2PreconsumptionRequestProfile.CreateObserver(
@@ -95,8 +98,53 @@ namespace OpenGGF.BizHawk.Headless
             {
                 requests.BeginRow(row);
                 advance();
-                return requests.CorrelateRow(row, nativeEvents);
+                return requests.CorrelateRow(row, frame.RawEvents);
             }
+        }
+
+        internal sealed class RequestV3Row
+        {
+            internal RequestV3Row(int row, Action advance,
+                CompleteRunAudioObserver.FrameCapture frame)
+            { Row = row; Advance = advance; Frame = frame; }
+            internal int Row { get; private set; }
+            internal Action Advance { get; private set; }
+            internal CompleteRunAudioObserver.FrameCapture Frame { get; private set; }
+        }
+
+        internal static IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
+            CaptureRequestV3RowsForTesting(string candidateManifestPath,
+                IGpgxHost host, IEnumerable<RequestV3Row> rows)
+        {
+            if (host == null || rows == null) throw new ArgumentNullException(
+                host == null ? "host" : "rows");
+            S2PreconsumptionRequestProfile.Candidate candidate =
+                S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
+            var published = new List<S2PreconsumptionRequestObserver.Transfer>();
+            using (var requests = S2PreconsumptionRequestProfile.CreateObserver(
+                candidate, host))
+            {
+                int expected = 0;
+                foreach (RequestV3Row value in rows)
+                {
+                    if (value == null || value.Row != expected || value.Advance == null
+                        || value.Frame == null || value.Frame.Bk2Row != value.Row)
+                        throw new InvalidDataException(
+                            "The S2 request candidate rows are not continuous evidence from power-on.");
+                    requests.BeginRow(value.Row);
+                    value.Advance();
+                    IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                        requests.CorrelateRow(value.Row, value.Frame.RawEvents);
+                    if (value.Row >= S2AudioObserverProfile.FirstRow)
+                        for (int index = 0; index < transfers.Count; index++)
+                            published.Add(transfers[index]);
+                    expected++;
+                }
+                if (expected <= S2AudioObserverProfile.FirstRow)
+                    throw new InvalidDataException(
+                        "The S2 request candidate ended before its publication boundary.");
+            }
+            return published.AsReadOnly();
         }
 
         private static void PublishRawWithAttestation(

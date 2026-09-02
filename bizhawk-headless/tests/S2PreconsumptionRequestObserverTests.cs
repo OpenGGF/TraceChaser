@@ -20,6 +20,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests make the runner correlate the callback before the row is published",
                 RunnerCorrelatesCallbackBeforeRowPublication));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject a non-marker record before the exact marker",
+                RejectsNonMarkerBeforeExactMarker));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject a marker with the wrong source or root owner",
+                RejectsWrongSourceOrOwner));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests observe from row zero and publish only comparison-boundary transfers",
+                ObservesFromRowZeroAndPublishesAtBoundary));
         }
 
         private static void RetainsFixedAcceptedTransferUntilExactMarker()
@@ -85,10 +94,61 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     Fixture("gpgx-audio-service-manifest-s2-request-v3.json"),
                     host, S2AudioObserverProfile.FirstRow,
                     () => host.Execute(S2PreconsumptionRequestObserver.Pc),
-                    new[] { Marker(0x00FF1000, 22) });
+                    Frame(S2AudioObserverProfile.FirstRow,
+                        Marker(0x00FF1000, 22)));
             AssertEx.Equal(1, transfers.Count);
             AssertEx.Equal((byte)0xCE, transfers[0].Request);
             AssertEx.Equal((ushort)2, transfers[0].Slot);
+            AssertEx.Equal(1, host.Disposals);
+        }
+
+        private static void RejectsNonMarkerBeforeExactMarker()
+        {
+            var host = new FakeHost();
+            host.Set("D0", 1); host.Set("D1", 0); host.Set("A7", 0x12);
+            var observer = new S2PreconsumptionRequestObserver(host);
+            observer.BeginRow(769);
+            host.Execute(S2PreconsumptionRequestObserver.Pc);
+            GpgxAudioTraceEvent wrong = Marker(0x12, 1);
+            wrong.Kind = 2;
+            AssertEx.Throws<InvalidOperationException>(() => observer.CorrelateRow(
+                769, new[] { wrong, Marker(0x12, 2) }), "next record");
+            AssertEx.Throws<InvalidOperationException>(() => observer.Dispose(),
+                "unmatched");
+        }
+
+        private static void RejectsWrongSourceOrOwner()
+        {
+            var host = new FakeHost();
+            host.Set("D0", 1); host.Set("D1", 0); host.Set("A7", 0x12);
+            var observer = new S2PreconsumptionRequestObserver(host);
+            observer.BeginRow(769);
+            host.Execute(S2PreconsumptionRequestObserver.Pc);
+            GpgxAudioTraceEvent wrong = Marker(0x12, 1);
+            wrong.SourceCpu = 1; wrong.ServiceToken = 9;
+            wrong.ServiceKindId = 3; wrong.Depth = 1;
+            AssertEx.Throws<InvalidOperationException>(() => observer.CorrelateRow(
+                769, new[] { wrong }), "source/owner");
+            AssertEx.Throws<InvalidOperationException>(() => observer.Dispose(),
+                "unmatched");
+        }
+
+        private static void ObservesFromRowZeroAndPublishesAtBoundary()
+        {
+            var host = new FakeHost();
+            host.Set("D0", 0xB5); host.Set("D1", 0); host.Set("A7", 1);
+            var rows = new List<S2CompleteAudioCaptureRunner.RequestV3Row>();
+            for (int row = 0; row <= S2AudioObserverProfile.FirstRow; row++)
+                rows.Add(new S2CompleteAudioCaptureRunner.RequestV3Row(row,
+                    () => host.Execute(S2PreconsumptionRequestObserver.Pc),
+                    Frame(row, Marker(1, (uint)(row + 1)))));
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                S2CompleteAudioCaptureRunner.CaptureRequestV3RowsForTesting(
+                    Fixture("gpgx-audio-service-manifest-s2-request-v3.json"),
+                    host, rows);
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(S2AudioObserverProfile.FirstRow, transfers[0].Row);
+            AssertEx.Equal(1, host.Registrations);
             AssertEx.Equal(1, host.Disposals);
         }
 
@@ -104,8 +164,19 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 Kind = 10, Value = 3, Pc = S2PreconsumptionRequestObserver.Pc,
                 Subject = S2PreconsumptionRequestObserver.MarkerToken,
-                Ordinal = ordinal, PayloadLength = 4, Payload = a7
+                Ordinal = ordinal, PayloadLength = 4, Payload = a7,
+                SourceCpu = 2, ServiceToken = 0, ParentToken = 0,
+                ServiceKindId = 0, Depth = 0
             };
+        }
+
+        private static CompleteRunAudioObserver.FrameCapture Frame(int row,
+            params GpgxAudioTraceEvent[] events)
+        {
+            return new CompleteRunAudioObserver.FrameCapture(events,
+                new List<CompleteRunAudioObserver.ServiceBuilder>(),
+                new List<CompleteRunAudioObserver.ResetRecord>(), 0,
+                (CompleteRunAudioObserver.DeferredBeginReservation)null, row);
         }
 
         private sealed class FakeHost : IGpgxHost, ICpuRegisterReader

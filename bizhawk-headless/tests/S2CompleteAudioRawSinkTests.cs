@@ -230,9 +230,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 {
                     new S2PreconsumptionRequestObserver.Transfer(
                         S2AudioObserverProfile.FirstRow, 0xB5, 3, 0x00FF1020,
-                        17, 9, 3, 1)
+                        17, 0, 0, 0)
                 });
-            sink.Complete(EmptyFrontier());
 
             string[] lines = output.ToString().Split(
                 new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -241,6 +240,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 (string)metadata["schema"]);
             AssertEx.Equal(false, (bool)metadata["production_bound"]);
             JObject frame = JObject.Parse(lines[2]);
+            AssertEx.Equal(true, frame["events"] is JArray);
+            AssertEx.Equal(true, frame["override_resume"] != null);
+            AssertEx.Equal(true, frame["pcm"] != null);
+            AssertEx.Equal(16384, ((string)frame["state_hex"]).Length);
             JArray transfers = (JArray)frame["request_transfers"];
             AssertEx.Equal(1, transfers.Count);
             AssertEx.Equal(769, (int)transfers[0]["row"]);
@@ -250,11 +253,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x10D6, (int)transfers[0]["pc"]);
             AssertEx.Equal("16715808", (string)transfers[0]["a7"]);
             AssertEx.Equal(17, (int)transfers[0]["native_ordinal"]);
-            AssertEx.Equal(9, (int)transfers[0]["service_token"]);
+            AssertEx.Equal(0, (int)transfers[0]["service_token"]);
             JObject owner = (JObject)transfers[0]["active_service_owner"];
-            AssertEx.Equal(9, (int)owner["token"]);
-            AssertEx.Equal(3, (int)owner["kind"]);
-            AssertEx.Equal(1, (int)owner["depth"]);
+            AssertEx.Equal(0, (int)owner["token"]);
+            AssertEx.Equal(0, (int)owner["kind"]);
+            AssertEx.Equal(0, (int)owner["depth"]);
         }
 
         private static void RejectsInvalidRawV3RequestTransferFields()

@@ -238,7 +238,7 @@ infer a request from later state or output, or dispatch the observed value into 
 The fourth is the approved future Sonic 3&K Sonic/Tails pre-consumption music-mailbox
 observer. It is limited to the stopped-Z80 interval from `M68K BUS` PC `0x001358` (opcode
 `33fc010000a11100`) through PC `0x001374` (opcode `33fc000000a11100`), and may snapshot only
-Z80 RAM `$1C0A` before the bus-release instruction. Its fixed manifest owns the two PCs,
+Z80 RAM `$1C0A..$1C0B` before the bus-release instruction. Its fixed manifest owns the two PCs,
 opcodes, active-service topology, and token inventory; it may not select a profile, address,
 or request value from callers, or infer a request from later state or output. This policy
 approval does not authorize its implementation, capture, fixture publication, or consumer use.
