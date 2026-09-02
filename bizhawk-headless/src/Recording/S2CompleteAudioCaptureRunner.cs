@@ -92,7 +92,8 @@ namespace OpenGGF.BizHawk.Headless
             S2PreconsumptionRequestProfile.Candidate candidate =
                 S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
             return new RequestCandidateSession(
-                S2PreconsumptionRequestProfile.CreateObserver(candidate, host),
+                S2PreconsumptionRequestProfile.CreateObserver(candidate, host,
+                    nativeObserver.CurrentFrameEventCount),
                 nativeObserver);
         }
 
@@ -109,6 +110,8 @@ namespace OpenGGF.BizHawk.Headless
                 published = new List<S2PreconsumptionRequestObserver.Transfer>();
             private int nextRow;
             private bool disposed;
+            private bool completed;
+            private bool failed;
 
             internal RequestCandidateSession(
                 S2PreconsumptionRequestObserver value,
@@ -129,8 +132,11 @@ namespace OpenGGF.BizHawk.Headless
                     "RequestCandidateSession");
                 if (advance == null) throw new ArgumentNullException("advance");
                 if (row != nextRow)
+                {
+                    DisposeAfterFailure();
                     throw new InvalidDataException(
                         "The S2 request candidate cannot carry evidence across rows.");
+                }
                 try
                 {
                     requests.BeginRow(row);
@@ -161,6 +167,7 @@ namespace OpenGGF.BizHawk.Headless
                     throw new InvalidDataException(
                         "The S2 request candidate ended before its full power-on interval.");
                 }
+                completed = true;
                 Dispose();
             }
 
@@ -169,11 +176,15 @@ namespace OpenGGF.BizHawk.Headless
                 if (disposed) return;
                 disposed = true;
                 requests.Dispose();
+                if (!completed && !failed)
+                    throw new InvalidDataException(
+                        "The S2 request candidate was disposed before its full power-on interval.");
             }
 
             private void DisposeAfterFailure()
             {
                 if (disposed) return;
+                failed = true;
                 try { Dispose(); }
                 catch (InvalidOperationException) { }
             }

@@ -75,6 +75,12 @@ namespace OpenGGF.BizHawk.Headless
         internal static S2PreconsumptionRequestObserver CreateObserver(
             Candidate candidate, IGpgxHost host)
         {
+            return CreateObserver(candidate, host, null);
+        }
+
+        internal static S2PreconsumptionRequestObserver CreateObserver(
+            Candidate candidate, IGpgxHost host, Func<uint> callbackWatermark)
+        {
             if (candidate == null) throw new ArgumentNullException("candidate");
             if (candidate.Pc != S2PreconsumptionRequestObserver.Pc
                 || candidate.Opcode != "13801009"
@@ -82,7 +88,7 @@ namespace OpenGGF.BizHawk.Headless
                     != S2PreconsumptionRequestObserver.MarkerToken)
                 throw new InvalidDataException(
                     "The S2 request candidate cannot select a different hook.");
-            return new S2PreconsumptionRequestObserver(host);
+            return new S2PreconsumptionRequestObserver(host, callbackWatermark);
         }
 
         private static string RequiredString(JObject value, string name)

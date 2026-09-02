@@ -45,6 +45,21 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests require the fixed M68K source on every raw v3 transfer",
                 RequiresFixedM68kSourceOnEveryRawV3Transfer));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reset native request ordinals at each raw v3 row",
+                ResetsNativeRequestOrdinalsAtEachRawV3Row));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject duplicate native request ordinals in a raw v3 row",
+                RejectsDuplicateNativeRequestOrdinals));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject reversed native request ordinals in a raw v3 row",
+                RejectsReversedNativeRequestOrdinals));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject a raw v3 row at the exclusive cutoff",
+                RejectsRawV3RowAtExclusiveCutoff));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject an early raw v3 cutoff",
+                RejectsEarlyRawV3Cutoff));
             if (Environment.GetEnvironmentVariable(
                 "OPENGGF_S2_COMPLETE_AUDIO_REFERENCE") == "1")
             {
@@ -251,6 +266,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(1, transfers.Count);
             AssertEx.Equal(769, (int)transfers[0]["row"]);
             AssertEx.Equal(0, (int)transfers[0]["order"]);
+            AssertEx.Equal(0, (int)transfers[0]["global_transfer_ordinal"]);
             AssertEx.Equal(0xB5, (int)transfers[0]["request"]);
             AssertEx.Equal(3, (int)transfers[0]["slot"]);
             AssertEx.Equal(0x10D6, (int)transfers[0]["pc"]);
@@ -292,6 +308,78 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         S2AudioObserverProfile.FirstRow, 1, 0, 0x10,
                         17, 0, 0, 0, 1)
                 }), "invalid request transfer");
+        }
+
+        private static void ResetsNativeRequestOrdinalsAtEachRawV3Row()
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            sink.Frame(S2AudioObserverProfile.FirstRow,
+                EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 1, 0, 0x10,
+                        0, 0, 0, 0)
+                });
+            sink.Frame(S2AudioObserverProfile.FirstRow + 1,
+                EmptyFrame(S2AudioObserverProfile.FirstRow + 1), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow + 1, 2, 1, 0x20,
+                        0, 0, 0, 0)
+                });
+        }
+
+        private static void RejectsDuplicateNativeRequestOrdinals()
+        {
+            AssertInvalidNativeOrdinals(0, 0);
+        }
+
+        private static void RejectsReversedNativeRequestOrdinals()
+        {
+            AssertInvalidNativeOrdinals(2, 1);
+        }
+
+        private static void AssertInvalidNativeOrdinals(uint first, uint second)
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            AssertEx.Throws<InvalidDataException>(() => sink.Frame(
+                S2AudioObserverProfile.FirstRow,
+                EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 1, 0, 0x10,
+                        first, 0, 0, 0),
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 2, 1, 0x20,
+                        second, 0, 0, 0)
+                }), "invalid request transfer");
+        }
+
+        private static void RejectsRawV3RowAtExclusiveCutoff()
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            AssertEx.Throws<InvalidDataException>(() => sink.Frame(
+                S2AudioObserverProfile.ExclusiveEnd,
+                EmptyFrame(S2AudioObserverProfile.ExclusiveEnd), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]), "not contiguous");
+        }
+
+        private static void RejectsEarlyRawV3Cutoff()
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            sink.Frame(S2AudioObserverProfile.FirstRow,
+                EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]);
+            AssertEx.Throws<InvalidDataException>(() => sink.Complete(EmptyFrontier()),
+                "early or empty cutoff");
         }
 
         private static CompleteRunAudioObserver.CutoffFrontier EmptyFrontier()

@@ -14,7 +14,7 @@ namespace OpenGGF.BizHawk.Headless
         private readonly S2CompleteAudioRawSink v2;
         private readonly TextWriter output;
         private int lastRow = -1;
-        private uint lastNativeOrdinal;
+        private long nextTransferOrdinal;
         private bool begun, complete;
 
         internal S2RequestAwareRawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
@@ -57,13 +57,16 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (transfers.Count > 4) throw new InvalidDataException("The S2 raw-v3 transfer count exceeds the fixed slot bound.");
             var values = new JArray();
+            uint previousNativeOrdinal = 0;
+            bool hasPreviousNativeOrdinal = false;
             for (int index = 0; index < transfers.Count; index++)
             {
                 S2PreconsumptionRequestObserver.Transfer transfer = transfers[index];
-                if (transfer == null || transfer.Row != row || transfer.Request == 0 || transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc || transfer.NativeOrdinal == 0 || transfer.NativeOrdinal <= lastNativeOrdinal || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu || transfer.ServiceToken != S2PreconsumptionRequestObserver.MarkerServiceToken || transfer.ServiceKind != S2PreconsumptionRequestObserver.MarkerServiceKind || transfer.Depth != S2PreconsumptionRequestObserver.MarkerDepth)
+                if (transfer == null || transfer.Row != row || transfer.Request == 0 || transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc || (hasPreviousNativeOrdinal && transfer.NativeOrdinal <= previousNativeOrdinal) || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu || transfer.ServiceToken != S2PreconsumptionRequestObserver.MarkerServiceToken || transfer.ServiceKind != S2PreconsumptionRequestObserver.MarkerServiceKind || transfer.Depth != S2PreconsumptionRequestObserver.MarkerDepth)
                     throw new InvalidDataException("The S2 raw-v3 has an invalid request transfer.");
-                lastNativeOrdinal = transfer.NativeOrdinal;
-                values.Add(new JObject { ["row"] = row, ["order"] = index, ["request"] = transfer.Request, ["slot"] = transfer.Slot, ["pc"] = transfer.Pc, ["a7"] = transfer.A7.ToString(CultureInfo.InvariantCulture), ["native_ordinal"] = transfer.NativeOrdinal, ["source_cpu"] = transfer.SourceCpu, ["service_token"] = transfer.ServiceToken, ["service_kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth, ["active_service_owner"] = new JObject { ["token"] = transfer.ServiceToken, ["kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth } });
+                previousNativeOrdinal = transfer.NativeOrdinal;
+                hasPreviousNativeOrdinal = true;
+                values.Add(new JObject { ["row"] = row, ["order"] = index, ["global_transfer_ordinal"] = nextTransferOrdinal++, ["request"] = transfer.Request, ["slot"] = transfer.Slot, ["pc"] = transfer.Pc, ["a7"] = transfer.A7.ToString(CultureInfo.InvariantCulture), ["native_ordinal"] = transfer.NativeOrdinal, ["source_cpu"] = transfer.SourceCpu, ["service_token"] = transfer.ServiceToken, ["service_kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth, ["active_service_owner"] = new JObject { ["token"] = transfer.ServiceToken, ["kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth } });
             }
             return values;
         }

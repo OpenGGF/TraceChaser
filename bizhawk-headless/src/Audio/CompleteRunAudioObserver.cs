@@ -548,6 +548,23 @@ namespace OpenGGF.BizHawk.Headless
             return LastCapture;
         }
 
+        /// <summary>
+        /// Fixed observer callbacks may snapshot only the current frame's
+        /// native record count while this observer owns the frame. This is an
+        /// ABI-4 ordering watermark, not a general event-drain surface.
+        /// </summary>
+        internal uint CurrentFrameEventCount()
+        {
+            if (!capturing) throw new InvalidOperationException(
+                "The native event watermark is outside an active frame.");
+            uint count, overflow;
+            RequireOk(api.EventCount(out count, out overflow), "callback event count");
+            if (overflow != 0 || count > api.Capacity)
+                throw new InvalidOperationException(
+                    "The native audio observer overflowed its bounded frame buffer.");
+            return count;
+        }
+
         public void CaptureFrame(Action frameAdvance,
             Action<GpgxAudioTraceEvent[], int> consume)
         {CaptureFrameCore(frameAdvance,consume,false,-1);}

@@ -19,6 +19,7 @@ namespace OpenGGF.BizHawk.Headless
         private const int MaximumTransfersPerRow = 4;
         private readonly ICpuRegisterReader registers;
         private readonly IDisposable registration;
+        private readonly Func<uint> callbackWatermark;
         private readonly Queue<PendingTransfer> pending =
             new Queue<PendingTransfer>();
         private int activeRow = -1;
@@ -57,16 +58,23 @@ namespace OpenGGF.BizHawk.Headless
 
         private sealed class PendingTransfer
         {
-            internal int Row; internal byte Request; internal ushort Slot; internal uint A7;
+            internal int Row; internal byte Request; internal ushort Slot;
+            internal uint A7; internal uint MarkerOrdinal;
         }
 
         internal S2PreconsumptionRequestObserver(IGpgxHost host)
+            : this(host, null)
+        { }
+
+        internal S2PreconsumptionRequestObserver(IGpgxHost host,
+            Func<uint> watermark)
         {
             if (host == null) throw new ArgumentNullException("host");
             registers = host as ICpuRegisterReader;
             if (registers == null)
                 throw new InvalidOperationException(
                     "The fixed S2 request observer requires M68K register reads.");
+            callbackWatermark = watermark;
             registration = host.RegisterExecuteCallback(Pc, OnTransfer);
             if (registration == null)
                 throw new InvalidOperationException(
@@ -109,6 +117,10 @@ namespace OpenGGF.BizHawk.Headless
                 if (pending.Count == 0)
                     throw new InvalidOperationException(
                         "The S2 request marker is orphaned or duplicated.");
+                if (callbackWatermark != null
+                    && value.Ordinal != pending.Peek().MarkerOrdinal)
+                    throw new InvalidOperationException(
+                        "The S2 request marker is not the callback successor.");
                 if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc
                     || value.Subject != MarkerToken || value.PayloadLength != 4)
                     throw new InvalidOperationException(
@@ -164,7 +176,9 @@ namespace OpenGGF.BizHawk.Headless
             pending.Enqueue(new PendingTransfer
             {
                 Row = activeRow, Request = request, Slot = slot,
-                A7 = registers.ReadCpuRegister("A7")
+                A7 = registers.ReadCpuRegister("A7"),
+                MarkerOrdinal = callbackWatermark == null ? 0
+                    : callbackWatermark()
             });
         }
 
