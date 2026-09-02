@@ -6,9 +6,17 @@ using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless
 {
-    /// <summary>Unbound strict v3 extension of the complete v2 raw envelope.</summary>
-    internal sealed class S2RequestAwareRawV3Sink
+    internal static partial class S2CompleteAudioCaptureRunner
     {
+      internal sealed partial class RequestAwareRawV3Candidate
+      {
+        /// <summary>
+        /// Unbound strict v3 extension of the complete v2 raw envelope. It is
+        /// private to the closed producer, so no caller can supply an
+        /// independently-built frame or transfer list.
+        /// </summary>
+        private sealed class RawV3Sink
+        {
         internal const string Schema = "openggf.s2-complete-run-audio-raw.v3";
         private readonly StringWriter v2Output = new StringWriter(CultureInfo.InvariantCulture);
         private readonly S2CompleteAudioRawSink v2;
@@ -17,7 +25,7 @@ namespace OpenGGF.BizHawk.Headless
         private long nextTransferOrdinal;
         private bool begun, complete;
 
-        internal S2RequestAwareRawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
+        internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
         {
             if (state == null) throw new ArgumentNullException("state");
             output = writer ?? throw new ArgumentNullException("writer");
@@ -84,5 +92,7 @@ namespace OpenGGF.BizHawk.Headless
                 output.Write(value.ToString(Newtonsoft.Json.Formatting.None)); output.Write('\n');
             }
         }
+        }
+      }
     }
 }

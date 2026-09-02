@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless
@@ -14,7 +15,11 @@ namespace OpenGGF.BizHawk.Headless
         internal const string CandidateNativePatchFile =
             "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch";
         internal const string CandidateNativePatchSha256 =
-            "d6648cf77204f26041356a788a81cecc6a7006ee5d6694f266211b172d4babec";
+            "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b";
+        internal const string CandidateNativeRecipeFile =
+            "bizhawk-headless/native/gpgx-audio-observer-candidates/s2-request-selftest-recipe.json";
+        internal const string CandidateNativeRecipeSha256 =
+            "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312";
 
         internal sealed class Candidate
         {
@@ -57,6 +62,12 @@ namespace OpenGGF.BizHawk.Headless
             RequireEqual(CandidateNativePatchSha256,
                 RequiredString(root, "candidate_native_patch_sha256"),
                 "candidate native patch identity");
+            RequireEqual(CandidateNativeRecipeFile,
+                RequiredString(root, "candidate_native_recipe_file"),
+                "candidate native recipe file");
+            RequireEqual(CandidateNativeRecipeSha256,
+                RequiredString(root, "candidate_native_recipe_sha256"),
+                "candidate native recipe identity");
             JObject transfer = root["request_transfer"] as JObject;
             if (transfer == null) throw new InvalidDataException(
                 "The S2 request candidate has no transfer definition.");
@@ -81,6 +92,55 @@ namespace OpenGGF.BizHawk.Headless
             return new Candidate(S2PreconsumptionRequestObserver.Pc,
                 "13801009", S2PreconsumptionRequestObserver.MarkerToken,
                 false);
+        }
+
+        /// <summary>
+        /// Builds the candidate observer only from the authenticated v2
+        /// manifest plus the one fixed, comparison-only M68K hook. The
+        /// returned observer remains unbound: no production capability or
+        /// CLI route accepts this profile.
+        /// </summary>
+        internal static CompleteRunAudioObserver CreateObserver(
+            Candidate candidate, string baseServiceManifestPath,
+            IGpgxAudioTraceApi api)
+        {
+            if (candidate == null) throw new ArgumentNullException("candidate");
+            if (api == null) throw new ArgumentNullException("api");
+            if (candidate.Pc != S2PreconsumptionRequestObserver.Pc
+                || candidate.Opcode != "13801009"
+                || candidate.MarkerToken
+                    != S2PreconsumptionRequestObserver.MarkerToken
+                || candidate.ProductionBound)
+                throw new InvalidDataException(
+                    "The S2 request candidate fixed hook profile differs.");
+            if (string.IsNullOrEmpty(baseServiceManifestPath)
+                || !Path.IsPathRooted(baseServiceManifestPath)
+                || !File.Exists(baseServiceManifestPath))
+                throw new InvalidDataException(
+                    "The S2 candidate base service manifest must be an existing absolute file.");
+            RequireEqual(S2AudioObserverProfile.ServiceManifestSha256,
+                Sha256File(baseServiceManifestPath),
+                "base manifest file identity");
+            return GpgxAudioServiceManifest.LoadS2RequestCandidate(
+                baseServiceManifestPath,
+                new S2AudioObserverProfile.PrepublicationApi(api));
+        }
+
+        private static string Sha256File(string path)
+        {
+            using (FileStream input = File.OpenRead(path))
+            using (SHA256 digest = SHA256.Create())
+            {
+                byte[] value = digest.ComputeHash(input);
+                char[] result = new char[value.Length * 2];
+                const string hex = "0123456789abcdef";
+                for (int index = 0; index < value.Length; index++)
+                {
+                    result[index * 2] = hex[value[index] >> 4];
+                    result[index * 2 + 1] = hex[value[index] & 15];
+                }
+                return new string(result);
+            }
         }
 
         private static string RequiredString(JObject value, string name)

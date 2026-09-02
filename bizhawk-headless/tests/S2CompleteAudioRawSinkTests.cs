@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless.Tests
@@ -240,7 +241,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void SerializesCorrelatedRequestTransfersInUnboundRawV3Candidate()
         {
             var output = new StringWriter();
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), output);
             sink.Begin(EmptyFrontier());
             sink.Frame(S2AudioObserverProfile.FirstRow, EmptyFrame(
@@ -282,7 +283,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void RejectsInvalidRawV3RequestTransferFields()
         {
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), new StringWriter());
             sink.Begin(EmptyFrontier());
             AssertEx.Throws<InvalidDataException>(() => sink.Frame(
@@ -297,7 +298,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void RequiresFixedM68kSourceOnEveryRawV3Transfer()
         {
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), new StringWriter());
             sink.Begin(EmptyFrontier());
             AssertEx.Throws<InvalidDataException>(() => sink.Frame(
@@ -313,7 +314,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void ResetsNativeRequestOrdinalsAtEachRawV3Row()
         {
             var output = new StringWriter();
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), output);
             sink.Begin(EmptyFrontier());
             sink.Frame(S2AudioObserverProfile.FirstRow,
@@ -360,7 +361,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void AssertInvalidNativeOrdinals(uint first, uint second)
         {
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), new StringWriter());
             sink.Begin(EmptyFrontier());
             AssertEx.Throws<InvalidDataException>(() => sink.Frame(
@@ -378,7 +379,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void RejectsRawV3RowAtExclusiveCutoff()
         {
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), new StringWriter());
             sink.Begin(EmptyFrontier());
             AssertEx.Throws<InvalidDataException>(() => sink.Frame(
@@ -389,7 +390,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void RejectsEarlyRawV3Cutoff()
         {
-            var sink = new S2RequestAwareRawV3Sink(
+            var sink = RequestAwareSink(
                 new FakeStateSource(new byte[0x2000]), new StringWriter());
             sink.Begin(EmptyFrontier());
             sink.Frame(S2AudioObserverProfile.FirstRow,
@@ -405,6 +406,71 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 new List<CompleteRunAudioObserver.ServiceBuilder>(),
                 new List<CompleteRunAudioObserver.ServiceBuilder>(),
                 0, 0, 1, true);
+        }
+
+        /// <summary>
+        /// Direct sink construction is unavailable to production callers.
+        /// These negative unit tests deliberately reflect the private owner
+        /// token so the sink's defensive validation remains covered.
+        /// </summary>
+        private static RequestAwareSinkHarness RequestAwareSink(
+            IS2CompleteAudioStateSource state, TextWriter output)
+        {
+            return new RequestAwareSinkHarness(state, output);
+        }
+
+        private sealed class RequestAwareSinkHarness
+        {
+            private readonly object sink;
+            private readonly MethodInfo begin;
+            private readonly MethodInfo frame;
+            private readonly MethodInfo complete;
+
+            internal RequestAwareSinkHarness(
+                IS2CompleteAudioStateSource state, TextWriter output)
+            {
+                Type type = typeof(S2CompleteAudioCaptureRunner
+                    .RequestAwareRawV3Candidate).GetNestedType(
+                        "RawV3Sink", BindingFlags.NonPublic);
+                if (type == null) throw new InvalidOperationException(
+                    "The closed producer has no private raw-v3 sink.");
+                sink = Activator.CreateInstance(type,
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    null, new object[] { state, output }, null);
+                begin = type.GetMethod("Begin",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                frame = type.GetMethod("Frame",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                complete = type.GetMethod("Complete",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            internal void Begin(
+                CompleteRunAudioObserver.CutoffFrontier boundary)
+            { Invoke(begin, new object[] { boundary }); }
+
+            internal void Frame(int row,
+                CompleteRunAudioObserver.FrameCapture capture,
+                OverrideResumeDiagnosticAudio.Packet audio,
+                IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers)
+            { Invoke(frame, new object[] { row, capture, audio, transfers }); }
+
+            internal void Complete(
+                CompleteRunAudioObserver.CutoffFrontier cutoff)
+            { Invoke(complete, new object[] { cutoff }); }
+
+            private void Invoke(MethodInfo method, object[] arguments)
+            {
+                if (method == null) throw new InvalidOperationException(
+                    "The closed producer sink surface changed.");
+                try { method.Invoke(sink, arguments); }
+                catch (TargetInvocationException error)
+                {
+                    if (error.InnerException != null)
+                        throw error.InnerException;
+                    throw;
+                }
+            }
         }
 
         private static OverrideResumeDiagnosticAudio.Packet EmptyPacket()

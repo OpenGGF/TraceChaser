@@ -381,7 +381,7 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidDataException(label + " changed.");
         }
 
-        private sealed class PrepublicationApi : IGpgxAudioTraceApi,
+        internal sealed class PrepublicationApi : IGpgxAudioTraceApi,
             IS2RequestSuccessorOrdinalApi
         {
             private readonly IGpgxAudioTraceApi inner;

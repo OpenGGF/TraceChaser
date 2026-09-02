@@ -9,6 +9,22 @@ namespace OpenGGF.BizHawk.Headless
     {
         internal static CompleteRunAudioObserver Load(string path, string game, IGpgxAudioTraceApi api)
         {
+            return LoadCore(path, game, api, false);
+        }
+
+        /// <summary>
+        /// Candidate-only closed construction of the approved S2 action-7
+        /// hook. Callers cannot select its token, PC, opcode, or topology.
+        /// </summary>
+        internal static CompleteRunAudioObserver LoadS2RequestCandidate(
+            string path, IGpgxAudioTraceApi api)
+        {
+            return LoadCore(path, "s2", api, true);
+        }
+
+        private static CompleteRunAudioObserver LoadCore(string path,
+            string game, IGpgxAudioTraceApi api, bool addS2RequestCandidate)
+        {
             if (!Path.IsPathRooted(path)) throw new ArgumentException("Manifest path must be absolute.", "path");
             JObject root = JObject.Parse(File.ReadAllText(path));
             if ((string)root["schema"] != "openggf.gpgx-audio-service-manifests.v1")
@@ -30,6 +46,28 @@ namespace OpenGGF.BizHawk.Headless
             JArray hj=(JArray)value["hooks"]; var hooks=new GpgxAudioObserverAdapter.ServiceHook[hj.Count]; var mask=new byte[8192]; var union=new HashSet<uint>();
             for(int i=0;i<hj.Count;i++){ JToken h=hj[i]; ushort first,count; Slice((JArray)h["ranges"],indices,out first,out count); byte cpu=Cpu((string)h["cpu"]); uint pc=(uint)h["pc"]; byte[] op=Hex((string)h["opcode"]); hooks[i]=new GpgxAudioObserverAdapter.ServiceHook { HookToken=(ushort)(int)h["token"], Action=Action((string)h["action"]), Cpu=cpu, Pc=pc, ServiceKindId=(byte)(int)h["kind"], ExpectedActiveKind=(byte)(int)h["expected_kind"], Flags=HookFlags((JArray)h["flags"]), OpcodeLength=(byte)op.Length, RangeFirst=first, RangeCount=count, Opcode=Pack(op) }; snapshots+=Length(ranges,first,count); if(cpu==1){ if(pc>=65536)throw new InvalidDataException("Z80 PC out of range."); mask[pc>>3]|=(byte)(1<<((int)pc&7)); union.Add(pc); } }
             var declared=new HashSet<uint>(); foreach(JToken pc in (JArray)value["z80_watch_pc_union"])declared.Add((uint)pc); if(!union.SetEquals(declared))throw new InvalidDataException("Watch mask is not the exact Z80 hook union.");
+            if(addS2RequestCandidate)
+            {
+                for(int i=0;i<hooks.Length;i++)
+                    if(hooks[i].HookToken==S2PreconsumptionRequestObserver.MarkerToken
+                        ||(hooks[i].Cpu==S2PreconsumptionRequestObserver.MarkerSourceCpu
+                            &&hooks[i].Pc==S2PreconsumptionRequestObserver.Pc)
+                        ||hooks[i].Action==7)
+                        throw new InvalidDataException("The authenticated S2 profile collides with the fixed request hook.");
+                var extended=new GpgxAudioObserverAdapter.ServiceHook[hooks.Length+1];
+                Array.Copy(hooks,extended,hooks.Length);
+                extended[hooks.Length]=new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken=S2PreconsumptionRequestObserver.MarkerToken,
+                    Action=7,Cpu=S2PreconsumptionRequestObserver.MarkerSourceCpu,
+                    Pc=S2PreconsumptionRequestObserver.Pc,
+                    ServiceKindId=S2PreconsumptionRequestObserver.MarkerServiceKind,
+                    ExpectedActiveKind=S2PreconsumptionRequestObserver.MarkerServiceKind,
+                    Flags=0,OpcodeLength=4,RangeFirst=0,RangeCount=0,
+                    Opcode=0x09108013UL,Reserved=0
+                };
+                hooks=extended;
+            }
             var config=new GpgxAudioObserverAdapter.Config { Magic=0x31544147,AbiVersion=1,StructSize=64,HookSize=32,RangeSize=16,EventSize=32,MaxDepth=8,MaxOpcodeBytes=8,ResetServiceKind=1,MaxContinuationFrames=4,WatchMaskBytes=8192,HookCount=(uint)hooks.Length,RangeCount=(uint)ranges.Length,SnapshotBytesTotal=snapshots,EventCapacity=65536,MaxServiceTokensPerFrame=65535,KindSize=16,KindCount=(ushort)kinds.Length };
             return new CompleteRunAudioObserver(api,config,mask,kinds,hooks,ranges);
         }

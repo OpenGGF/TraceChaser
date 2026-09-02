@@ -5,6 +5,16 @@ using Newtonsoft.Json;
 
 namespace OpenGGF.BizHawk.Headless
 {
+    /// <summary>
+    /// Candidate-only host surface. No production host implements this until
+    /// a fresh capability binds the fixed native patch and v3 inventory.
+    /// </summary>
+    internal interface IS2RequestAwareRawV3CandidateHost : IGpgxHost,
+        ICpuRegisterReader, IS2CompleteAudioStateSource
+    {
+        IGpgxAudioTraceApi CreateRequestCandidateAudioTraceApi();
+    }
+
     internal interface IS2CompleteAudioCaptureSink
     {
         void Begin(CompleteRunAudioObserver.CutoffFrontier boundary);
@@ -18,7 +28,7 @@ namespace OpenGGF.BizHawk.Headless
     /// power-on, while publication starts at the reviewed comparison boundary
     /// without resetting chip latches or the native service lifecycle.
     /// </summary>
-    internal static class S2CompleteAudioCaptureRunner
+    internal static partial class S2CompleteAudioCaptureRunner
     {
         internal sealed class CaptureResult
         {
@@ -77,22 +87,178 @@ namespace OpenGGF.BizHawk.Headless
         }
 
         /// <summary>
-        /// Opens the unbound candidate at power-on. The returned session owns
-        /// the fixed callback registration and every row's native
-        /// BeginFrame/advance/EndFrame/drain/correlation sequence. It is not
-        /// reachable from the authenticated capture CLI while unbound.
+        /// Closed unbound producer. It owns the authenticated base profile,
+        /// the one fixed candidate hook, callback registration, row advance,
+        /// native drain, request correlation, state capture, and raw-v3 sink.
+        /// It is deliberately unreachable from the authenticated CLI.
         /// </summary>
-        internal static S2PreconsumptionRequestObserver OpenRequestCandidateSession(
-            string candidateManifestPath, IGpgxHost host,
-            CompleteRunAudioObserver nativeObserver)
+        internal static RequestAwareRawV3Candidate
+            OpenRequestAwareRawV3Candidate(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost host, TextWriter output)
         {
-            if (host == null) throw new ArgumentNullException("host");
-            if (nativeObserver == null) throw new ArgumentNullException(
-                "nativeObserver");
-            S2PreconsumptionRequestProfile.Candidate candidate =
-                S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
-            return new S2PreconsumptionRequestObserver(
-                candidate, host, nativeObserver);
+            return RequestAwareRawV3Candidate.Open(candidateManifestPath,
+                baseServiceManifestPath, host, output);
+        }
+
+        internal sealed partial class RequestAwareRawV3Candidate : IDisposable
+        {
+            private readonly IS2RequestAwareRawV3CandidateHost host;
+            private readonly CompleteRunAudioObserver nativeObserver;
+            private readonly S2PreconsumptionRequestObserver requests;
+            private readonly RawV3Sink sink;
+            private int nextRow;
+            private bool completed;
+            private bool failed;
+            private bool disposed;
+
+            private RequestAwareRawV3Candidate(
+                IS2RequestAwareRawV3CandidateHost candidateHost,
+                CompleteRunAudioObserver observer,
+                S2PreconsumptionRequestObserver requestObserver,
+                TextWriter output)
+            {
+                host = candidateHost
+                    ?? throw new ArgumentNullException("candidateHost");
+                nativeObserver = observer
+                    ?? throw new ArgumentNullException("observer");
+                requests = requestObserver
+                    ?? throw new ArgumentNullException("requestObserver");
+                sink = new RawV3Sink(host,
+                    output ?? throw new ArgumentNullException("output"));
+            }
+
+            internal static RequestAwareRawV3Candidate Open(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost candidateHost,
+                TextWriter output)
+            {
+                if (candidateHost == null)
+                    throw new ArgumentNullException("candidateHost");
+                if (output == null) throw new ArgumentNullException("output");
+                S2PreconsumptionRequestProfile.Candidate candidate =
+                    S2PreconsumptionRequestProfile.LoadCandidate(
+                        candidateManifestPath);
+                CompleteRunAudioObserver observer =
+                    S2PreconsumptionRequestProfile.CreateObserver(candidate,
+                        baseServiceManifestPath, candidateHost
+                            .CreateRequestCandidateAudioTraceApi());
+                try
+                {
+                    return new RequestAwareRawV3Candidate(candidateHost,
+                        observer, new S2PreconsumptionRequestObserver(
+                            candidate, candidateHost, observer), output);
+                }
+                catch
+                {
+                    try { observer.DiscardCutoffState(); }
+                    catch { }
+                    throw;
+                }
+            }
+
+            internal void AdvanceRow(int row, Bk2Frame frame)
+            {
+                if (disposed) throw new ObjectDisposedException(
+                    "RequestAwareRawV3Candidate");
+                if (frame == null) throw new ArgumentNullException("frame");
+                if (row != nextRow)
+                {
+                    CleanupAfterFailure();
+                    throw new InvalidDataException(
+                        "The closed S2 raw-v3 producer cannot carry evidence across rows.");
+                }
+                try
+                {
+                    if (row == S2AudioObserverProfile.FirstRow)
+                        sink.Begin(nativeObserver
+                            .CaptureBoundaryFrontierAndResetPublication());
+                    S1TraceCaptureRunner.ApplyFrame(frame, host);
+                    S2PreconsumptionRequestObserver.OwnedRow owned;
+                    OverrideResumeDiagnosticAudio.Packet audio;
+                    IOverrideResumeDiagnosticAudioHost diagnostic =
+                        host as IOverrideResumeDiagnosticAudioHost;
+                    if (diagnostic == null)
+                    {
+                        owned = requests.AdvanceOwnedRow(row, host.Advance);
+                        audio = new OverrideResumeDiagnosticAudio.Packet(
+                            44100, 0, new byte[0]);
+                    }
+                    else
+                    {
+                        owned = null;
+                        audio = OverrideResumeDiagnosticAudio.AdvanceAndDrain(
+                            new ObserverAdvanceDiagnosticAudioHost(diagnostic,
+                                () => owned = requests.AdvanceOwnedRow(row,
+                                    diagnostic.AdvanceDiagnosticAudio)));
+                    }
+                    if (owned == null || owned.Frame == null
+                        || owned.Frame.Bk2Row != row)
+                        throw new InvalidDataException(
+                            "The closed S2 producer lost its owned frame origin.");
+                    if (row >= S2AudioObserverProfile.FirstRow)
+                        sink.Frame(row, owned.Frame, audio, owned.Transfers);
+                    nextRow++;
+                }
+                catch
+                {
+                    CleanupAfterFailure();
+                    throw;
+                }
+            }
+
+            internal void Complete()
+            {
+                if (disposed) throw new ObjectDisposedException(
+                    "RequestAwareRawV3Candidate");
+                if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
+                {
+                    Dispose();
+                    throw new InvalidDataException(
+                        "The closed S2 raw-v3 producer ended early.");
+                }
+                try
+                {
+                    sink.Complete(nativeObserver.CaptureCutoffFrontier());
+                    requests.Complete();
+                    nativeObserver.DiscardCutoffState();
+                    completed = true;
+                    disposed = true;
+                }
+                catch
+                {
+                    CleanupAfterFailure();
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                bool rejectEarly = !completed && !failed;
+                disposed = true;
+                Exception first = null;
+                try { requests.Dispose(); }
+                catch (Exception error) { first = error; }
+                try { nativeObserver.DiscardCutoffState(); }
+                catch (Exception error) { if (first == null) first = error; }
+                if (rejectEarly)
+                    throw first as InvalidDataException
+                        ?? new InvalidDataException(
+                        "The closed S2 raw-v3 producer was disposed before its full power-on interval.");
+                if (first != null) throw first;
+            }
+
+            private void CleanupAfterFailure()
+            {
+                if (disposed) return;
+                failed = true;
+                try { requests.Dispose(); }
+                catch { }
+                try { nativeObserver.DiscardCutoffState(); }
+                catch { }
+                disposed = true;
+            }
         }
 
         private static void PublishRawWithAttestation(

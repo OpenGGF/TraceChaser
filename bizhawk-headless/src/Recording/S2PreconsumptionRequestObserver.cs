@@ -81,6 +81,19 @@ namespace OpenGGF.BizHawk.Headless
             internal uint SuccessorOrdinal;
         }
 
+        /// <summary>The one frame and transfer list produced by one drain.</summary>
+        internal sealed class OwnedRow
+        {
+            internal OwnedRow(CompleteRunAudioObserver.FrameCapture frame,
+                IReadOnlyList<Transfer> transfers)
+            { Frame = frame; Transfers = transfers; }
+
+            internal CompleteRunAudioObserver.FrameCapture Frame
+            { get; private set; }
+            internal IReadOnlyList<Transfer> Transfers
+            { get; private set; }
+        }
+
         internal S2PreconsumptionRequestObserver(
             S2PreconsumptionRequestProfile.Candidate candidate,
             IGpgxHost host, CompleteRunAudioObserver observer)
@@ -114,6 +127,11 @@ namespace OpenGGF.BizHawk.Headless
         /// </summary>
         internal IReadOnlyList<Transfer> AdvanceRow(int row, Action advance)
         {
+            return AdvanceOwnedRow(row, advance).Transfers;
+        }
+
+        internal OwnedRow AdvanceOwnedRow(int row, Action advance)
+        {
             if (disposed) throw new ObjectDisposedException(
                 "S2PreconsumptionRequestObserver");
             if (advance == null) throw new ArgumentNullException("advance");
@@ -134,7 +152,7 @@ namespace OpenGGF.BizHawk.Headless
                     for (int index = 0; index < transfers.Count; index++)
                         published.Add(transfers[index]);
                 nextRow++;
-                return transfers;
+                return new OwnedRow(frame, transfers);
             }
             catch
             {
@@ -177,9 +195,10 @@ namespace OpenGGF.BizHawk.Headless
                 GpgxAudioTraceEvent value = events[index];
                 if (!IsFixedMarkerCandidate(value))
                 {
-                    if (pending.Count != 0 && value.Kind == 2)
+                    if (pending.Count != 0 && value.Kind == 2
+                        && value.Ordinal >= pending.Peek().SuccessorOrdinal)
                         throw new InvalidOperationException(
-                            "The S2 request terminal boundary preceded its marker.");
+                            "The S2 request terminal boundary followed its callback before its marker.");
                     continue;
                 }
                 if (pending.Count == 0)
@@ -230,8 +249,8 @@ namespace OpenGGF.BizHawk.Headless
             if (pending.Count >= MaximumTransfersPerRow)
                 throw new InvalidOperationException(
                     "The S2 request callback exceeded its four-slot bound.");
-            byte request = (byte)registers.ReadCpuRegister("D0");
-            ushort slot = (ushort)registers.ReadCpuRegister("D1");
+            byte request = (byte)registers.ReadCpuRegister("M68K D0");
+            ushort slot = (ushort)registers.ReadCpuRegister("M68K D1");
             if (request == 0)
                 throw new InvalidOperationException(
                     "The S2 request callback observed a zero transfer.");
@@ -243,7 +262,7 @@ namespace OpenGGF.BizHawk.Headless
                 Row = activeRow,
                 Request = request,
                 Slot = slot,
-                A7 = registers.ReadCpuRegister("A7"),
+                A7 = registers.ReadCpuRegister("M68K A7"),
                 SuccessorOrdinal = nativeObserver.CurrentS2RequestSuccessorOrdinal()
             });
         }

@@ -3,34 +3,14 @@
 #include <string.h>
 #include "m68kconf.h"
 #include "m68k.h"
-#include "cpuhook.h"
 #include "audio_trace.h"
-
-enum { SELFTEST_TRACE_OK=0, SELFTEST_TRACE_INVALID_PHASE=-2,
-  SELFTEST_TRACE_LIMIT=-3 };
 
 uint8_t zram[0x2000];
 uint8_t work_ram[0x10000];
 static uint8_t page0[0x10000];
 static unsigned int writes;
 static unsigned int invoke_irq_delay;
-static unsigned int fixed_s2_callback_hits;
 int vdp_68k_irq_ack(int int_level) { return int_level; }
-
-static unsigned int fixed_s2_callback(hook_type_t type, int width,
-  unsigned int address, unsigned int value)
-{
-  uint32_t count, ordinal, overflow;
-  (void)width;
-  if(type==HOOK_M68K_E && address==0x10d6u)
-  {
-    assert(gpgx_audio_trace_event_count(&count,&overflow)==SELFTEST_TRACE_INVALID_PHASE);
-    assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==SELFTEST_TRACE_OK
-      && ordinal==0);
-    fixed_s2_callback_hits++;
-  }
-  return value;
-}
 
 static void write_fm(unsigned int address, unsigned int data)
 {
@@ -52,7 +32,6 @@ int main(void)
   uint8_t mask[8192];
   const uint8_t setup[4]={0x10,0x3c,0x00,0x7f};
   const uint8_t instruction[4]={0x11,0xc0,0x40,0x00};
-  const uint8_t s2_request[4]={0x13,0x80,0x10,0x09};
   uint32_t count;
   unsigned int i;
   memset(&config,0,sizeof(config)); memset(&kind,0,sizeof(kind)); memset(hooks,0,sizeof(hooks));
@@ -92,26 +71,5 @@ int main(void)
     && events[2].payload[3]==0x89);
   assert(events[6].kind==2 && events[6].pc==10);
   assert(m68k_get_reg(M68K_REG_A7)==0x89abcdefu);
-
-  assert(gpgx_audio_trace_disable()==SELFTEST_TRACE_OK);
-  memset(hooks,0,sizeof(hooks)); memset(mask,0,sizeof(mask));
-  config.hook_count=1; config.snapshot_bytes_total=1;
-  hooks[0].hook_token=24; hooks[0].action=7; hooks[0].cpu=2;
-  hooks[0].pc=0x10d6; hooks[0].opcode_length=4;
-  memcpy(hooks[0].opcode,s2_request,4);
-  for(i=0;i<4;i++)put_byte(0x10d6u+i,s2_request[i]);
-  m68k.memory_map[0].write8=NULL; cpu_hook=fixed_s2_callback;
-  m68k_set_reg(M68K_REG_PC,0x10d6); m68k.pref_addr=~0u;
-  m68k.cycles=0; m68k.refresh_cycles=1000000;
-  assert(gpgx_audio_trace_configure(&config,mask,&kind,hooks,&range)==SELFTEST_TRACE_OK);
-  assert(gpgx_audio_trace_begin_frame()==SELFTEST_TRACE_OK); m68k_run(8);
-  assert(fixed_s2_callback_hits==1);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&count)
-    ==SELFTEST_TRACE_LIMIT);
-  assert(gpgx_audio_trace_end_frame()==SELFTEST_TRACE_OK);
-  assert(gpgx_audio_trace_drain(events,8,&count)==SELFTEST_TRACE_OK && count==1);
-  assert(events[0].kind==10 && events[0].pc==0x10d6
-    && events[0].subject==24 && events[0].value==3);
-  cpu_hook=NULL;
   return 0;
 }

@@ -36,7 +36,6 @@ source_dir=${1-}; toolchain=${2-}; scratch=${3-}
 /usr/bin/env -i PATH=/usr/bin:/bin \
   LD_LIBRARY_PATH="$toolchain/clang/usr/lib/x86_64-linux-gnu:$toolchain/clang/usr/lib/llvm-16/lib" \
   "$toolchain/clang/usr/bin/clang-16" -std=c99 -DLSB_FIRST -DcdStream=cdStream \
-  -DHOOK_CPU -fcommon \
   -DINLINE='static __inline__' -include string.h \
   -O2 -Wall -Wextra -Werror -Wno-unused-function -Wno-sign-compare \
   -I"$source_dir/waterbox/emulibc" \

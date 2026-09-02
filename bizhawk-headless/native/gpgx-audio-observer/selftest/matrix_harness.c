@@ -56,73 +56,6 @@ static void fixture(int with_pop)
 static int configure(void)
 { return gpgx_audio_trace_configure(&config,mask,&kind,hooks,&range); }
 
-static void fixed_s2_request_successor_ordinal_boundary(void)
-{
-  struct gpgx_audio_trace_event *ordinary;
-  uint8_t rom[65536];
-  uint8_t previous;
-  uint32_t i, ordinal, count, overflow;
-  const uint8_t opcode[4]={0x13,0x80,0x10,0x09};
-  memset(rom,0,sizeof(rom)); memset(&m68k,0,sizeof(m68k));
-  for(i=0;i<sizeof(opcode);i++)rom[((0x10d6u+i)&0xffffu)^1u]=opcode[i];
-  m68k.memory_map[0].base=rom;
-  fixture(0); config.abi_version=4; memset(mask,0,sizeof(mask));
-  hooks[0].hook_token=24; hooks[0].action=ACTION_OBSERVATION_MARKER;
-  hooks[0].cpu=GPGX_AUDIO_TRACE_CPU_M68K; hooks[0].pc=0x10d6;
-  hooks[0].service_kind=0; hooks[0].expected_active_kind=0;
-  hooks[0].opcode_length=4; memcpy(hooks[0].opcode,opcode,4);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_INVALID_PHASE);
-  assert(configure()==TRACE_OK);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_INVALID_PHASE);
-  assert(gpgx_audio_trace_begin_frame()==TRACE_OK);
-  assert(gpgx_audio_trace_event_count(&count,&overflow)==TRACE_INVALID_PHASE);
-  previous=gpgx_audio_trace_enter_cpu(GPGX_AUDIO_TRACE_CPU_M68K);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_ABI_OR_CONFIG_LIMIT);
-  gpgx_audio_trace_s2_request_callback_begin(0x10d8);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_ABI_OR_CONFIG_LIMIT);
-  gpgx_audio_trace_s2_request_callback_end();
-  gpgx_audio_trace_s2_request_callback_begin(0x10d6);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(NULL)==TRACE_INVALID_ARGUMENT);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_OK && ordinal==0);
-  ordinary=new_event(EVENT_HOOK_MARKER); assert(ordinary && ordinary->ordinal==0);
-  ordinary->pc=0x2000; ordinary->subject=25;
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_OK && ordinal==1);
-  trace_depth=1;
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_ABI_OR_CONFIG_LIMIT);
-  trace_depth=0;
-  gpgx_audio_trace_s2_request_callback_end();
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_ABI_OR_CONFIG_LIMIT);
-  gpgx_audio_trace_instruction(GPGX_AUDIO_TRACE_CPU_M68K,0x10d6);
-  assert(trace_event_count_value==2 && trace_events[1].ordinal==1
-    && trace_events[1].kind==EVENT_HOOK_MARKER
-    && trace_events[1].subject==24 && trace_events[1].value==3);
-  gpgx_audio_trace_leave_cpu(previous);
-  assert(gpgx_audio_trace_end_frame()==TRACE_OK);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_INVALID_PHASE);
-  assert(gpgx_audio_trace_abort_frame()==TRACE_OK);
-  assert(gpgx_audio_trace_begin_frame()==TRACE_OK);
-  previous=gpgx_audio_trace_enter_cpu(GPGX_AUDIO_TRACE_CPU_M68K);
-  gpgx_audio_trace_s2_request_callback_begin(0x10d6);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_OK);
-  assert(gpgx_audio_trace_abort_frame()==TRACE_OK
-    && !trace_s2_request_callback_active);
-  gpgx_audio_trace_leave_cpu(previous);
-
-  fixture(0); config.abi_version=4; memset(mask,0,sizeof(mask));
-  hooks[0].hook_token=23; hooks[0].action=ACTION_OBSERVATION_MARKER;
-  hooks[0].cpu=GPGX_AUDIO_TRACE_CPU_M68K; hooks[0].pc=0x10d6;
-  hooks[0].service_kind=0; hooks[0].expected_active_kind=0;
-  hooks[0].opcode_length=4; memcpy(hooks[0].opcode,opcode,4);
-  assert(configure()==TRACE_OK && gpgx_audio_trace_begin_frame()==TRACE_OK);
-  previous=gpgx_audio_trace_enter_cpu(GPGX_AUDIO_TRACE_CPU_M68K);
-  gpgx_audio_trace_s2_request_callback_begin(0x10d6);
-  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal)==TRACE_ABI_OR_CONFIG_LIMIT);
-  gpgx_audio_trace_s2_request_callback_end();
-  gpgx_audio_trace_leave_cpu(previous);
-  assert(gpgx_audio_trace_abort_frame()==TRACE_OK);
-  memset(&m68k,0,sizeof(m68k));
-}
-
 static void config_negatives(void)
 {
   struct gpgx_audio_service_kind_v1 kinds[2];
@@ -2856,7 +2789,6 @@ int main(void)
   assert(bytes[0]==1 && bytes[3]==4 && bytes[4]==5 && bytes[5]==6
     && bytes[8]==9 && bytes[11]==12 && bytes[24]==0x18);
   config_negatives(); phases_copy_and_drain(); chip_port_vectors();
-  fixed_s2_request_successor_ordinal_boundary();
   first_fault_is_read_only_and_session_scoped();
   prearm_filter_and_publication_epoch();
   m68k_proof_and_stack_bounds(); overflow_and_reset_bounds();
