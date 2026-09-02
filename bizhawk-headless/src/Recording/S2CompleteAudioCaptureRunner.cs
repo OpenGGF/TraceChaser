@@ -76,6 +76,29 @@ namespace OpenGGF.BizHawk.Headless
             PublishRawWithAttestation(outputPath,capture);
         }
 
+        /// <summary>
+        /// Pure candidate seam: the fixed observer is active around an entire
+        /// row and is correlated before a caller can pass its result to the
+        /// unbound raw-v3 sink. No production authority path calls this method.
+        /// </summary>
+        internal static IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
+            CaptureRequestV3RowForTesting(string candidateManifestPath,
+                IGpgxHost host, int row, Action advance,
+                IEnumerable<GpgxAudioTraceEvent> nativeEvents)
+        {
+            if (host == null) throw new ArgumentNullException("host");
+            if (advance == null) throw new ArgumentNullException("advance");
+            S2PreconsumptionRequestProfile.Candidate candidate =
+                S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
+            using (var requests = S2PreconsumptionRequestProfile.CreateObserver(
+                candidate, host))
+            {
+                requests.BeginRow(row);
+                advance();
+                return requests.CorrelateRow(row, nativeEvents);
+            }
+        }
+
         private static void PublishRawWithAttestation(
             string outputPath,Action<TextWriter> capture)
         {

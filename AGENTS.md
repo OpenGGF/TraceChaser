@@ -212,8 +212,8 @@ them, and that is a decision rather than a gap —
 `bizhawk-headless/docs/s3k-profiles-and-hooks.md` §2.4 records the reasoning,
 and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
-Do not "helpfully" add general M68K exec/memory-write callback support. Two
-address-filtered hardware-timing observers are permitted exceptions, and nothing else is.
+Do not "helpfully" add general M68K exec/memory-write callback support. Four fixed,
+address-filtered observers are permitted exceptions, and nothing else is.
 
 The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001B46`,
 immediately after `Process_Kos_Module_Queue` returns from `Queue_Kos`. It may mirror or
@@ -228,7 +228,22 @@ and the arm predicate itself (`v_plc_buffer` non-zero, `v_plc_patternsleft` zero
 true on entry. It records readiness edges into the per-segment `hardware_timing.jsonl`
 and nothing else.
 
-Both are observers. Neither may select a trace sync point, mutate emulation state, carry
+The third is the Sonic 2 REV01 pre-consumption request-transfer observer at `M68K BUS`
+PC `0x0010D6`, before opcode bytes `13 80 10 09` execute. It may read only the accepted
+nonzero `D0.b` request, actual `D1.w` slot `0..3`, and `A7` correlation token, then correlate
+that snapshot with the next exact ABI-4 action-7 A7 marker. Its fixed manifest owns the PC,
+opcode, and token inventory; it may not expose a caller-selectable observation address,
+infer a request from later state or output, or dispatch the observed value into playback.
+
+The fourth is the approved future Sonic 3&K Sonic/Tails pre-consumption music-mailbox
+observer. It is limited to the stopped-Z80 interval from `M68K BUS` PC `0x001358` (opcode
+`33fc010000a11100`) through PC `0x001374` (opcode `33fc000000a11100`), and may snapshot only
+Z80 RAM `$1C0A` before the bus-release instruction. Its fixed manifest owns the two PCs,
+opcodes, active-service topology, and token inventory; it may not select a profile, address,
+or request value from callers, or infer a request from later state or output. This policy
+approval does not authorize its implementation, capture, fixture publication, or consumer use.
+
+All four are observers. None may select a trace sync point, mutate emulation state, carry
 a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate must
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and

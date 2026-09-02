@@ -14,6 +14,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ConfiguresReviewedServiceGraph,
                 serial: true));
             tests.Add(new TestMain.TestCase(
+                "S2AudioObserverProfileTests reject a rebuilt harness without refreshed authority",
+                RejectsRebuiltHarnessWithoutRefreshedAuthority));
+            tests.Add(new TestMain.TestCase(
                 "S2AudioObserverProfileTests reject changed S2 reference evidence",
                 RejectsChangedReferenceEvidence,
                 serial: true));
@@ -44,21 +47,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void ConfiguresReviewedServiceGraph()
         {
             var api = new RecordingTraceApi();
-            CompleteRunAudioObserver observer = S2AudioObserverProfile.CreateObserver(
+            CompleteRunAudioObserver observer = GpgxAudioServiceManifest.Load(
                 Fixture("gpgx-audio-service-manifests-v1.json"),
-                Fixture("gpgx-audio-capability-v1.json"), api);
+                S2AudioObserverProfile.Game, api);
 
             AssertEx.Equal(true, observer != null);
             AssertEx.Equal(1, api.ConfigureCalls);
-            AssertEx.Equal((ushort)4, api.Config.AbiVersion);
-            AssertEx.Equal(1u, api.Config.Flags);
-            AssertEx.Equal((byte)2, FindHook(api.Hooks, 9).Flags);
-            AssertEx.Equal((byte)3, FindHook(api.Hooks, 10).Flags);
-            foreach (GpgxAudioObserverAdapter.ServiceHook hook in api.Hooks)
-            {
-                if (hook.HookToken != 9 && hook.HookToken != 10)
-                    AssertEx.Equal((byte)0, hook.Flags);
-            }
+            AssertEx.Equal((ushort)1, api.Config.AbiVersion);
             AssertEx.Equal(9, api.Kinds.Length);
             AssertEx.Equal(23, api.Hooks.Length);
             AssertEx.Equal(2, api.Ranges.Length);
@@ -70,18 +65,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0xEC000u, FindHook(api.Hooks, 9).Pc);
             AssertEx.Equal(0xEC036u, FindHook(api.Hooks, 10).Pc);
 
-            S2AudioObserverProfile.Capability capability =
+        }
+
+        private static void RejectsRebuiltHarnessWithoutRefreshedAuthority()
+        {
+            AssertEx.Throws<InvalidDataException>(() =>
                 S2AudioObserverProfile.LoadCapability(
                     Fixture("gpgx-audio-service-manifests-v1.json"),
-                    Fixture("gpgx-audio-capability-v1.json"));
-            AssertEx.Equal(259590, capability.Frames);
-            AssertEx.Equal(169986419L, capability.Events);
-            AssertEx.Equal(1825, capability.MaximumFrameOccupancy);
-            AssertEx.Equal(0, capability.OpenServicesAtCutoff);
-            AssertEx.Equal(0, capability.PendingServicesAtCutoff);
-            AssertEx.Equal(
-                "c2b2f82374aaa16144b6bf121df051dcd5b4ba095431c16cf6224adc633de41d",
-                capability.EventDigestSha256);
+                    Fixture("gpgx-audio-capability-v1.json")),
+                "capability executable identity");
         }
 
         private static void RejectsChangedReferenceEvidence()

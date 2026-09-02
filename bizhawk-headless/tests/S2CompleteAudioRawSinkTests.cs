@@ -36,6 +36,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests reject restore service without owned writes",
                 RejectsRestoreServiceWithoutOwnedWrites));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests serialize correlated request transfers only in the unbound raw v3 candidate",
+                SerializesCorrelatedRequestTransfersInUnboundRawV3Candidate));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject invalid raw v3 request transfer fields",
+                RejectsInvalidRawV3RequestTransferFields));
             if (Environment.GetEnvironmentVariable(
                 "OPENGGF_S2_COMPLETE_AUDIO_REFERENCE") == "1")
             {
@@ -211,6 +217,59 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Throws<InvalidDataException>(() => sink.Frame(
                 S2AudioObserverProfile.FirstRow, RestoreFrame(3910, false),
                 EmptyPacket()), "owns no chip writes");
+        }
+
+        private static void SerializesCorrelatedRequestTransfersInUnboundRawV3Candidate()
+        {
+            var output = new StringWriter();
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), output);
+            sink.Begin(EmptyFrontier());
+            sink.Frame(S2AudioObserverProfile.FirstRow, EmptyFrame(
+                S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 0xB5, 3, 0x00FF1020,
+                        17, 9, 3, 1)
+                });
+            sink.Complete(EmptyFrontier());
+
+            string[] lines = output.ToString().Split(
+                new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            JObject metadata = JObject.Parse(lines[0]);
+            AssertEx.Equal("openggf.s2-complete-run-audio-raw.v3",
+                (string)metadata["schema"]);
+            AssertEx.Equal(false, (bool)metadata["production_bound"]);
+            JObject frame = JObject.Parse(lines[2]);
+            JArray transfers = (JArray)frame["request_transfers"];
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(769, (int)transfers[0]["row"]);
+            AssertEx.Equal(0, (int)transfers[0]["order"]);
+            AssertEx.Equal(0xB5, (int)transfers[0]["request"]);
+            AssertEx.Equal(3, (int)transfers[0]["slot"]);
+            AssertEx.Equal(0x10D6, (int)transfers[0]["pc"]);
+            AssertEx.Equal("16715808", (string)transfers[0]["a7"]);
+            AssertEx.Equal(17, (int)transfers[0]["native_ordinal"]);
+            AssertEx.Equal(9, (int)transfers[0]["service_token"]);
+            JObject owner = (JObject)transfers[0]["active_service_owner"];
+            AssertEx.Equal(9, (int)owner["token"]);
+            AssertEx.Equal(3, (int)owner["kind"]);
+            AssertEx.Equal(1, (int)owner["depth"]);
+        }
+
+        private static void RejectsInvalidRawV3RequestTransferFields()
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            AssertEx.Throws<InvalidDataException>(() => sink.Frame(
+                S2AudioObserverProfile.FirstRow,
+                EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 0, 4, 0x00FF1020,
+                        17, 9, 3, 1)
+                }), "invalid request transfer");
         }
 
         private static CompleteRunAudioObserver.CutoffFrontier EmptyFrontier()

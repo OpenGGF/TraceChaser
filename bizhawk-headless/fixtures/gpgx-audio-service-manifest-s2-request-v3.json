@@ -1,0 +1,17 @@
+{
+  "schema": "openggf.s2-preconsumption-request-manifest.v1",
+  "production_bound": false,
+  "base_service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
+  "request_transfer": {
+    "cpu": "M68K",
+    "pc": 4310,
+    "opcode": "13801009",
+    "native_action": 7,
+    "marker_event_kind": 10,
+    "marker_value": 3,
+    "marker_token": 24,
+    "marker_expected_kinds": [0],
+    "source_file": "docs/s2disasm/s2.asm",
+    "source_label": "sndDriverInput accepted M68K-to-Z80 transfer"
+  }
+}
