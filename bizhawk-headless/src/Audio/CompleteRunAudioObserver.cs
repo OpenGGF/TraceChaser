@@ -1116,6 +1116,9 @@ namespace OpenGGF.BizHawk.Headless
                 ref GpgxAudioTraceEvent e=ref events[i]; long coordinate=globalEventCoordinate+i;
                 if(e.Ordinal!=(uint)i)throw Invalid("noncontiguous event ordinal");
                 ValidateCommon(ref e);
+                if(e.SourceCpu==1&&!nowArmed)
+                    throw Invalid(
+                        "Z80 event emitted while native proofs were disarmed");
                 switch(e.Kind)
                 {
                 case 1:
@@ -1260,6 +1263,12 @@ namespace OpenGGF.BizHawk.Headless
                         ValidateSnapshots(b,hook.RangeFirst,hook.RangeCount,e.SourceCpu,e.Pc);
                         if(hook.Action==5)
                             ValidateConditionalCompletion(events,i,ref e,hook);
+                        if((hook.Flags&1)!=0)
+                        {
+                            ValidateArmCompletionAdjacency(events,i,ref e,
+                                hook,b);
+                            nowArmed=true;epoch++;
+                        }
                     }
                     b.EndCoordinate=coordinate;b.EndPc=e.Pc;b.EndHookToken=cancelled?(ushort)0:e.Subject;
                     active.RemoveAt(promotes?active.Count-2:active.Count-1);
@@ -1537,14 +1546,9 @@ namespace OpenGGF.BizHawk.Headless
             pendingDeferredBegin=p.Deferred;
             ymPort0Address=p.Port0;ymPort1Address=p.Port1;armEpoch=p.Epoch;armed=p.Armed;
             LastCapture=p.Capture;globalEventCoordinate+=p.EventCount;
-            for(int i=0;i<p.Completed.Count;i++)
-            { ServiceBuilder s=p.Completed[i]; if(!s.Cancelled&&armHookToken!=0&&HookArms(s)) {armed=true;armEpoch++;} }
             projectionActive.Clear();projectionComplete.Clear();projectionPending.Clear();projectionResets.Clear();
             projectionDeferredBegins.Clear();
         }
-
-        private bool HookArms(ServiceBuilder s)
-        { return hasHook[s.EndHookToken]&&(hookByToken[s.EndHookToken].Flags&1)!=0; }
 
         private static bool ContainsToken(List<ServiceBuilder> active,ushort token)
         {for(int i=0;i<active.Count;i++)if(active[i].Token==token)return true;return false;}
@@ -1650,6 +1654,49 @@ namespace OpenGGF.BizHawk.Headless
                 ||events[at].Subject!=hook.HookToken||events[at].Pc!=hook.Pc
                 ||events[at].ServiceToken!=end.ServiceToken)
                 throw Invalid("conditional completion without POP marker");
+        }
+
+        private void ValidateArmCompletionAdjacency(
+            GpgxAudioTraceEvent[] events,int index,
+            ref GpgxAudioTraceEvent end,
+            GpgxAudioObserverAdapter.ServiceHook hook,ServiceBuilder service)
+        {
+            int at=index-1;
+            for(int rangeIndex=hook.RangeCount-1;rangeIndex>=0;rangeIndex--)
+            {
+                GpgxAudioObserverAdapter.SnapshotRange range=
+                    ranges[hook.RangeFirst+rangeIndex];
+                if(at<0||events[at].Kind!=7
+                    ||events[at].Subject!=range.RangeId
+                    ||events[at].ServiceToken!=service.Token
+                    ||events[at].ParentToken!=service.CurrentParentToken
+                    ||events[at].ServiceKindId!=service.Kind
+                    ||events[at].Depth!=service.CurrentDepth
+                    ||events[at].Pc!=end.Pc
+                    ||events[at].SourceCpu!=end.SourceCpu)
+                    throw Invalid(
+                        "proof-arm completion snapshot adjacency");
+                at--;
+                while(at>=0&&events[at].Kind==6
+                    &&events[at].Subject==range.RangeId
+                    &&events[at].ServiceToken==service.Token
+                    &&events[at].ParentToken==service.CurrentParentToken
+                    &&events[at].ServiceKindId==service.Kind
+                    &&events[at].Depth==service.CurrentDepth
+                    &&events[at].Pc==end.Pc
+                    &&events[at].SourceCpu==end.SourceCpu)at--;
+                if(at<0||events[at].Kind!=5
+                    ||events[at].Subject!=range.RangeId
+                    ||events[at].ServiceToken!=service.Token
+                    ||events[at].ParentToken!=service.CurrentParentToken
+                    ||events[at].ServiceKindId!=service.Kind
+                    ||events[at].Depth!=service.CurrentDepth
+                    ||events[at].Pc!=end.Pc
+                    ||events[at].SourceCpu!=end.SourceCpu)
+                    throw Invalid(
+                        "proof-arm completion snapshot adjacency");
+                at--;
+            }
         }
 
         private static void ValidateTailBegin(GpgxAudioTraceEvent[] events,int index,

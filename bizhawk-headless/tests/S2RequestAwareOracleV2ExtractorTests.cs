@@ -58,6 +58,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests reject native ABI and lifecycle mutations",
                 RejectsNativeAbiAndLifecycleMutations));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject Z80 evidence while native proofs are disarmed",
+                RejectsZ80EvidenceWhileNativeProofsAreDisarmed));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests require the exact native upload re-arm proof",
+                RequiresExactNativeUploadRearmProof));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests preserve armed unarmed and repeated-cycle cutoff state",
+                PreservesArmStateAcrossCutoffsAndRepeatedCycles));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject native continuation overflow across rows",
                 RejectsNativeContinuationOverflowAcrossRows));
             tests.Add(new TestMain.TestCase(
@@ -358,9 +367,19 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         private static byte[] ProducerRaw()
-        { return ProducerRaw(false); }
+        { return ProducerRaw(false, true); }
 
         private static byte[] ProducerRaw(bool followingRowPcm)
+        { return ProducerRaw(followingRowPcm, true); }
+
+        private static byte[] ProducerRaw(bool followingRowPcm,
+            bool includePostResetArmProof)
+        { return ProducerRaw(followingRowPcm,includePostResetArmProof,
+            true,false); }
+
+        private static byte[] ProducerRaw(bool followingRowPcm,
+            bool includePostResetArmProof,bool includePostResetZ80,
+            bool repeatResetAndArm)
         {
             var api = new ProducerTraceApi();
             var host = new ProducerHost(api);
@@ -381,7 +400,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 candidate.AdvanceRow(1, new Bk2Frame());
 
                 const uint a7 = 0x00FF1020;
-                api.Events = RequestAndOpenServiceEvents(a7);
+                api.Events = RequestAndOpenServiceEvents(a7,
+                    includePostResetArmProof,includePostResetZ80);
                 api.SuccessorOrdinal = 19;
                 host.Set("M68K D0", 0xB5);
                 host.Set("M68K D1", 3);
@@ -391,7 +411,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     ?new short[0]:new short[] { 1, -2 };
                 candidate.AdvanceRow(2, new Bk2Frame());
 
-                api.Events = new GpgxAudioTraceEvent[0];
+                api.Events = repeatResetAndArm
+                    ?ResetAndRearmEvents()
+                    :new GpgxAudioTraceEvent[0];
                 host.AudioAfterAdvance = followingRowPcm
                     ?new short[] { 1, -2 }:new short[0];
                 candidate.AdvanceRow(3,new Bk2Frame());
@@ -444,6 +466,89 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ((JArray)cutoff["active_services"])[0]["parent_token"] = 44;
                 lines[5] = Json(cutoff);
             }, "frontier");
+        }
+
+        private static void RejectsZ80EvidenceWhileNativeProofsAreDisarmed()
+        {
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                int completion=ArmCompletionIndex(events);
+                JToken z80=events[completion+1];
+                events.RemoveAt(completion+1);
+                events.Insert(20,z80);
+                Renumber(events);
+                lines[3]=Json(frame);
+            },"native");
+        }
+
+        private static void RequiresExactNativeUploadRearmProof()
+        {
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                ((JObject)events[ArmCompletionIndex(events)])["subject"]=9;
+                lines[3]=Json(frame);
+            },"native");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                ((JObject)events[ArmCompletionIndex(events)])["pc"]=0x0EC034;
+                lines[3]=Json(frame);
+            },"native");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                ((JObject)events[ArmCompletionIndex(events)])
+                    ["service_kind"]=3;
+                lines[3]=Json(frame);
+            },"native");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                ((JObject)events[ArmCompletionIndex(events)])
+                    ["source_cpu"]=1;
+                lines[3]=Json(frame);
+            },"native");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                int completion=ArmCompletionIndex(events);
+                events.RemoveAt(completion-1);
+                Renumber(events);
+                lines[3]=Json(frame);
+            },"native");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray events=(JArray)frame["events"];
+                int completion=ArmCompletionIndex(events);
+                JObject end=(JObject)events[completion];
+                events.Insert(completion,new JObject {
+                    ["ordinal"]=0,
+                    ["service_token"]=(int)end["service_token"],
+                    ["parent_token"]=0,["pc"]=0x0EC036,
+                    ["subject"]=0,["offset"]=0,["kind"]=3,
+                    ["service_kind"]=2,["depth"]=0,["source_cpu"]=2,
+                    ["payload_length"]=0,["value"]=0x22,["flags"]=0,
+                    ["reserved"]=0,["payload"]="0" });
+                Renumber(events);
+                lines[3]=Json(frame);
+            },"native");
+        }
+
+        private static void PreservesArmStateAcrossCutoffsAndRepeatedCycles()
+        {
+            AssertProducerArmState(ProducerRaw(),3,true);
+            AssertProducerArmState(ProducerRaw(false,false,false,false),
+                2,false);
+            AssertProducerArmState(ProducerRaw(false,true,true,true),5,true);
         }
 
         private static void RejectsNativeContinuationOverflowAcrossRows()
@@ -923,6 +1028,63 @@ namespace OpenGGF.BizHawk.Headless.Tests
             Action<string[]> mutate, string message)
         { AssertProducerRawRejection(ProducerRaw(),mutate,message); }
 
+        private static int ArmCompletionIndex(JArray events)
+        {
+            int found=-1;
+            for(int index=0;index<events.Count;index++)
+            {
+                JObject value=(JObject)events[index];
+                if((int)value["kind"]!=2||(int)value["subject"]!=10
+                    ||(int)value["pc"]!=0x0EC036
+                    ||(int)value["service_kind"]!=2)continue;
+                if(found>=0)throw new InvalidOperationException(
+                    "duplicate test upload completion");
+                found=index;
+            }
+            if(found<0)throw new InvalidOperationException(
+                "missing test upload completion");
+            return found;
+        }
+
+        private static void Renumber(JArray events)
+        {
+            for(int index=0;index<events.Count;index++)
+                ((JObject)events[index])["ordinal"]=index;
+        }
+
+        private static void AssertProducerArmState(byte[] raw,long epoch,
+            bool armed)
+        {
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-arm-state");
+            try
+            {
+                Directory.CreateDirectory(root);
+                string[] lines=Encoding.UTF8.GetString(raw).Split(
+                    new[]{'\n'},StringSplitOptions.RemoveEmptyEntries);
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject cutoff=JObject.Parse(lines[lines.Length-1]);
+                AssertEx.Equal(1L,(long)baseline["native_arm_epoch"]);
+                AssertEx.Equal(true,(bool)baseline["native_armed"]);
+                AssertEx.Equal(epoch,(long)cutoff["native_arm_epoch"]);
+                AssertEx.Equal(armed,(bool)cutoff["native_armed"]);
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        1,4,2,3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"arm.raw.jsonl"),
+                    Capability=Path.Combine(root,"arm.capability.json"),
+                    Attestation=Path.Combine(root,"arm.attestation.json") };
+                File.WriteAllBytes(input.Raw,raw);
+                WriteAuthority(input,Capability(raw,2,3),raw);
+                string output=Path.Combine(root,"window.jsonl");
+                input.Extractor.ExtractForTesting(input.Raw,input.Capability,
+                    input.Attestation,output);
+                AssertEx.Equal(true,File.Exists(output));
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
         private static void AssertProducerRawRejection(byte[] original,
             Action<string[]> mutate, string message)
         {
@@ -961,17 +1123,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static GpgxAudioTraceEvent[] UploadEvents()
         {
             var values = new List<GpgxAudioTraceEvent>();
-            values.Add(Native(values.Count, 1, 1, 0, 0x0EC000, 9,
-                0, 2, 0, 2));
-            values.Add(Native(values.Count, 5, 1, 0, 0x0EC036, 1,
-                0, 2, 0, 2));
-            for (int offset = 0; offset < 8192; offset += 8)
-                values.Add(Native(values.Count, 6, 1, 0, 0x0EC036,
-                    1, (ushort)offset, 2, 0, 2, 8));
-            values.Add(Native(values.Count, 7, 1, 0, 0x0EC036, 1,
-                8192, 2, 0, 2));
-            values.Add(Native(values.Count, 2, 1, 0, 0x0EC036, 10,
-                0, 2, 0, 2));
+            AddUploadProofEvents(values, 1);
             values.Add(Native(values.Count,1,2,0,378,5,0,4,0,1));
             values.Add(Native(values.Count,1,3,2,56,2,0,3,1,1));
             values.Add(Native(values.Count,1,4,3,272,21,0,9,2,1));
@@ -1020,7 +1172,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         private static GpgxAudioTraceEvent[] RequestAndOpenServiceEvents(
-            uint a7)
+            uint a7, bool includeArmProof, bool includeZ80)
         {
             var values=new List<GpgxAudioTraceEvent>();
             AddResumeCompletionEvents(values);
@@ -1036,9 +1188,43 @@ namespace OpenGGF.BizHawk.Headless.Tests
             marker.Value = 3;
             marker.Payload = a7;
             values.Add(marker);
-            values.Add(Native(values.Count, 1, 3, 0, 378, 5,
-                0, 4, 0, 1));
+            if(includeArmProof)AddUploadProofEvents(values,3);
+            if(includeZ80)
+                values.Add(Native(values.Count, 1,
+                    (ushort)(includeArmProof?4:3), 0, 378, 5,
+                    0, 4, 0, 1));
             return values.ToArray();
+        }
+
+        private static GpgxAudioTraceEvent[] ResetAndRearmEvents()
+        {
+            var values=new List<GpgxAudioTraceEvent>();
+            values.Add(Native(values.Count,8,1,0,0,1,0,1,0,3));
+            AddOneByteSnapshot(values,4,0,4,0,0,3);
+            GpgxAudioTraceEvent cancelled=Native(values.Count,2,4,0,0,0,
+                0,4,0,3);
+            cancelled.Flags=2;
+            values.Add(cancelled);
+            AddOneByteSnapshot(values,1,0,1,0,0,3);
+            values.Add(Native(values.Count,9,1,0,0,0,0,1,0,3));
+            AddUploadProofEvents(values,2);
+            return values.ToArray();
+        }
+
+        private static void AddUploadProofEvents(
+            IList<GpgxAudioTraceEvent> values, ushort token)
+        {
+            values.Add(Native(values.Count,1,token,0,0x0EC000,9,
+                0,2,0,2));
+            values.Add(Native(values.Count,5,token,0,0x0EC036,1,
+                0,2,0,2));
+            for(int offset=0;offset<8192;offset+=8)
+                values.Add(Native(values.Count,6,token,0,0x0EC036,1,
+                    (ushort)offset,2,0,2,8));
+            values.Add(Native(values.Count,7,token,0,0x0EC036,1,
+                8192,2,0,2));
+            values.Add(Native(values.Count,2,token,0,0x0EC036,10,
+                0,2,0,2));
         }
 
         private static void AddOneByteSnapshot(

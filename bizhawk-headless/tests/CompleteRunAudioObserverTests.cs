@@ -1160,7 +1160,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             var api = new FakeTraceApi { Events = new[]
             {
-                Event(0, 1, 1, 0, 1, 0),
+                new GpgxAudioTraceEvent { Ordinal = 0, Kind = 1,
+                    ServiceToken = 1, ServiceKindId = 1, SourceCpu = 2,
+                    Subject = 1, Pc = 0x100 },
                 new GpgxAudioTraceEvent { Ordinal = 1, Kind = 3, ServiceToken = 1,
                     ServiceKindId = 1, SourceCpu = 2, Subject = 0, Value = 0x2A },
                 new GpgxAudioTraceEvent { Ordinal = 2, Kind = 3, ServiceToken = 1,
@@ -1731,7 +1733,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 WatchMaskBytes = 8192, EventCapacity = 65536
             };
             var hooks = new[] {
-                new GpgxAudioObserverAdapter.ServiceHook {HookToken=1,Action=1,Cpu=1,Pc=0x100,ServiceKindId=1},
+                new GpgxAudioObserverAdapter.ServiceHook {HookToken=1,Action=1,Cpu=(byte)(armOnCompletion?2:1),Pc=0x100,ServiceKindId=1},
                 new GpgxAudioObserverAdapter.ServiceHook {HookToken=3,Action=1,Cpu=1,Pc=0x110,ServiceKindId=2,ExpectedActiveKind=1},
                 new GpgxAudioObserverAdapter.ServiceHook {HookToken=2,Action=2,Cpu=1,Pc=0x120,ExpectedActiveKind=1},
                 new GpgxAudioObserverAdapter.ServiceHook {HookToken=9,Action=2,Cpu=2,Pc=0x120,ExpectedActiveKind=1,Flags=(byte)(armOnCompletion?1:0)} };
