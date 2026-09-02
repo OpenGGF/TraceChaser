@@ -307,11 +307,9 @@ namespace OpenGGF.BizHawk.Headless
             Projection projection)
         {
             JObject metadata=projection.Metadata, preceding=projection.Preceding;
-            JObject capability=projection.Capability, cutoff=projection.Cutoff;
             int latch0=projection.Latch0,latch1=projection.Latch1;
-            FileEvidence raw=projection.Raw;
             Publish(outputPath, writer => {
-            Write(writer, new JObject {
+            JObject boundedMetadata=new JObject {
                 ["type"]="metadata", ["schema"]=OracleSchema,
                 ["rom_sha1"]=String(metadata,"rom_sha1"),
                 ["bk2_sha256"]=String(metadata,"bk2_sha256"),
@@ -320,23 +318,132 @@ namespace OpenGGF.BizHawk.Headless
                 ["state_start"]=0, ["state_exclusive_end"]=0x2000,
                 ["source_schema"]=RawSchema, ["source_first_row"]=sourceFirst,
                 ["source_exclusive_end"]=sourceEnd,
-                ["source_raw_sha256"]=raw.Sha256,
-                ["source_raw_byte_count"]=raw.ByteCount,
-                ["source_capability_sha256"]=Hex(Sha256(Canonical(capability))),
                 ["request_transfer_schema"]="openggf.s2-preconsumption-request-transfer.v1",
-                ["production_bound"]=false });
-            Write(writer, new JObject { ["type"]="baseline", ["row"]=windowFirst,
+                ["production_bound"]=false,
+                ["digest_domains"]=new JObject {
+                    ["inventories"]="compact-json-lf-v1",
+                    ["body"]="bounded-jsonl-body-bytes-v1",
+                    ["terminal_state"]="decoded-z80-state-bytes-v1",
+                    ["payload_before_cutoff"]="bounded-jsonl-before-cutoff-bytes-v1" } };
+            JObject baseline=new JObject { ["type"]="baseline", ["row"]=windowFirst,
                 ["source_preceding_row"]=windowFirst-1,
                 ["state_hex"]=String(preceding,"state_hex"),
-                ["ym_port0_latch"]=latch0, ["ym_port1_latch"]=latch1 });
+                ["ym_port0_latch"]=latch0, ["ym_port1_latch"]=latch1 };
+            using(var evidence=new BoundedEvidence(windowFirst,windowEnd))
+            {
+            using(SHA256 payload=SHA256.Create())
+            {
+            Append(payload,Write(writer,boundedMetadata));
+            byte[] baselineBytes=Write(writer,baseline);
+            Append(payload,baselineBytes);evidence.Baseline(baselineBytes);
             using(var input=new StreamReader(File.OpenRead(stagedWindow),
                 new UTF8Encoding(false,true),false,65536))
-            { string frame;while((frame=input.ReadLine())!=null)writer.WriteLine(frame); }
-            Write(writer, new JObject { ["type"]="cutoff", ["exclusive_end"]=windowEnd,
-                ["source_cutoff_exclusive_end"]=sourceEnd,
-                ["source_cutoff_frontier_sha256"]=Hex(Sha256(Canonical(cutoff))),
-                ["terminal_state_sha256"]=String(capability,"terminal_state_sha256") });
+            {
+                string line;while((line=input.ReadLine())!=null)
+                {
+                    JObject frame=ParseLine(line,"bounded frame");
+                    evidence.Frame(frame);
+                    Append(payload,Write(writer,frame));
+                }
+            }
+            payload.TransformFinalBlock(new byte[0],0,0);
+            Write(writer,evidence.Cutoff(Hex(payload.Hash)));
+            }
+            }
             });
+        }
+
+        /// <summary>
+        /// Builds only claims that the bounded raw-v2 body itself can prove.
+        /// Raw-v3/capability/attestation provenance remains in the reviewed
+        /// pre-publication validation path and is deliberately not copied here.
+        /// </summary>
+        private sealed class BoundedEvidence : IDisposable
+        {
+            private readonly int first,end;
+            private readonly SHA256 baseDigest=SHA256.Create();
+            private readonly SHA256 allDigest=SHA256.Create();
+            private readonly SHA256 markerDigest=SHA256.Create();
+            private readonly SHA256 requestDigest=SHA256.Create();
+            private readonly SHA256 resumeDigest=SHA256.Create();
+            private readonly SHA256 pcmDigest=SHA256.Create();
+            private readonly SHA256 bodyDigest=SHA256.Create();
+            private long frameCount,baseCount,allCount,markerCount,requestCount;
+            private long resumeCount,pcmCount,bodyBytes;
+            private int occupancy;
+            private byte[] terminalState;
+
+            internal BoundedEvidence(int firstRow,int exclusiveEnd)
+            { first=firstRow;end=exclusiveEnd; }
+
+            internal void Baseline(byte[] bytes) { Body(bytes); }
+
+            internal void Frame(JObject value)
+            {
+                ValidateFrame(value,first+(int)frameCount);
+                Body(Canonical(value));frameCount++;
+                terminalState=StateBytes(String(value,"state_hex"));
+                JArray events=Array(value,"events");
+                foreach(JToken token in events)
+                {
+                    JObject evt=Object(token,"bounded event");byte[] bytes=Canonical(evt);
+                    Append(allDigest,bytes);allCount++;
+                    if(Marker(evt))
+                    {
+                        Require(Byte(evt,"payload_length")==4
+                            &&UShort(evt,"offset")==0&&Byte(evt,"flags")==0
+                            &&Byte(evt,"reserved")==0,
+                            "bounded action-7 marker shape differs");
+                        Append(markerDigest,bytes);markerCount++;
+                    }
+                    else { Append(baseDigest,bytes);baseCount++; }
+                }
+                JArray transfers=Array(value,"request_transfers");
+                occupancy=Math.Max(occupancy,transfers.Count);
+                foreach(JToken token in transfers)
+                { Append(requestDigest,Canonical(token));requestCount++; }
+                JToken resume=value["override_resume"];
+                if(resume!=null&&resume.Type!=JTokenType.Null)
+                { Append(resumeDigest,Canonical(resume));resumeCount++; }
+                JToken pcm=value["pcm"];
+                if(pcm!=null&&pcm.Type!=JTokenType.Null)
+                { Append(pcmDigest,Canonical(pcm));pcmCount++; }
+            }
+
+            internal JObject Cutoff(string payloadBeforeCutoffSha256)
+            {
+                Require(frameCount==end-first&&terminalState!=null,
+                    "bounded output frame inventory differs");
+                return new JObject { ["type"]="cutoff", ["exclusive_end"]=end,
+                    ["frame_count"]=frameCount, ["base_event_count"]=baseCount,
+                    ["all_event_count"]=allCount, ["marker_event_count"]=markerCount,
+                    ["request_transfer_count"]=requestCount,
+                    ["override_resume_count"]=resumeCount,["pcm_count"]=pcmCount,
+                    ["max_request_occupancy"]=occupancy,
+                    ["base_event_sha256"]=Finish(baseDigest),
+                    ["all_event_sha256"]=Finish(allDigest),
+                    ["marker_event_sha256"]=Finish(markerDigest),
+                    ["request_transfer_sha256"]=Finish(requestDigest),
+                    ["override_resume_sha256"]=Finish(resumeDigest),
+                    ["pcm_sha256"]=Finish(pcmDigest),
+                    ["body_byte_count"]=bodyBytes,
+                    ["body_sha256"]=Finish(bodyDigest),
+                    ["terminal_state_sha256"]=Hex(Sha256(terminalState)),
+                    ["payload_before_cutoff_sha256"]=payloadBeforeCutoffSha256 };
+            }
+
+            private void Body(byte[] bytes)
+            { Append(bodyDigest,bytes);bodyBytes+=bytes.Length; }
+
+            private static string Finish(SHA256 value)
+            { value.TransformFinalBlock(new byte[0],0,0);return Hex(value.Hash); }
+
+            public void Dispose()
+            {
+                baseDigest.Dispose();allDigest.Dispose();markerDigest.Dispose();
+                requestDigest.Dispose();resumeDigest.Dispose();pcmDigest.Dispose();
+                bodyDigest.Dispose();
+            }
         }
 
         private static CompleteRunAudioObserver.CutoffFrontier ValidateBaseline(
@@ -1240,8 +1347,10 @@ namespace OpenGGF.BizHawk.Headless
         { HexData(value);var result=new byte[value.Length/2];for(int index=0;index<result.Length;index++)result[index]=(byte)((Nibble(value[index*2])<<4)|Nibble(value[index*2+1]));return result; }
         private static string StrictUtf8(byte[] value,string label)
         { try{return new UTF8Encoding(false,true).GetString(value);}catch(DecoderFallbackException error){throw Invalid(label+" is not strict UTF-8",error);} }
-        private static void Write(TextWriter output,JObject value)
-        { output.Write(value.ToString(Formatting.None));output.Write('\n'); }
+        private static byte[] Write(TextWriter output,JObject value)
+        { byte[] bytes=Canonical(value);output.Write(Encoding.UTF8.GetString(bytes));return bytes; }
+        private static void Append(HashAlgorithm digest,byte[] bytes)
+        { digest.TransformBlock(bytes,0,bytes.Length,bytes,0); }
         private static void Require(bool condition,string message)
         { if(!condition)throw Invalid(message); }
         private static InvalidDataException Invalid(string message)

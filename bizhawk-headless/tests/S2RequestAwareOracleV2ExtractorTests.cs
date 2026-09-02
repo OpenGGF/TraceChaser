@@ -22,6 +22,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests project the exact 750-row window deterministically",
                 ProjectsExactWindowDeterministically));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests publish a self-verifying bounded-v2 closure",
+                PublishesSelfVerifyingBoundedClosure));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject malformed candidate authority before output",
                 RejectMalformedCandidateAuthority));
             tests.Add(new TestMain.TestCase(
@@ -133,6 +136,116 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 JObject cutoff = JObject.Parse(lines[752]);
                 AssertEx.Equal(10900, (int)cutoff["exclusive_end"]);
             });
+        }
+
+        private static void PublishesSelfVerifyingBoundedClosure()
+        {
+            string root = TestScratch.CreateRootPath("s2-request-aware-bounded-closure");
+            try
+            {
+                Directory.CreateDirectory(root);
+                string[] rawLines = Encoding.UTF8.GetString(ProducerRaw()).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                JObject boundedFrame = JObject.Parse(rawLines[3]);
+                boundedFrame["state_hex"] = "01" + new string('0', 0x3FFE);
+                rawLines[3] = Json(boundedFrame);
+                byte[] raw = Encoding.UTF8.GetBytes(string.Join("\n", rawLines) + "\n");
+                var input = new Inputs
+                {
+                    Extractor = S2RequestAwareOracleV2Extractor.ForTesting(
+                        1, 4, 2, 3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw = Path.Combine(root, "producer.raw.jsonl"),
+                    Capability = Path.Combine(root, "producer.capability.json"),
+                    Attestation = Path.Combine(root, "producer.attestation.json")
+                };
+                File.WriteAllBytes(input.Raw, raw);
+                WriteAuthority(input, Capability(raw, 2, 3), raw);
+                string output = Path.Combine(root, "window.jsonl");
+
+                input.Extractor.ExtractForTesting(input.Raw, input.Capability,
+                    input.Attestation, output);
+
+                string[] lines = File.ReadAllText(output).Split(new[] { '\n' },
+                    StringSplitOptions.RemoveEmptyEntries);
+                AssertEx.Equal(4, lines.Length);
+                JObject metadata = JObject.Parse(lines[0]);
+                AssertEx.Equal(false, metadata.ContainsKey("source_raw_sha256"));
+                AssertEx.Equal(false, metadata.ContainsKey("source_raw_byte_count"));
+                AssertEx.Equal(false, metadata.ContainsKey("source_capability_sha256"));
+                JObject domains = (JObject)metadata["digest_domains"];
+                AssertEx.Equal("compact-json-lf-v1", (string)domains["inventories"]);
+                AssertEx.Equal("bounded-jsonl-body-bytes-v1", (string)domains["body"]);
+                AssertEx.Equal("decoded-z80-state-bytes-v1",
+                    (string)domains["terminal_state"]);
+                AssertEx.Equal("bounded-jsonl-before-cutoff-bytes-v1",
+                    (string)domains["payload_before_cutoff"]);
+
+                JObject baseline = JObject.Parse(lines[1]);
+                JObject frame = JObject.Parse(lines[2]);
+                JObject cutoff = JObject.Parse(lines[3]);
+                AssertEx.Equal(false, cutoff.ContainsKey("source_cutoff_frontier_sha256"));
+                AssertEx.Equal(false, cutoff.ContainsKey("terminal_state_sha256_source"));
+                AssertEx.Equal(false, cutoff.ContainsKey("source_terminal_state_sha256"));
+
+                var baseEvents = new List<byte>();
+                var allEvents = new List<byte>();
+                var markerEvents = new List<byte>();
+                long baseCount = 0, markerCount = 0;
+                foreach (JToken token in (JArray)frame["events"])
+                {
+                    JObject value = (JObject)token;
+                    byte[] canonical = Canonical(value);
+                    allEvents.AddRange(canonical);
+                    bool marker = (int)value["kind"] == 10
+                        && (int)value["value"] == 3
+                        && (int)value["pc"] == 0x10D6
+                        && (int)value["subject"] == 24;
+                    if (marker)
+                    {
+                        AssertEx.Equal(4, (int)value["payload_length"]);
+                        AssertEx.Equal(0, (int)value["offset"]);
+                        AssertEx.Equal(0, (int)value["flags"]);
+                        AssertEx.Equal(0, (int)value["reserved"]);
+                        markerEvents.AddRange(canonical);
+                        markerCount++;
+                    }
+                    else { baseEvents.AddRange(canonical); baseCount++; }
+                }
+                var transfers = new List<byte>();
+                foreach (JToken token in (JArray)frame["request_transfers"])
+                    transfers.AddRange(Canonical(token));
+                byte[] body = Concat(Canonical(baseline), Canonical(frame));
+                AssertEx.Equal(1L, (long)cutoff["frame_count"]);
+                AssertEx.Equal(baseCount, (long)cutoff["base_event_count"]);
+                AssertEx.Equal((long)((JArray)frame["events"]).Count,
+                    (long)cutoff["all_event_count"]);
+                AssertEx.Equal(markerCount, (long)cutoff["marker_event_count"]);
+                AssertEx.Equal((long)((JArray)frame["request_transfers"]).Count,
+                    (long)cutoff["request_transfer_count"]);
+                AssertEx.Equal(1L, (long)cutoff["override_resume_count"]);
+                AssertEx.Equal(1L, (long)cutoff["pcm_count"]);
+                AssertEx.Equal(1, (int)cutoff["max_request_occupancy"]);
+                AssertEx.Equal(Digest(baseEvents.ToArray()),
+                    (string)cutoff["base_event_sha256"]);
+                AssertEx.Equal(Digest(allEvents.ToArray()),
+                    (string)cutoff["all_event_sha256"]);
+                AssertEx.Equal(Digest(markerEvents.ToArray()),
+                    (string)cutoff["marker_event_sha256"]);
+                AssertEx.Equal(Digest(transfers.ToArray()),
+                    (string)cutoff["request_transfer_sha256"]);
+                AssertEx.Equal(Digest(Canonical(frame["override_resume"])),
+                    (string)cutoff["override_resume_sha256"]);
+                AssertEx.Equal(Digest(Canonical(frame["pcm"])),
+                    (string)cutoff["pcm_sha256"]);
+                AssertEx.Equal((long)body.Length, (long)cutoff["body_byte_count"]);
+                AssertEx.Equal(Digest(body), (string)cutoff["body_sha256"]);
+                AssertEx.Equal(Digest(StateBytes((string)frame["state_hex"])),
+                    (string)cutoff["terminal_state_sha256"]);
+                AssertEx.Equal(Digest(Concat(Canonical(metadata), body)),
+                    (string)cutoff["payload_before_cutoff_sha256"]);
+            }
+            finally { try { Directory.Delete(root, true); } catch { } }
         }
 
         private static void RejectMalformedCandidateAuthority()
@@ -1581,6 +1694,32 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static string Json(JObject value) { return value.ToString(Formatting.None); }
         private static byte[] Canonical(JToken value)
         { return Encoding.UTF8.GetBytes(value.ToString(Formatting.None)+"\n"); }
+        private static byte[] Concat(params byte[][] values)
+        {
+            int length = 0;
+            foreach (byte[] value in values) length += value.Length;
+            var result = new byte[length];
+            int offset = 0;
+            foreach (byte[] value in values)
+            {
+                Buffer.BlockCopy(value, 0, result, offset, value.Length);
+                offset += value.Length;
+            }
+            return result;
+        }
+        private static byte[] StateBytes(string value)
+        {
+            var result = new byte[value.Length / 2];
+            for (int index = 0; index < result.Length; index++)
+            {
+                int high = value[index * 2] <= '9'
+                    ? value[index * 2] - '0' : value[index * 2] - 'a' + 10;
+                int low = value[index * 2 + 1] <= '9'
+                    ? value[index * 2 + 1] - '0' : value[index * 2 + 1] - 'a' + 10;
+                result[index] = (byte)((high << 4) | low);
+            }
+            return result;
+        }
         private static string Digest(byte[] bytes)
         { using(SHA256 hash=SHA256.Create())return Hex(hash.ComputeHash(bytes)); }
         private static string Hex(byte[] bytes)
