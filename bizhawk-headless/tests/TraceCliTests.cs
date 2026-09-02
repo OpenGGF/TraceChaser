@@ -160,6 +160,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 string trace=Path.Combine(root,"tools","tracechaser");
                 Directory.CreateDirectory(trace);
+                string fixture=Path.Combine(root,"src","test","resources",
+                    "audio","parity");
+                Directory.CreateDirectory(fixture);
                 string[] files=new string[8];
                 for(int index=0;index<files.Length;index++)
                 {
@@ -175,8 +178,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "--s1-raw-2",files[2],"--s1-attestation-2",files[3],
                     "--s2-raw-1",files[4],"--s2-attestation-1",files[5],
                     "--s2-raw-2",files[6],"--s2-attestation-2",files[7],
-                    "--fixture-root",Path.Combine(root,"src","test","resources",
-                        "audio","parity")
+                    "--fixture-root",fixture
                 };
                 OverrideResumePublisherCommandOptions parsed=
                     OverrideResumePublisherCommandOptions.Parse(args);

@@ -128,7 +128,20 @@ namespace OpenGGF.BizHawk.Headless
                 ["logical_byte_count"]=logical.LongLength,
                 ["logical_sha256"]=Digest(logical),
                 ["stored_byte_count"]=stored.LongLength,
-                ["stored_sha256"]=Digest(stored)
+                ["stored_sha256"]=Digest(stored),
+                ["bundle_relative_root"]=
+                    "src/test/resources/audio/parity/"
+                    +OverrideResumeFirstDivergencePublisher.BundleName,
+                ["bundle_member_inventory"]=new JArray(
+                    "s1/s1-override-resume-reference.v1.jsonl.gz",
+                    "s1/s1-override-resume-metadata.v1.json",
+                    "s2/s2-override-resume-reference.v1.jsonl.gz",
+                    "s2/s2-override-resume-metadata.v1.json"),
+                ["publication_protocol"]=
+                    "linux-atomic-bundle-rename-noreplace-v1",
+                ["namespace_lock_precondition"]=
+                    OverrideResumeFirstDivergencePublisher
+                        .NamespaceStabilityPrecondition
             };
             ValidatePublishedMetadata(game,metadata);
             return new GameOutput(stored,Utf8(Canonical(metadata)+"\n"));
@@ -432,7 +445,9 @@ namespace OpenGGF.BizHawk.Headless
             ExactProperties(value,"published metadata","schema","game",
                 "raw_sha256","raw_byte_count","attestation_sha256",
                 "record_count","logical_byte_count","logical_sha256",
-                "stored_byte_count","stored_sha256");
+                "stored_byte_count","stored_sha256","bundle_relative_root",
+                "bundle_member_inventory","publication_protocol",
+                "namespace_lock_precondition");
             RequireEqual("openggf.override-resume-first-divergence-metadata.v1",
                 RequiredString(value,"schema"),"metadata schema");
             RequireEqual(game,RequiredString(value,"game"),"metadata game");
@@ -451,6 +466,98 @@ namespace OpenGGF.BizHawk.Headless
                 "stored byte count");
             ValidateLowerHex(RequiredString(value,"stored_sha256"),64,
                 "stored digest");
+            RequireEqual("src/test/resources/audio/parity/"
+                +OverrideResumeFirstDivergencePublisher.BundleName,
+                RequiredString(value,"bundle_relative_root"),
+                "bundle relative root");
+            JArray inventory=RequiredArray(value,"bundle_member_inventory");
+            string[] expectedInventory={
+                "s1/s1-override-resume-reference.v1.jsonl.gz",
+                "s1/s1-override-resume-metadata.v1.json",
+                "s2/s2-override-resume-reference.v1.jsonl.gz",
+                "s2/s2-override-resume-metadata.v1.json"};
+            if(inventory.Count!=expectedInventory.Length)
+                throw Invalid("bundle member inventory is not exact");
+            for(int index=0;index<expectedInventory.Length;index++)
+                RequireEqual(expectedInventory[index],
+                    inventory[index].Type==JTokenType.String
+                        ?(string)inventory[index]:null,
+                    "bundle member inventory");
+            RequireEqual("linux-atomic-bundle-rename-noreplace-v1",
+                RequiredString(value,"publication_protocol"),
+                "publication protocol");
+            RequireEqual(OverrideResumeFirstDivergencePublisher
+                    .NamespaceStabilityPrecondition,
+                RequiredString(value,"namespace_lock_precondition"),
+                "namespace lock precondition");
+        }
+
+        /// <summary>
+        /// Revalidates the exact bytes reopened from the private publication
+        /// directory. This is deliberately byte-based: the publisher must not
+        /// trust the extractor's earlier in-memory validation after staging.
+        /// </summary>
+        internal static void ValidatePublishedGameBytes(string game,
+            byte[] stored,byte[] metadataBytes)
+        {
+            if(game!="s1"&&game!="s2")throw Invalid(
+                "published game must be s1 or s2");
+            if(stored==null||stored.Length<18||stored[0]!=0x1f
+                ||stored[1]!=0x8b||stored[2]!=8||stored[3]!=0
+                ||stored[4]!=0||stored[5]!=0||stored[6]!=0||stored[7]!=0
+                ||stored[9]!=255)
+                throw Invalid("published reference is not deterministic gzip");
+            byte[] logical;
+            try
+            {
+                using(var input=new MemoryStream(stored,false))
+                using(var gzip=new GZipStream(input,CompressionMode.Decompress))
+                using(var output=new MemoryStream())
+                {
+                    gzip.CopyTo(output);
+                    logical=output.ToArray();
+                }
+            }
+            catch(Exception exception)
+            {
+                throw new InvalidDataException(
+                    "published reference gzip is invalid",exception);
+            }
+            if(logical.Length==0||logical[logical.Length-1]!=10)
+                throw Invalid("published reference must be LF-terminated");
+            string logicalText=StrictUtf8(logical,"published reference");
+            if(logicalText.IndexOf('\n')!=logicalText.Length-1
+                ||logicalText.IndexOf('\r')>=0)
+                throw Invalid("published reference must contain one LF record");
+            JObject reference=ParseObject(logicalText.Substring(
+                0,logicalText.Length-1),"published reference");
+            ValidatePublishedReference(game,reference);
+
+            if(metadataBytes==null||metadataBytes.Length==0
+                ||metadataBytes[metadataBytes.Length-1]!=10)
+                throw Invalid("published metadata must be LF-terminated");
+            string metadataText=StrictUtf8(metadataBytes,
+                "published metadata");
+            if(metadataText.IndexOf('\n')!=metadataText.Length-1
+                ||metadataText.IndexOf('\r')>=0)
+                throw Invalid("published metadata must contain one LF record");
+            JObject metadata=ParseObject(metadataText.Substring(
+                0,metadataText.Length-1),"published metadata");
+            ValidatePublishedMetadata(game,metadata);
+            RequireEqual(1,RequiredInt(metadata,"record_count"),
+                "published record count");
+            RequireEqual(logical.LongLength,
+                RequiredLong(metadata,"logical_byte_count"),
+                "published logical byte count");
+            RequireEqual(Digest(logical),
+                RequiredString(metadata,"logical_sha256"),
+                "published logical digest");
+            RequireEqual(stored.LongLength,
+                RequiredLong(metadata,"stored_byte_count"),
+                "published stored byte count");
+            RequireEqual(Digest(stored),
+                RequiredString(metadata,"stored_sha256"),
+                "published stored digest");
         }
 
         private static void ValidateDigestPair(JArray value,string label)

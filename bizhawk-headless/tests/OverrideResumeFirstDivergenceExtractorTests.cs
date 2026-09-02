@@ -84,6 +84,18 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     (string)s1["schema"]);
                 AssertEx.Equal("s1", (string)s1["game"]);
                 AssertEx.Equal(2, ((JArray)s1["raw_sha256"]).Count);
+                AssertEx.Equal(
+                    "src/test/resources/audio/parity/"
+                    + "override-resume-first-divergence-v1",
+                    (string)s1["bundle_relative_root"]);
+                AssertEx.Equal(
+                    "linux-atomic-bundle-rename-noreplace-v1",
+                    (string)s1["publication_protocol"]);
+                AssertEx.Equal(4,
+                    ((JArray)s1["bundle_member_inventory"]).Count);
+                AssertEx.Equal(true,
+                    ((string)s1["namespace_lock_precondition"])
+                        .Contains("namespace-stable"));
                 string reference = Gunzip(first.S1.ReferenceGzip);
                 AssertEx.Equal(true, reference.EndsWith("\n",
                     StringComparison.Ordinal));
@@ -111,7 +123,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "attestation_sha256", "game", "logical_byte_count",
                     "logical_sha256", "raw_byte_count", "raw_sha256",
                     "record_count", "schema", "stored_byte_count",
-                    "stored_sha256");
+                    "stored_sha256", "bundle_relative_root",
+                    "bundle_member_inventory", "publication_protocol",
+                    "namespace_lock_precondition");
 
                 JObject s2Reference = JObject.Parse(
                     Gunzip(first.S2.ReferenceGzip));

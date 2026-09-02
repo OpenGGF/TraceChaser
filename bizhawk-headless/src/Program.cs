@@ -972,13 +972,21 @@ namespace BizHawk.Headless.Gpgx
                 {
                     OverrideResumePublisherCommandOptions options =
                         OverrideResumePublisherCommandOptions.Parse(args);
-                    new OverrideResumeFirstDivergencePublisher(
-                        new OverrideResumeFirstDivergenceExtractor(),
-                        new NoReplacePublisher()).Publish(options.Inputs,
-                            options.TracechaserRoot, options.InputRoot,
-                            options.FixtureRoot);
+                    OverrideResumeBundlePublicationResult publication =
+                        new OverrideResumeFirstDivergencePublisher(
+                            new OverrideResumeFirstDivergenceExtractor())
+                        .Publish(options.Inputs, options.TracechaserRoot,
+                            options.InputRoot, options.FixtureRoot);
+                    if (publication == OverrideResumeBundlePublicationResult
+                            .CommittedButDurabilityUnconfirmed)
+                    {
+                        Console.Out.WriteLine(
+                            "OVERRIDE_RESUME_FIRST_DIVERGENCE_COMMITTED_"
+                            + "BUT_DURABILITY_UNCONFIRMED");
+                        return 3;
+                    }
                     Console.Out.WriteLine(
-                        "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED");
+                        "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED_DURABLY");
                     return 0;
                 }
                 if (CompleteAudioCommandOptions.IsRequested(args))
