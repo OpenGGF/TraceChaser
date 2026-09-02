@@ -16,6 +16,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests define the closed raw-v2 contract",
                 DefinesClosedContract));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept the committed unbound candidate template",
+                AcceptCommittedUnboundCandidateTemplate));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests project the exact 750-row window deterministically",
                 ProjectsExactWindowDeterministically));
             tests.Add(new TestMain.TestCase(
@@ -27,6 +30,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject unknown raw fields and marker disagreement",
                 RejectUnknownRawFieldsAndMarkerDisagreement));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject non-contiguous native ordinals",
+                RejectNonContiguousNativeOrdinals));
             tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests preserve existing output and clean failed staging",
                 PreservesExistingOutputAndCleansFailedStaging));
@@ -45,6 +51,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             AssertEx.Equal("openggf.s2-oracle-audio-raw.v2",
                 S2RequestAwareOracleV2Extractor.OracleSchema);
+        }
+
+        private static void AcceptCommittedUnboundCandidateTemplate()
+        {
+            string path=Path.GetFullPath(Path.Combine(EndToEndTests.ToolDirectory,
+                "fixtures", "gpgx-audio-capability-s2-request-v3.template.json"));
+            S2RequestAwareOracleV2Extractor.ValidateCandidateTemplateForTesting(path);
         }
 
         private static void ProjectsExactWindowDeterministically()
@@ -145,6 +158,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     .ExtractForTesting(input.Raw, input.Capability, input.Attestation,
                         Path.Combine(root, "near-marker.jsonl")), "candidate");
             });
+        }
+
+        private static void RejectNonContiguousNativeOrdinals()
+        {
+            WithSyntheticInputs((root,input) => AssertRawRejection(input,root,lines =>
+            {
+                JObject frame=JObject.Parse(lines[4]);
+                ((JArray)frame["events"])[1]["ordinal"]=8;
+                lines[4]=Json(frame);
+            },"native ordinal"));
         }
 
         private static void PreservesExistingOutputAndCleansFailedStaging()
@@ -281,8 +304,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var lines = new List<string>();
             lines.Add(Json(new JObject { ["type"]="metadata",
                 ["schema"]="openggf.s2-complete-run-audio-raw.v3",
-                ["rom_sha1"]=new string('a',40), ["bk2_sha256"]=new string('b',64),
-                ["service_manifest_sha256"]=new string('c',64), ["first_row"]=10148,
+                ["rom_sha1"]="8bca5dcef1af3e00098666fd892dc1c2a76333f9", ["bk2_sha256"]="e850798f882b8c580aad148bc97cb50f260cae1d336dd649fe2f4dfae6796aa5",
+                ["service_manifest_sha256"]="ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0", ["first_row"]=10148,
                 ["exclusive_end"]=10900, ["state_start"]=0,
                 ["state_exclusive_end"]=0x2000, ["production_bound"]=false,
                 ["request_manifest_schema"]="openggf.s2-preconsumption-request-manifest.v1" }));
@@ -291,28 +314,27 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ["native_arm_epoch"]=1, ["native_armed"]=true,
                 ["active_services"]=new JArray(), ["pending_descendants"]=new JArray(),
                 ["row"]=10148 }));
-            int global = 0;
             for (int row = 10148; row < 10900; row++)
             {
                 var events = new JArray();
-                if (row == 10148) events.Add(Event(1, 3, 0, 0x22));
+                if (row == 10148) events.Add(Event(0, 3, 0, 0x22));
                 else if (row == 10149)
-                { events.Add(Event(2, 3, 2, 0x33)); events.Add(Event(3, 8, 0, 0)); }
-                else events.Add(Event((uint)(100 + row), 3, 1, 0x44));
+                { events.Add(Event(0, 3, 2, 0x33)); events.Add(Event(1, 8, 0, 0)); }
+                else events.Add(Event(0, 3, 1, 0x44));
                 var transfers = new JArray();
                 if (row == 10150)
                 {
-                    events.Add(Event(699, 3, 0, 0x99));
-                    events.Add(Event(700, 10, 24, 3, "16715808"));
-                    transfers.Add(Transfer(row, 0, global++, 0xB5, 3, 700,
+                    events.Add(Event(1, 3, 0, 0x99));
+                    events.Add(Event(2, 10, 24, 3, "16715808"));
+                    transfers.Add(Transfer(row, 0, 0, 0xB5, 3, 2,
                         "16715808"));
                 }
                 if (row == 10151)
                 {
-                    events.Add(Event(701, 10, 24, 3, "20"));
-                    events.Add(Event(702, 10, 24, 3, "21"));
-                    transfers.Add(Transfer(row, 0, global++, 1, 0, 701, "20"));
-                    transfers.Add(Transfer(row, 1, global++, 2, 1, 702, "21"));
+                    events.Add(Event(1, 10, 24, 3, "20"));
+                    events.Add(Event(2, 10, 24, 3, "21"));
+                    transfers.Add(Transfer(row, 0, 1, 1, 0, 1, "20"));
+                    transfers.Add(Transfer(row, 1, 2, 2, 1, 2, "21"));
                 }
                 lines.Add(Json(new JObject { ["type"]="frame", ["row"]=row,
                     ["lag"]=false, ["state_hex"]=state, ["events"]=events,
@@ -320,7 +342,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     ["request_transfers"]=transfers }));
             }
             lines.Add(Json(new JObject { ["type"]="cutoff", ["state_hex"]=state,
-                ["ym_port0_latch"]=0x22, ["ym_port1_latch"]=0x33,
+                ["ym_port0_latch"]=0x99, ["ym_port1_latch"]=0,
                 ["native_arm_epoch"]=1, ["native_armed"]=true,
                 ["active_services"]=new JArray(), ["pending_descendants"]=new JArray(),
                 ["exclusive_end"]=10900 }));
@@ -356,23 +378,25 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 }
                 else if((string)record["type"]=="cutoff")cutoff=record;
             }
-            return new JObject { ["schema"]="openggf.s2-request-aware-raw-v3-capability.v1",
-                ["production_bound"]=false, ["producer"]="s2-complete-audio-request-candidate",
-                ["rom_sha1"]=new string('a',40), ["bk2_sha256"]=new string('b',64),
-                ["service_manifest_sha256"]=new string('c',64),
-                ["candidate_manifest_sha256"]=new string('d',64),
-                ["harness_executable_sha256"]=new string('e',64),
-                ["first_row"]=10148, ["exclusive_end"]=10900,
-                ["window_first_row"]=10150, ["window_exclusive_end"]=10900,
-                ["base_event_count"]=baseCount, ["all_event_count"]=allCount,
-                ["marker_event_count"]=markerCount, ["request_count"]=requestCount,
-                ["base_event_sha256"]=Digest(baseBytes.ToArray()),
-                ["all_event_sha256"]=Digest(allBytes.ToArray()),
-                ["marker_event_sha256"]=Digest(markerBytes.ToArray()),
-                ["request_sha256"]=Digest(requestBytes.ToArray()),
-                ["max_request_occupancy"]=2,
-                ["cutoff_frontier_sha256"]=Digest(Canonical(cutoff)),
-                ["terminal_state_sha256"]=Digest(Encoding.UTF8.GetBytes(new string('0',0x4000))) };
+            JObject capability=JObject.Parse(File.ReadAllText(Path.Combine(
+                EndToEndTests.ToolDirectory,"fixtures",
+                "gpgx-audio-capability-s2-request-v3.template.json")));
+            // The friend-only seam derives every reviewed identity and digest
+            // domain from the committed candidate template. Only unavailable
+            // full-run inventory evidence is synthetic.
+            capability["harness_executable_sha256"]=Digest(raw);
+            capability["first_row"]=10148; capability["exclusive_end"]=10900;
+            capability["window_first_row"]=10150; capability["window_exclusive_end"]=10900;
+            capability["base_event_count"]=baseCount; capability["all_event_count"]=allCount;
+            capability["marker_event_count"]=markerCount; capability["request_count"]=requestCount;
+            capability["base_event_sha256"]=Digest(baseBytes.ToArray());
+            capability["all_event_sha256"]=Digest(allBytes.ToArray());
+            capability["marker_event_sha256"]=Digest(markerBytes.ToArray());
+            capability["request_sha256"]=Digest(requestBytes.ToArray());
+            capability["max_request_occupancy"]=2;
+            capability["cutoff_frontier_sha256"]=Digest(Canonical(cutoff));
+            capability["terminal_state_sha256"]=Digest(new byte[0x2000]);
+            return capability;
         }
 
         private static JObject Event(uint ordinal, int kind, int subject, int value,

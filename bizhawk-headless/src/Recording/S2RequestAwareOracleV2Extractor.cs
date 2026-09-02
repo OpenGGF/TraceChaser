@@ -26,14 +26,23 @@ namespace OpenGGF.BizHawk.Headless
         private const int DefaultSourceEnd = 259590;
         private const int DefaultWindowFirst = 10150;
         private const int DefaultWindowEnd = 10900;
+        private const string CandidateManifestSha256 =
+            "7fa043d51da88ac25a885ed371c55f33362a9af909c05b7807558643e1edc62e";
+        private const string CandidatePatchSha256 =
+            "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b";
+        private const string CandidateRecipeSha256 =
+            "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312";
+        private const string CandidateProfileSha256 =
+            "e955877eb60bc1ba7c281cc63bd3b9f7146e086cb14162dfaf09e38fae227719";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
+        private readonly bool syntheticTestSeam;
 
         internal S2RequestAwareOracleV2Extractor()
             : this(DefaultSourceFirst, DefaultSourceEnd,
-                DefaultWindowFirst, DefaultWindowEnd) { }
+                DefaultWindowFirst, DefaultWindowEnd, false) { }
 
         private S2RequestAwareOracleV2Extractor(int sourceStart, int sourceStop,
-            int windowStart, int windowStop)
+            int windowStart, int windowStop, bool testing)
         {
             if (sourceStart < 0 || sourceStop <= sourceStart
                 || windowStart <= sourceStart || windowStop > sourceStop
@@ -41,24 +50,35 @@ namespace OpenGGF.BizHawk.Headless
                 throw new ArgumentException("The S2 request-aware bounds are invalid.");
             sourceFirst = sourceStart; sourceEnd = sourceStop;
             windowFirst = windowStart; windowEnd = windowStop;
+            syntheticTestSeam=testing;
         }
 
         internal static S2RequestAwareOracleV2Extractor ForTesting(
             int sourceStart, int sourceStop, int windowStart, int windowStop)
         { return new S2RequestAwareOracleV2Extractor(sourceStart, sourceStop,
-            windowStart, windowStop); }
+            windowStart, windowStop, true); }
+
+        /// <summary>Friend-test validation of the committed candidate shape.
+        /// It deliberately does not create an extraction or publication route.</summary>
+        internal static void ValidateCandidateTemplateForTesting(string path)
+        {
+            var extractor=new S2RequestAwareOracleV2Extractor(
+                DefaultSourceFirst,DefaultSourceEnd,DefaultWindowFirst,
+                DefaultWindowEnd,true);
+            extractor.ValidateCapability(ReadObject(path,"capability"));
+        }
 
         /// <summary>Test-only synthetic projection; it accepts only an explicitly
         /// unbound capability and cannot establish capture authority.</summary>
         internal void ExtractForTesting(string rawPath, string capabilityPath,
             string attestationPath, string outputPath)
-        { Extract(rawPath, capabilityPath, attestationPath, outputPath, false); }
+        { Extract(rawPath, capabilityPath, attestationPath, outputPath); }
 
         private void Extract(string rawPath, string capabilityPath,
-            string attestationPath, string outputPath, bool production)
+            string attestationPath, string outputPath)
         {
             JObject capability = ReadObject(capabilityPath, "capability");
-            ValidateCapability(capability, false);
+            ValidateCapability(capability);
             JObject attestation = ReadObject(attestationPath, "attestation");
             string stagedWindow = StagePath(outputPath);
             try
@@ -97,12 +117,16 @@ namespace OpenGGF.BizHawk.Headless
             Require(Integer(metadata, "state_start") == 0
                 && Integer(metadata, "state_exclusive_end") == 0x2000,
                 "raw state range differs");
-            Require((bool?)metadata["production_bound"] == false,
+            Require(Boolean(metadata,"production_bound") == false,
                 "candidate raw must remain unbound");
             Require(String(metadata, "request_manifest_schema")
                 == "openggf.s2-preconsumption-request-manifest.v1",
                 "request manifest schema differs");
-            Require(String(metadata, "rom_sha1") == String(capability, "rom_sha1")
+            Require(String(metadata, "rom_sha1") == S2AudioObserverProfile.RomSha1
+                && String(metadata, "bk2_sha256") == S2AudioObserverProfile.MovieSha256
+                && String(metadata, "service_manifest_sha256")
+                    == S2AudioObserverProfile.ServiceManifestSha256
+                && String(metadata, "rom_sha1") == String(capability, "rom_sha1")
                 && String(metadata, "bk2_sha256") == String(capability, "bk2_sha256")
                 && String(metadata, "service_manifest_sha256")
                     == String(capability, "service_manifest_sha256"),
@@ -132,6 +156,9 @@ namespace OpenGGF.BizHawk.Headless
                         FileEvidence raw=rawInput.Finish();
                         ValidateCutoff(value, sourceEnd);
                         Require(expectedRow == sourceEnd, "raw is truncated");
+                        Require(Integer(value,"ym_port0_latch")==latch0
+                            && Integer(value,"ym_port1_latch")==latch1,
+                            "cutoff latches differ from folded events");
                         baseDigest.TransformFinalBlock(new byte[0], 0, 0);
                         allDigest.TransformFinalBlock(new byte[0], 0, 0);
                         markerDigest.TransformFinalBlock(new byte[0], 0, 0);
@@ -150,8 +177,7 @@ namespace OpenGGF.BizHawk.Headless
                         Require(Hex(Sha256(Canonical(value)))
                             == String(capability, "cutoff_frontier_sha256"),
                             "raw cutoff differs from capability");
-                        Require(Hex(Sha256(Encoding.UTF8.GetBytes(
-                            String(value, "state_hex"))))
+                        Require(Hex(Sha256(StateBytes(String(value, "state_hex"))))
                             == String(capability, "terminal_state_sha256"),
                             "raw terminal state differs from capability");
                         if (preceding == null || expectedRow != sourceEnd)
@@ -162,9 +188,12 @@ namespace OpenGGF.BizHawk.Headless
                     ValidateFrame(value, expectedRow);
                     JArray events = Array(value, "events");
                     var markers = new Dictionary<uint, JObject>();
+                    uint nativeOrdinal=0;
                     foreach (JToken token in events)
                     {
                         JObject evt = Object(token, "event"); ValidateEvent(evt);
+                        Require(Unsigned(evt,"ordinal")==nativeOrdinal++,
+                            "native ordinal is not zero-based contiguous");
                         byte[] eventBytes = Canonical(evt); allDigest.TransformBlock(
                             eventBytes, 0, eventBytes.Length, null, 0); allCount++;
                         if (MarkerCandidate(evt) && !Marker(evt))
@@ -275,6 +304,12 @@ namespace OpenGGF.BizHawk.Headless
                 "baseline row differs");
             State(value,"state_hex"); Byte(value,"ym_port0_latch");
             Byte(value,"ym_port1_latch");
+            if(!bounded)
+            {
+                Integer64(value,"native_arm_epoch"); Boolean(value,"native_armed");
+                ValidateServices(Array(value,"active_services"),"active services");
+                ValidateServices(Array(value,"pending_descendants"),"pending descendants");
+            }
         }
 
         private static void ValidateFrame(JObject value, int row)
@@ -286,8 +321,8 @@ namespace OpenGGF.BizHawk.Headless
             if (value["lag"] == null || value["lag"].Type != JTokenType.Boolean)
                 throw Invalid("frame lag differs");
             State(value,"state_hex");
-            if (value["override_resume"] == null || value["pcm"] == null)
-                throw Invalid("v2 frame envelope is incomplete");
+            ValidateOverrideResume(value["override_resume"]);
+            ValidatePcm(value["pcm"],row);
         }
 
         private static void ValidateEvent(JObject value)
@@ -299,7 +334,8 @@ namespace OpenGGF.BizHawk.Headless
             Unsigned(value,"offset"); Byte(value,"kind"); Byte(value,"service_kind");
             Byte(value,"depth"); Byte(value,"source_cpu"); Byte(value,"payload_length");
             Unsigned(value,"value"); Unsigned(value,"flags"); Unsigned(value,"reserved");
-            ulong parsed; if (!ulong.TryParse(String(value,"payload"), out parsed))
+            ulong parsed; if (!ulong.TryParse(String(value,"payload"), out parsed)
+                || String(value,"payload")!=parsed.ToString())
                 throw Invalid("event payload differs");
         }
 
@@ -313,14 +349,16 @@ namespace OpenGGF.BizHawk.Headless
             Require(Integer(value,"row")==row && Integer(value,"order")==order
                 && Integer(value,"global_transfer_ordinal")==global,
                 "request transfer order differs");
-            Require(Byte(value,"request") != 0 && Integer(value,"slot") <= 3
+            Require(Byte(value,"request") != 0 && Integer(value,"slot") >= 0
+                && Integer(value,"slot") <= 3
                 && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc
                 && Byte(value,"source_cpu")==S2PreconsumptionRequestObserver.MarkerSourceCpu
                 && Integer(value,"service_token")==S2PreconsumptionRequestObserver.MarkerServiceToken
                 && Byte(value,"service_kind")==S2PreconsumptionRequestObserver.MarkerServiceKind
                 && Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth,
                 "request transfer identity differs");
-            ulong a7; if (!ulong.TryParse(String(value,"a7"), out a7))
+            uint a7; if (!uint.TryParse(String(value,"a7"), out a7)
+                || String(value,"a7")!=a7.ToString())
                 throw Invalid("request transfer A7 differs");
             uint native = Unsigned(value,"native_ordinal");
             if (hasNative && native <= previousNative)
@@ -368,17 +406,96 @@ namespace OpenGGF.BizHawk.Headless
                 "active_services","pending_descendants","exclusive_end");
             Require(String(value,"type")=="cutoff" && Integer(value,"exclusive_end")==end,
                 "raw cutoff differs"); State(value,"state_hex");
+            Byte(value,"ym_port0_latch"); Byte(value,"ym_port1_latch");
+            Integer64(value,"native_arm_epoch"); Boolean(value,"native_armed");
+            ValidateServices(Array(value,"active_services"),"active services");
+            ValidateServices(Array(value,"pending_descendants"),"pending descendants");
         }
 
-        private void ValidateCapability(JObject value, bool production)
+        private static void ValidateOverrideResume(JToken value)
+        {
+            if(value==null)throw Invalid("v2 override envelope is incomplete");
+            if(value.Type==JTokenType.Null)return;
+            JObject resume=Object(value,"override resume");
+            Exact(resume,"override resume","request","admission","request_pc",
+                "pc","service_token","service_begin_ordinal","native_ordinal",
+                "frame","fix_driver_bugs","restores_saved_priority",
+                "restores_psg_noise","writes");
+            Require(String(resume,"request")=="cfFadeInToPrevious"
+                && String(resume,"admission")=="native_service_completion"
+                && Unsigned(resume,"request_pc")==0x0D35
+                && Unsigned(resume,"pc")==0x0DB4 && Integer(resume,"fix_driver_bugs")==0,
+                "override resume identity differs");
+            Unsigned(resume,"service_token"); Unsigned(resume,"service_begin_ordinal");
+            Unsigned(resume,"native_ordinal"); Integer(resume,"frame");
+            Boolean(resume,"restores_saved_priority"); Boolean(resume,"restores_psg_noise");
+            JArray writes=Array(resume,"writes"); Require(writes.Count>0,"override resume has no writes");
+            foreach(JToken write in writes) ValidateChip(Object(write,"override write"));
+        }
+
+        private static void ValidatePcm(JToken value,int row)
+        {
+            if(value==null)throw Invalid("v2 PCM envelope is incomplete");
+            if(value.Type==JTokenType.Null)return;
+            JObject pcm=Object(value,"PCM");
+            Exact(pcm,"PCM","selection","row","offset","sample_rate","channels",
+                "format","stereo_frames","byte_count","pcm_hex","sha256");
+            Require((String(pcm,"selection")=="service_frame" || String(pcm,"selection")=="following_row")
+                && Integer(pcm,"row")==row && Integer(pcm,"offset")>=0
+                && Integer(pcm,"sample_rate")>0 && Integer(pcm,"channels")==2
+                && String(pcm,"format")=="s16le-interleaved-stereo"
+                && Integer64(pcm,"stereo_frames")>=0 && Integer64(pcm,"byte_count")>=0,
+                "PCM identity differs");
+            HexData(String(pcm,"pcm_hex")); HexString(String(pcm,"sha256"));
+            Require(String(pcm,"pcm_hex").Length==Integer64(pcm,"byte_count")*2,
+                "PCM byte count differs");
+        }
+
+        private static void ValidateServices(JArray services,string label)
+        {
+            var seen=new HashSet<uint>();
+            foreach(JToken token in services)
+            {
+                JObject service=Object(token,label); Exact(service,label,"token","parent_token",
+                    "kind","depth","current_parent_token","current_depth","begin_coordinate",
+                    "begin_row","begin_native_ordinal","end_coordinate","begin_pc","end_pc",
+                    "begin_hook_token","end_hook_token","begin_source_cpu","cancelled","complete",
+                    "chips","snapshots","ancestry_transitions");
+                uint serviceToken=Unsigned(service,"token");
+                Require(seen.Add(serviceToken),label+" has duplicate service token");
+                Unsigned(service,"parent_token"); Byte(service,"kind"); Byte(service,"depth");
+                Unsigned(service,"current_parent_token"); Byte(service,"current_depth");
+                Integer64(service,"begin_coordinate"); Integer(service,"begin_row");
+                Unsigned(service,"begin_native_ordinal"); Integer64(service,"end_coordinate");
+                Unsigned(service,"begin_pc"); Unsigned(service,"end_pc"); Unsigned(service,"begin_hook_token");
+                Unsigned(service,"end_hook_token"); Byte(service,"begin_source_cpu");
+                Boolean(service,"cancelled"); Boolean(service,"complete");
+                foreach(JToken chip in Array(service,"chips")) ValidateChip(Object(chip,"chip"));
+                foreach(JToken snapshot in Array(service,"snapshots")) ValidateSnapshot(Object(snapshot,"snapshot"));
+                foreach(JToken transition in Array(service,"ancestry_transitions")) ValidateTransition(Object(transition,"ancestry transition"));
+            }
+        }
+
+        private static void ValidateChip(JObject value)
+        { Exact(value,"chip","coordinate","native_ordinal","event_kind","subject","value","pc","source_cpu","data","port","register");
+          Integer64(value,"coordinate");Unsigned(value,"native_ordinal");Byte(value,"event_kind");Unsigned(value,"subject");Unsigned(value,"value");Unsigned(value,"pc");Byte(value,"source_cpu");Boolean(value,"data");Byte(value,"port");Byte(value,"register"); }
+        private static void ValidateSnapshot(JObject value)
+        { Exact(value,"snapshot","range_id","source_cpu","pc","bytes_hex");Unsigned(value,"range_id");Byte(value,"source_cpu");Unsigned(value,"pc");HexData(String(value,"bytes_hex")); }
+        private static void ValidateTransition(JObject value)
+        { Exact(value,"ancestry transition","coordinate","native_ordinal","previous_parent_token","previous_depth","current_parent_token","current_depth","hook_token","source_cpu","pc");Integer64(value,"coordinate");Unsigned(value,"native_ordinal");Unsigned(value,"previous_parent_token");Byte(value,"previous_depth");Unsigned(value,"current_parent_token");Byte(value,"current_depth");Unsigned(value,"hook_token");Byte(value,"source_cpu");Unsigned(value,"pc"); }
+
+        private void ValidateCapability(JObject value)
         {
             Exact(value,"capability","schema","production_bound","producer",
                 "rom_sha1","bk2_sha256","service_manifest_sha256",
-                "candidate_manifest_sha256","harness_executable_sha256",
+                "candidate_manifest_sha256","candidate_patch_sha256",
+                "candidate_recipe_sha256","candidate_profile_sha256",
+                "harness_executable_sha256",
                 "first_row","exclusive_end","window_first_row","window_exclusive_end",
                 "base_event_count","all_event_count","marker_event_count","request_count",
                 "base_event_sha256","all_event_sha256","marker_event_sha256","request_sha256",
-                "max_request_occupancy","cutoff_frontier_sha256","terminal_state_sha256");
+                "max_request_occupancy","cutoff_frontier_sha256","terminal_state_sha256",
+                "digest_domains");
             Require(String(value,"schema")==CapabilitySchema
                 && String(value,"producer")=="s2-complete-audio-request-candidate"
                 && Integer(value,"first_row")==sourceFirst
@@ -386,14 +503,41 @@ namespace OpenGGF.BizHawk.Headless
                 && Integer(value,"window_first_row")==windowFirst
                 && Integer(value,"window_exclusive_end")==windowEnd,
                 "capability identity differs");
-            bool? bound=(bool?)value["production_bound"];
-            if (!bound.HasValue || (production ? !bound.Value : bound.Value))
-                throw Invalid(production ? "unbound capability cannot publish production output"
-                    : "synthetic extractor requires an unbound capability");
-            foreach(string name in new[]{"base_event_sha256","all_event_sha256",
-                "marker_event_sha256","request_sha256","cutoff_frontier_sha256",
-                "terminal_state_sha256","candidate_manifest_sha256",
-                "harness_executable_sha256"}) HexString(String(value,name));
+            Require(String(value,"rom_sha1")==S2AudioObserverProfile.RomSha1
+                && String(value,"bk2_sha256")==S2AudioObserverProfile.MovieSha256
+                && String(value,"service_manifest_sha256")==S2AudioObserverProfile.ServiceManifestSha256
+                && String(value,"candidate_manifest_sha256")==CandidateManifestSha256
+                && String(value,"candidate_patch_sha256")==CandidatePatchSha256
+                && String(value,"candidate_recipe_sha256")==CandidateRecipeSha256
+                && String(value,"candidate_profile_sha256")==CandidateProfileSha256,
+                "capability static identity differs");
+            Require(Boolean(value,"production_bound")==false,
+                "candidate capability must remain unbound");
+            foreach(string name in new[]{"candidate_manifest_sha256",
+                "candidate_patch_sha256","candidate_recipe_sha256",
+                "candidate_profile_sha256"}) HexString(String(value,name));
+            JObject domains=Object(value["digest_domains"],"digest domains");
+            Exact(domains,"digest domains","raw_sha256","event_and_request_sha256",
+                "cutoff_frontier_sha256","terminal_state_sha256");
+            Require(String(domains,"raw_sha256")=="raw-file-bytes-v1"
+                && String(domains,"event_and_request_sha256")=="compact-json-lf-v1"
+                && String(domains,"cutoff_frontier_sha256")=="compact-json-lf-v1"
+                && String(domains,"terminal_state_sha256")=="decoded-z80-state-bytes-v1",
+                "capability digest domains differ");
+            bool allUnbound=Null(value,"harness_executable_sha256")
+                && Null(value,"base_event_count") && Null(value,"all_event_count")
+                && Null(value,"marker_event_count") && Null(value,"request_count")
+                && Null(value,"base_event_sha256") && Null(value,"all_event_sha256")
+                && Null(value,"marker_event_sha256") && Null(value,"request_sha256")
+                && Null(value,"max_request_occupancy")
+                && Null(value,"cutoff_frontier_sha256")
+                && Null(value,"terminal_state_sha256");
+            if(allUnbound)return;
+            Require(syntheticTestSeam,"unbound candidate has no authenticated inventory");
+            foreach(string name in new[]{"harness_executable_sha256",
+                "base_event_sha256","all_event_sha256","marker_event_sha256",
+                "request_sha256","cutoff_frontier_sha256","terminal_state_sha256"})
+                HexString(String(value,name));
             if(Integer64(value,"base_event_count")<0 || Integer64(value,"all_event_count")<0
                 || Integer64(value,"marker_event_count")<0 || Integer64(value,"request_count")<0
                 || Integer(value,"max_request_occupancy")<0 || Integer(value,"max_request_occupancy")>4)
@@ -500,29 +644,50 @@ namespace OpenGGF.BizHawk.Headless
         {
             RequireExisting(path,label);
             using(var input=new StreamReader(File.OpenRead(path),new UTF8Encoding(false,true),false,65536))
-            { string line=ReadLine(input,label);if(input.ReadLine()!=null)throw Invalid(label+" has trailing record");return ParseLine(line,label); }
+            using(var reader=new JsonTextReader(input))
+            {
+                try
+                {
+                    JObject result=Object(JObject.Load(reader,new JsonLoadSettings {
+                        DuplicatePropertyNameHandling=DuplicatePropertyNameHandling.Error }),label);
+                    if(reader.Read())throw Invalid(label+" has trailing record");
+                    return result;
+                }
+                catch(InvalidDataException) { throw; }
+                catch(Exception error) { throw Invalid(label+" is not strict JSON",error); }
+            }
         }
         private static string ReadLine(StreamReader input,string label)
         { string line=input.ReadLine();if(line==null)throw Invalid(label+" ended early");return line; }
         private static JObject ParseLine(string line,string label)
-        { try{return Object(JObject.Parse(line),label);}catch(Exception error)
+        { try{using(var reader=new JsonTextReader(new StringReader(line)))
+          { return Object(JObject.Load(reader,new JsonLoadSettings {
+              DuplicatePropertyNameHandling=DuplicatePropertyNameHandling.Error }),label); }}catch(Exception error)
           {throw Invalid(label+" is not strict JSON",error);} }
         private static JObject Object(JToken value,string label)
         { JObject result=value as JObject;if(result==null)throw Invalid(label+" is not an object");return result; }
         private static JArray Array(JObject value,string name)
         { JArray result=value[name] as JArray;if(result==null)throw Invalid(name+" is not an array");return result; }
         private static string String(JObject value,string name)
-        { string result=(string)value[name];if(string.IsNullOrEmpty(result))throw Invalid("missing string: "+name);return result; }
+        { JToken token=value[name];if(token==null||token.Type!=JTokenType.String||string.IsNullOrEmpty((string)token))throw Invalid("missing string: "+name);return (string)token; }
+        private static bool Boolean(JObject value,string name)
+        { JToken token=value[name];if(token==null||token.Type!=JTokenType.Boolean)throw Invalid("missing boolean: "+name);return token.Value<bool>(); }
+        private static bool Null(JObject value,string name)
+        { JToken token=value[name];if(token==null)throw Invalid("missing property: "+name);return token.Type==JTokenType.Null; }
         private static int Integer(JObject value,string name)
-        { int? result=(int?)value[name];if(!result.HasValue)throw Invalid("missing integer: "+name);return result.Value; }
+        { JToken token=value[name];if(token==null||token.Type!=JTokenType.Integer)throw Invalid("missing integer: "+name);try{return token.Value<int>();}catch(Exception){throw Invalid("integer range differs: "+name);} }
         private static long Integer64(JObject value,string name)
-        { long? result=(long?)value[name];if(!result.HasValue)throw Invalid("missing integer: "+name);return result.Value; }
+        { JToken token=value[name];if(token==null||token.Type!=JTokenType.Integer)throw Invalid("missing integer: "+name);try{return token.Value<long>();}catch(Exception){throw Invalid("integer range differs: "+name);} }
         private static uint Unsigned(JObject value,string name)
-        { uint? result=(uint?)value[name];if(!result.HasValue)throw Invalid("missing unsigned integer: "+name);return result.Value; }
+        { JToken token=value[name];if(token==null||token.Type!=JTokenType.Integer)throw Invalid("missing unsigned integer: "+name);try{return token.Value<uint>();}catch(Exception){throw Invalid("unsigned range differs: "+name);} }
         private static byte Byte(JObject value,string name)
         { int result=Integer(value,name);if(result<0||result>255)throw Invalid(name+" is outside byte range");return (byte)result; }
         private static void State(JObject value,string name)
         { string state=String(value,name);if(state.Length!=0x4000)throw Invalid("state snapshot differs");for(int i=0;i<state.Length;i++)if(!Uri.IsHexDigit(state[i]))throw Invalid("state snapshot is not hex"); }
+        private static byte[] StateBytes(string state)
+        { if(state.Length!=0x4000)throw Invalid("state snapshot differs");var bytes=new byte[0x2000];for(int i=0;i<bytes.Length;i++){int high=Nibble(state[i*2]),low=Nibble(state[i*2+1]);bytes[i]=(byte)((high<<4)|low);}return bytes; }
+        private static int Nibble(char value)
+        { if(value>='0'&&value<='9')return value-'0';if(value>='a'&&value<='f')return value-'a'+10;throw Invalid("state snapshot is not lowercase hex"); }
         private static void Exact(JObject value,string label,params string[] names)
         { var expected=new HashSet<string>(names,StringComparer.Ordinal);if(value.Count!=expected.Count)throw Invalid(label+" has unknown or missing property");foreach(string name in names)if(value[name]==null)throw Invalid(label+" is missing property: "+name);foreach(JProperty property in value.Properties())if(!expected.Contains(property.Name))throw Invalid(label+" has unknown property: "+property.Name); }
         private static byte[] Canonical(JToken value)
@@ -533,6 +698,8 @@ namespace OpenGGF.BizHawk.Headless
         { var output=new StringBuilder(value.Length*2);foreach(byte item in value)output.Append(item.ToString("x2"));return output.ToString(); }
         private static void HexString(string value)
         { if(value.Length!=64)throw Invalid("digest length differs");for(int i=0;i<value.Length;i++)if(!Uri.IsHexDigit(value[i])||char.IsUpper(value[i]))throw Invalid("digest differs"); }
+        private static void HexData(string value)
+        { if((value.Length&1)!=0)throw Invalid("hex data length differs");for(int i=0;i<value.Length;i++)if(!Uri.IsHexDigit(value[i])||char.IsUpper(value[i]))throw Invalid("hex data differs"); }
         private static string StrictUtf8(byte[] value,string label)
         { try{return new UTF8Encoding(false,true).GetString(value);}catch(DecoderFallbackException error){throw Invalid(label+" is not strict UTF-8",error);} }
         private static void Write(TextWriter output,JObject value)

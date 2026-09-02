@@ -8,6 +8,7 @@
   "candidate_manifest_sha256": "7fa043d51da88ac25a885ed371c55f33362a9af909c05b7807558643e1edc62e",
   "candidate_patch_sha256": "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b",
   "candidate_recipe_sha256": "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312",
+  "candidate_profile_sha256": "e955877eb60bc1ba7c281cc63bd3b9f7146e086cb14162dfaf09e38fae227719",
   "harness_executable_sha256": null,
   "first_row": 769,
   "exclusive_end": 259590,
@@ -25,9 +26,9 @@
   "cutoff_frontier_sha256": null,
   "terminal_state_sha256": null,
   "digest_domains": {
-    "raw_sha256": "exact raw JSONL file bytes",
-    "event_and_request_sha256": "canonical-json-v1 compact record bytes followed by one LF per record",
-    "cutoff_frontier_sha256": "canonical-json-v1 compact cutoff record bytes followed by one LF",
-    "terminal_state_sha256": "decoded terminal Z80 state bytes (8192 bytes)"
+    "raw_sha256": "raw-file-bytes-v1",
+    "event_and_request_sha256": "compact-json-lf-v1",
+    "cutoff_frontier_sha256": "compact-json-lf-v1",
+    "terminal_state_sha256": "decoded-z80-state-bytes-v1"
   }
 }
