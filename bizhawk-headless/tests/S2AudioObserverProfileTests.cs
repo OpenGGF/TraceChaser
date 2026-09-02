@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless.Tests
@@ -46,10 +47,24 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void ConfiguresReviewedServiceGraph()
         {
+            string root = TestScratch.CreateRootPath("s2-audio-profile-current-harness");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string capabilityPath = Path.Combine(root, "capability.json");
+                string pinned = File.ReadAllText(
+                    Fixture("gpgx-audio-capability-v1.json"));
+                string pinnedExecutable = (string)JObject.Parse(pinned)
+                    ["task8_harness_executable_sha256"];
+                File.WriteAllText(capabilityPath, pinned.Replace(
+                    pinnedExecutable, Sha256File(typeof(GpgxHost).Assembly.Location)));
+                AssertEx.Equal(S2AudioObserverProfile.CapabilityTemplateSha256(
+                    Fixture("gpgx-audio-capability-v1.json")),
+                    S2AudioObserverProfile.CapabilityTemplateSha256(capabilityPath));
             var api = new RecordingTraceApi();
             CompleteRunAudioObserver observer = S2AudioObserverProfile.CreateObserver(
                 Fixture("gpgx-audio-service-manifests-v1.json"),
-                Fixture("gpgx-audio-capability-v1.json"), api);
+                capabilityPath, api);
 
             AssertEx.Equal(true, observer != null);
             AssertEx.Equal(1, api.ConfigureCalls);
@@ -76,7 +91,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             S2AudioObserverProfile.Capability capability =
                 S2AudioObserverProfile.LoadCapability(
                     Fixture("gpgx-audio-service-manifests-v1.json"),
-                    Fixture("gpgx-audio-capability-v1.json"));
+                    capabilityPath);
             AssertEx.Equal(259590, capability.Frames);
             AssertEx.Equal(169986419L, capability.Events);
             AssertEx.Equal(1825, capability.MaximumFrameOccupancy);
@@ -84,6 +99,23 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0, capability.PendingServicesAtCutoff);
             AssertEx.Equal("c2b2f82374aaa16144b6bf121df051dcd5b4ba095431c16cf6224adc633de41d",
                 capability.EventDigestSha256);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static string Sha256File(string path)
+        {
+            using (SHA256 hash = SHA256.Create())
+            {
+                byte[] bytes = hash.ComputeHash(File.ReadAllBytes(path));
+                var value = new System.Text.StringBuilder(bytes.Length * 2);
+                for (int index = 0; index < bytes.Length; index++)
+                    value.Append(bytes[index].ToString("x2"));
+                return value.ToString();
+            }
         }
 
         private static void RejectsRebuiltHarnessWithoutRefreshedAuthority()
