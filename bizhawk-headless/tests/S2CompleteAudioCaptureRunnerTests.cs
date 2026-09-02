@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless.Tests
@@ -38,6 +39,115 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     serial: true,
                     estimatedSeconds: 20.0));
             }
+            string requestOutput = Environment.GetEnvironmentVariable(
+                "OPENGGF_S2_REQUEST_RAW_V3_SMOKE_OUTPUT");
+            string requestMovie = Environment.GetEnvironmentVariable(
+                "OPENGGF_S2_REQUEST_BK2_PATH");
+            if (File.Exists(rom) && File.Exists(requestMovie)
+                && !string.IsNullOrEmpty(requestOutput))
+            {
+                tests.Add(new TestMain.TestCase(
+                    "S2CompleteAudioCaptureRunnerTests prove live unbound request raw-v3 window",
+                    () => ProvesLiveUnboundRequestRawV3Window(
+                        rom, requestMovie, requestOutput),
+                    game: "s2",
+                    movie: "s2-sonic-tails-complete-emeralds",
+                    kind: TestKind.Gate,
+                    serial: true,
+                    estimatedSeconds: 180.0));
+            }
+        }
+
+        private static void ProvesLiveUnboundRequestRawV3Window(
+            string romPath, string moviePath, string outputPath)
+        {
+            const int firstRow = 10150;
+            const int exclusiveEnd = 10900;
+            const string candidateCoreSha256 =
+                "aea422e8f98fda42a681310ce105dca177fe7ef7a14d415b5a0431b175a061b8";
+            if (!Path.IsPathRooted(outputPath) || File.Exists(outputPath))
+                throw new InvalidOperationException(
+                    "The live raw-v3 smoke output must be an absolute absent file.");
+            string home = Environment.GetEnvironmentVariable("BIZHAWK_HOME");
+            string core = Path.Combine(home ?? string.Empty,
+                "dll", "gpgx.wbx.zst");
+            AssertEx.Equal(candidateCoreSha256, Sha256File(core));
+            S2AudioObserverProfile.ValidateRom(romPath);
+            Bk2Movie movie = S2AudioObserverProfile.OpenMovie(moviePath);
+            string candidateManifest = Path.GetFullPath(Path.Combine(
+                EndToEndTests.ToolDirectory, "fixtures",
+                "gpgx-audio-service-manifest-s2-request-v3.json"));
+            string baseManifest = ManifestPath();
+
+            using (var host = new LiveRequestCandidateHost(
+                GpgxHost.Open(romPath, movie.SyncSettings)))
+            using (var writer = new StreamWriter(outputPath, false,
+                new UTF8Encoding(false)))
+            using (S2CompleteAudioCaptureRunner.RequestAwareRawV3Candidate
+                producer = S2CompleteAudioCaptureRunner
+                    .OpenRequestAwareRawV3CandidateForTesting(
+                        candidateManifest, baseManifest, host, writer,
+                        firstRow, exclusiveEnd))
+            using (IEnumerator<Bk2Frame> rows = movie.OpenFrameStream()
+                .GetEnumerator())
+            {
+                for (int row = 0; row < exclusiveEnd; row++)
+                {
+                    if (!rows.MoveNext())
+                        throw new InvalidDataException(
+                            "The truthful S2 BK2 ended before the smoke window.");
+                    try { producer.AdvanceRow(row, rows.Current); }
+                    catch (Exception error)
+                    {
+                        throw new InvalidOperationException(
+                            "The live request candidate failed at BK2 row "
+                            + row + ".", error);
+                    }
+                }
+                producer.Complete();
+            }
+
+            int frameCount = 0;
+            int requestCount = 0;
+            int lineCount = 0;
+            using (var reader = new StreamReader(outputPath,
+                new UTF8Encoding(false), false))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    JObject value = JObject.Parse(line);
+                    lineCount++;
+                    if ((string)value["type"] == "metadata")
+                    {
+                        AssertEx.Equal(
+                            "openggf.s2-complete-run-audio-raw.v3",
+                            (string)value["schema"]);
+                        AssertEx.Equal(false,
+                            (bool)value["production_bound"]);
+                        AssertEx.Equal(firstRow, (int)value["first_row"]);
+                        AssertEx.Equal(exclusiveEnd,
+                            (int)value["exclusive_end"]);
+                    }
+                    else if ((string)value["type"] == "frame")
+                    {
+                        frameCount++;
+                        requestCount += ((JArray)value[
+                            "request_transfers"]).Count;
+                    }
+                    else if ((string)value["type"] == "cutoff")
+                    {
+                        AssertEx.Equal(exclusiveEnd,
+                            (int)value["exclusive_end"]);
+                    }
+                }
+            }
+            AssertEx.Equal(exclusiveEnd - firstRow, frameCount);
+            AssertEx.Equal(exclusiveEnd - firstRow + 3, lineCount);
+            AssertEx.Equal(true, requestCount > 0);
+            Console.WriteLine("S2 unbound raw-v3 smoke: frames="
+                + frameCount + " requests=" + requestCount + " sha256="
+                + Sha256File(outputPath));
         }
 
         private static void DrainsPowerOnThenStreamsEveryComparisonRow()
@@ -222,6 +332,45 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "src", "test", "resources", "traces", "s2", "runs",
                 "s2-sonic-tails-complete-emeralds",
                 "sonic-2-sonic-tails-complete-emeralds.bk2");
+        }
+
+        private sealed class LiveRequestCandidateHost :
+            IS2RequestAwareRawV3CandidateHost,
+            IOverrideResumeDiagnosticAudioHost
+        {
+            private readonly GpgxHost inner;
+            private readonly GpgxS2CompleteAudioStateSource state;
+
+            internal LiveRequestCandidateHost(GpgxHost value)
+            {
+                inner = value ?? throw new ArgumentNullException("value");
+                state = new GpgxS2CompleteAudioStateSource(inner);
+            }
+
+            public int CompletedFrame { get { return inner.CompletedFrame; } }
+            public bool IsLagged { get { return inner.IsLagged; } }
+            public int LagCount { get { return inner.LagCount; } }
+            public int DiagnosticAudioSampleRate { get { return 44100; } }
+            public void ClearButtons() { inner.ClearButtons(); }
+            public void SetButton(string name, bool pressed)
+            { inner.SetButton(name, pressed); }
+            public IDisposable RegisterExecuteCallback(uint address,
+                Action callback)
+            { return inner.RegisterExecuteCallback(address, callback); }
+            public void Advance() { inner.Advance(); }
+            public byte ReadMainRamByte(int offset)
+            { return inner.ReadMainRamByte(offset); }
+            public uint ReadCpuRegister(string name)
+            { return inner.ReadCpuRegister(name); }
+            public byte[] CaptureDriverState()
+            { return state.CaptureDriverState(); }
+            public IGpgxAudioTraceApi CreateRequestCandidateAudioTraceApi()
+            { return inner.CreateAudioTraceApi(); }
+            public void AdvanceDiagnosticAudio()
+            { inner.AdvanceDiagnosticAudio(); }
+            public short[] DrainDiagnosticAudio(out int stereoFrames)
+            { return inner.DrainDiagnosticAudio(out stereoFrames); }
+            public void Dispose() { inner.Dispose(); }
         }
 
         private sealed class RecordingSink : IS2CompleteAudioCaptureSink

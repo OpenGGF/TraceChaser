@@ -28,8 +28,8 @@
     },
     {
       "file": "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch",
-      "sha256": "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b",
-      "role": "unbound fixed token-24 PC-0x10D6 candidate"
+      "sha256": "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099",
+      "role": "unbound fixed token-24/token-25 PC-0x10D6 candidate"
     }
   ],
   "versioned_inputs": {
@@ -42,10 +42,10 @@
     "bizhawk-headless/native/gpgx-audio-observer/selftest/m68k_boundary_harness.c": "2913214165e97724ea01aad772381810cdf6b801583bc74f19a85fb5add7de04",
     "bizhawk-headless/native/gpgx-audio-observer/selftest/shared.h": "7b884c4ebea3e4639f48070122e44df3c5cc03c8760e2502b60f210d61e144ce",
     "bizhawk-headless/native/gpgx-audio-observer/selftest/emulibc.h": "449757babbb19ef05cf3d6c859d5bdeba60124ff49a2e0695a28364886c4afc8",
-    "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch": "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b",
+    "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch": "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099",
     "bizhawk-headless/native/gpgx-audio-observer-candidates/run-s2-request-selftest.sh": "a65f7fc8859283d6f8980de1e40871c9651da4ce226f8895579444eb175fd5eb",
-    "bizhawk-headless/native/gpgx-audio-observer-candidates/s2_request_matrix_harness.c": "6c5bf78d3b33cbf2918fd1eb948079425fd02736b089e29a50f15079ec878c4c",
-    "bizhawk-headless/native/gpgx-audio-observer-candidates/s2_request_m68k_boundary_harness.c": "6d34aab4e73ce87e10c44a7c5182efdb136ebbce6be0fa7b7318468bdbaa2975"
+    "bizhawk-headless/native/gpgx-audio-observer-candidates/s2_request_matrix_harness.c": "5e79465466e450006bc5c611b14d1e730e5bb7fe16fffedb7a811b117a5ea9d3",
+    "bizhawk-headless/native/gpgx-audio-observer-candidates/s2_request_m68k_boundary_harness.c": "eee5b6069015c8a6523dca00554040f24d06764a729c345905b6668bf3cdfbb8"
   },
   "commands": [
     ["git", "apply", "--check", "--whitespace=error-all", "authenticated-base-patch"],

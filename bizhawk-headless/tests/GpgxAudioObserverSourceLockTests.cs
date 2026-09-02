@@ -42,7 +42,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ScriptsAreCreateNewAndFailClosed));
             tests.Add(new TestMain.TestCase(
                 "GpgxAudioObserverSourceLockTests secure runtime rejects ambient overrides",
-                SecureRuntimeRejectsAmbientOverrides));
+                SecureRuntimeRejectsAmbientOverrides,
+                serial: true));
+            tests.Add(new TestMain.TestCase(
+                "GpgxAudioObserverSourceLockTests reject mutable install script",
+                RejectsMutableInstallScript));
             tests.Add(new TestMain.TestCase(
                 "GpgxAudioObserverSourceLockTests canonical recipe and managed inputs are complete",
                 CanonicalRecipeAndManagedInputsAreComplete));
@@ -73,10 +77,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal("16.0.6-15", (string)toolchain["versions"]["clang"]);
             AssertEx.Equal("1.5.5", (string)toolchain["versions"]["zstd"]);
             AssertEx.Equal(
-                "7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307",
+                "2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885",
                 (string)toolchain["zstd"]["executable_sha256"]);
             AssertEx.Equal(
-                "57ea87848e924904cc3463e6a8b59c80eea62e22fe19f1c0d2c82c7bce33260a",
+                "fe413586670ba2649b2c0ee9479902ce17d6d0515dbc9ad65d83d2706b0a94a8",
                 (string)toolchain["build_recipe"]["sha256"]);
             AssertEx.Equal(
                 "c4231296ec5ba59b431df22b68e234ae7bfbbfc87b6e72fa471234ac1b220d12",
@@ -175,10 +179,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "9b8f89ee3105aad8b2a18805362677b6d983721e9d3706629359ddf7c9ec837b",
                 (string)toolchain["waterbox"]["libc_archive_sha256"]);
             AssertEx.Equal(
-                "36dde84c81429343b2f4425ff66c04f8fbdf54bcaf42a2459e68c52f95e9a0d4",
+                "496966a34a5f6f4bd7bd16434c359fe85d1f94318a6d469d2470d566ab64215b",
                 (string)toolchain["build_recipe"]["verified_input_identity_sha256"]);
             AssertEx.Equal(
-                "9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521",
+                "5faae28cb6b2f22f5bcfca545518e112cf227ea2c72847c9cd30658f02f813b9",
                 (string)toolchain["build_recipe"]["complete_toolchain_tree_sha256"]);
         }
 
@@ -244,7 +248,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string prepareScript = File.ReadAllText(Path.Combine(observerRoot, "prepare-toolchain.sh"));
             string verifyScript = File.ReadAllText(Path.Combine(observerRoot, "verify-inputs.sh"));
             const string completeToolchainTree =
-                "9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521";
+                "5faae28cb6b2f22f5bcfca545518e112cf227ea2c72847c9cd30658f02f813b9";
             AssertEx.Equal(true, prepareScript.Contains(completeToolchainTree));
             AssertEx.Equal(true, verifyScript.Contains(completeToolchainTree));
             foreach (string script in new[] { "fetch-source.sh", "prepare-toolchain.sh",
@@ -480,6 +484,59 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
                 }
                 File.AppendAllText(Path.Combine(scratch, "verify-inputs.sh"), "# mutation\n");
+                AssertEx.Equal(false,
+                    Run("secure-runtime.sh", "verify-recipe", scratch).ExitCode == 0);
+            }
+            finally
+            {
+                if (Directory.Exists(scratch))
+                {
+                    Directory.Delete(scratch, true);
+                }
+            }
+        }
+
+        private static void RejectsMutableInstallScript()
+        {
+            string root = Path.Combine(EndToEndTests.ToolDirectory, ObserverDirectory);
+            string scratch = TestScratch.CreateRootPath("gpgx-install-recipe");
+            try
+            {
+                Directory.CreateDirectory(scratch);
+                foreach (string file in Directory.GetFiles(root))
+                {
+                    File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
+                }
+
+                string recipePath = Path.Combine(scratch, "build-recipe.json");
+                JObject recipe = JObject.Parse(File.ReadAllText(recipePath));
+                foreach (JProperty item in
+                    ((JObject)recipe["trust_root"]["executables"]).Properties())
+                {
+                    item.Value = Sha256(item.Name);
+                }
+                foreach (JProperty item in
+                    ((JObject)recipe["trust_root"]["system_files"]).Properties())
+                {
+                    item.Value = Sha256(item.Name);
+                }
+                File.WriteAllText(recipePath, recipe.ToString() + "\n");
+
+                string toolchainPath = Path.Combine(scratch, "toolchain-lock.json");
+                JObject toolchain = JObject.Parse(File.ReadAllText(toolchainPath));
+                toolchain["build_recipe"]["sha256"] = Sha256(recipePath);
+                File.WriteAllText(toolchainPath, toolchain.ToString() + "\n");
+
+                ProcessResult normalized =
+                    Run("secure-runtime.sh", "verify-recipe", scratch);
+                if (normalized.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Normalized recipe verification failed: "
+                        + normalized.Stderr);
+                }
+                File.AppendAllText(Path.Combine(scratch, "install-core.sh"),
+                    "# mutation\n");
                 AssertEx.Equal(false,
                     Run("secure-runtime.sh", "verify-recipe", scratch).ExitCode == 0);
             }

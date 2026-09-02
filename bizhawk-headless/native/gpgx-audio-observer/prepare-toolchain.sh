@@ -80,10 +80,10 @@ while read -r expected executable; do
   printf '%s  %s\n' "$expected" "$executable" | sha256sum -c - >/dev/null || fail "wrong host build executable: $executable"
 done <<'LOCKED_HOST_TOOLS'
 0052cc9e1280ad0874744623d7241afa01f689be9c0d627056876bb254af5c51 /usr/bin/make
-69c93ee96fe89de9a071010905786a48c136fbabcdafff2fbd5bc4f2d7866f84 /usr/bin/ar
-23fad77931641e49fc9f6ca955796f1713436b4c00d1da871786f11af460c462 /usr/bin/tar
-ed4c733407f4a77de4e4e35a89e8575f4efe04823ec07495a02c99a9169baf8b /usr/bin/gcc
-eabbccb0f7f755b96d30834026a9b5d941c606400d097d87c1ff16622edaf68c /usr/bin/bwrap
+0c1aceed56dde02eeed19228a4ba712f5e5d571bc7efb84f94960dd191b66656 /usr/bin/ar
+326bb5548b0a17ea3922a928634f141d0ac75d714edf08c096f0659bd90449f7 /usr/bin/tar
+c348a945846fa0e76c17c4df61f326b5323b5b527f432abb1f1f5ed787e2e68a /usr/bin/gcc
+c80a86dbf86f4e855e99139b77024725636037d690ef0ac30e398f2272bfcd51 /usr/bin/bwrap
 LOCKED_HOST_TOOLS
 while read -r expected library; do
   printf '%s  %s\n' "$expected" "$library" | sha256sum -c - >/dev/null || fail "wrong zstd build library: $library"
@@ -91,8 +91,8 @@ done <<'LOCKED_ZSTD_LIBRARIES'
 2a252a45a28d93ca2e6a7d2662f6cef5cfa666c9da2f8cfbc90bc521c45a03c5 /usr/lib/libz.so.1
 901c835bf040bb531c1801d9e9400cf1181c27db708f9634ca33941e5fd5f0d5 /usr/lib/liblzma.so.5
 2999ba4a7587726402b0ecd4ea970ba6da9bd4ac93f1e63a26d948e37abdf9b5 /usr/lib/liblz4.so.1
-4804f1729b20c523cd1cc84034a38c80f83db72645c1366bfa2e300e112f193f /usr/lib/libc.so.6
-97c4ef84e2abe44c1ab1f37753f259b00b3f73574fe711b6a123e5fe75ae6b7c /usr/lib64/ld-linux-x86-64.so.2
+4c8eb6d2e4c3459f5100e44330067db455b7cb873742d8d8f820ee5d6a142080 /usr/lib/libc.so.6
+68a643913f9499e5a4986b793c202da085e7583714357c244a70727c57bbdb24 /usr/lib64/ld-linux-x86-64.so.2
 LOCKED_ZSTD_LIBRARIES
 
 for package in "$packages_dir"/*.deb; do
@@ -119,7 +119,7 @@ if ! env -i PATH=/usr/bin:/bin LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=1758367997 \
   tail -200 "$stage/zstd-build.log" >&2
   fail "zstd build failed"
 fi
-printf '%s  %s\n' 7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307 "$stage/zstd-1.5.5/programs/zstd" | sha256sum -c - >/dev/null || fail "zstd build is not the locked binary"
+printf '%s  %s\n' 2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885 "$stage/zstd-1.5.5/programs/zstd" | sha256sum -c - >/dev/null || fail "zstd build is not the locked binary"
 
 rm -rf -- "$stage/work-source/waterbox/sysroot" "$stage/work-source/waterbox/emulibc/obj"
 git -C "$stage/work-source/waterbox/musl" clean -ffdx >/dev/null
@@ -170,7 +170,7 @@ complete_tree_digest=$(
     fi
   done | sha256sum | cut -d' ' -f1
 )
-[[ "$complete_tree_digest" = 9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521 ]] \
+[[ "$complete_tree_digest" = 5faae28cb6b2f22f5bcfca545518e112cf227ea2c72847c9cd30658f02f813b9 ]] \
   || fail "complete toolchain tree differs: $complete_tree_digest"
 
 secure_publish_create_new "$stage" "$output"

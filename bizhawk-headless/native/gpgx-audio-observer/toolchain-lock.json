@@ -54,7 +54,7 @@
   },
   "zstd": {
     "executable_size": 1302704,
-    "executable_sha256": "7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307"
+    "executable_sha256": "2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885"
   },
   "environment": {
     "LC_ALL": "C",
@@ -66,9 +66,9 @@
   "build_recipe": {
     "encoding": "UTF-8 LF",
     "file": "build-recipe.json",
-    "sha256": "57ea87848e924904cc3463e6a8b59c80eea62e22fe19f1c0d2c82c7bce33260a",
-    "verified_input_identity_sha256": "36dde84c81429343b2f4425ff66c04f8fbdf54bcaf42a2459e68c52f95e9a0d4",
-    "complete_toolchain_tree_sha256": "9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521"
+    "sha256": "fe413586670ba2649b2c0ee9479902ce17d6d0515dbc9ad65d83d2706b0a94a8",
+    "verified_input_identity_sha256": "496966a34a5f6f4bd7bd16434c359fe85d1f94318a6d469d2470d566ab64215b",
+    "complete_toolchain_tree_sha256": "5faae28cb6b2f22f5bcfca545518e112cf227ea2c72847c9cd30658f02f813b9"
   },
   "negative_controls": {
     "clang18_decompressed_size": 4026152,

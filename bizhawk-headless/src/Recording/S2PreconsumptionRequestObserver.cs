@@ -23,9 +23,11 @@ namespace OpenGGF.BizHawk.Headless
     {
         internal const uint Pc = 0x0010D6;
         internal const ushort MarkerToken = 24;
+        internal const ushort Kind3MarkerToken = 25;
         internal const byte MarkerSourceCpu = 2;
         internal const ushort MarkerServiceToken = 0;
         internal const byte MarkerServiceKind = 0;
+        internal const byte Kind3MarkerServiceKind = 3;
         internal const byte MarkerDepth = 0;
         private const int MaximumTransfersPerRow = 4;
 
@@ -114,6 +116,7 @@ namespace OpenGGF.BizHawk.Headless
                 throw new ArgumentOutOfRangeException("expectedExclusiveEnd");
             if (candidate.Pc != Pc || candidate.Opcode != "13801009"
                 || candidate.MarkerToken != MarkerToken
+                || candidate.Kind3MarkerToken != Kind3MarkerToken
                 || candidate.ProductionBound)
                 throw new InvalidDataException(
                     "The S2 request candidate cannot select a different hook or authority state.");
@@ -221,14 +224,11 @@ namespace OpenGGF.BizHawk.Headless
                     throw new InvalidOperationException(
                         "The S2 request marker predates its callback successor boundary.");
                 if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc
-                    || value.Subject != MarkerToken || value.PayloadLength != 4)
+                    || value.PayloadLength != 4)
                     throw new InvalidOperationException(
                         "The S2 request next marker is not its exact fixed action-7 record.");
                 if (value.SourceCpu != MarkerSourceCpu
-                    || value.ServiceToken != MarkerServiceToken
-                    || value.ParentToken != MarkerServiceToken
-                    || value.ServiceKindId != MarkerServiceKind
-                    || value.Depth != MarkerDepth)
+                    || !HasReviewedMarkerOwner(value))
                     throw new InvalidOperationException(
                         "The S2 request marker source/owner differs.");
                 pending.Dequeue();
@@ -250,7 +250,23 @@ namespace OpenGGF.BizHawk.Headless
         private static bool IsFixedMarkerCandidate(GpgxAudioTraceEvent value)
         {
             return value.Subject == MarkerToken
+                || value.Subject == Kind3MarkerToken
                 || (value.Kind == 10 && value.Value == 3 && value.Pc == Pc);
+        }
+
+        private static bool HasReviewedMarkerOwner(GpgxAudioTraceEvent value)
+        {
+            bool root = value.Subject == MarkerToken
+                && value.ServiceToken == MarkerServiceToken
+                && value.ParentToken == MarkerServiceToken
+                && value.ServiceKindId == MarkerServiceKind
+                && value.Depth == MarkerDepth;
+            bool kind3 = value.Subject == Kind3MarkerToken
+                && value.ServiceToken != MarkerServiceToken
+                && value.ParentToken == MarkerServiceToken
+                && value.ServiceKindId == Kind3MarkerServiceKind
+                && value.Depth == MarkerDepth;
+            return root || kind3;
         }
 
         private void OnTransfer()

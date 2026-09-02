@@ -55,6 +55,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests accept bytes from the closed raw-v3 producer",
                 AcceptsBytesFromClosedRawV3Producer));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept the reviewed kind-3 request topology",
+                AcceptsReviewedKind3RequestTopology));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject every other request topology",
+                RejectsEveryOtherRequestTopology));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests accept producer following-row PCM",
                 AcceptsProducerFollowingRowPcm));
             tests.Add(new TestMain.TestCase(
@@ -99,6 +105,24 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             string path=Path.GetFullPath(Path.Combine(EndToEndTests.ToolDirectory,
                 "fixtures", "gpgx-audio-capability-s2-request-v3.template.json"));
+            JObject template=JObject.Parse(File.ReadAllText(path));
+            AssertEx.Equal(Digest(File.ReadAllBytes(Fixture(
+                "gpgx-audio-service-manifest-s2-request-v3.json"))),
+                (string)template["candidate_manifest_sha256"]);
+            AssertEx.Equal(Digest(File.ReadAllBytes(Path.Combine(
+                EndToEndTests.ToolDirectory,"native",
+                "gpgx-audio-observer-candidates",
+                "0001-s2-request-successor-ordinal.patch"))),
+                (string)template["candidate_patch_sha256"]);
+            AssertEx.Equal(Digest(File.ReadAllBytes(Path.Combine(
+                EndToEndTests.ToolDirectory,"native",
+                "gpgx-audio-observer-candidates",
+                "s2-request-selftest-recipe.json"))),
+                (string)template["candidate_recipe_sha256"]);
+            AssertEx.Equal(Digest(File.ReadAllBytes(Path.Combine(
+                EndToEndTests.ToolDirectory,"src","Recording",
+                "S2PreconsumptionRequestProfile.cs"))),
+                (string)template["candidate_profile_sha256"]);
             S2RequestAwareOracleV2Extractor.ValidateCandidateTemplateForTesting(path);
         }
 
@@ -479,6 +503,96 @@ namespace OpenGGF.BizHawk.Headless.Tests
             }
         }
 
+        private static void AcceptsReviewedKind3RequestTopology()
+        {
+            byte[] raw=ProducerRaw(false,true,true,false,true);
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-kind3-extractor");
+            try
+            {
+                Directory.CreateDirectory(root);
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        1,4,2,3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"kind3.raw.jsonl"),
+                    Capability=Path.Combine(root,"kind3.capability.json"),
+                    Attestation=Path.Combine(root,"kind3.attestation.json") };
+                File.WriteAllBytes(input.Raw,raw);
+                WriteAuthority(input,Capability(raw,2,3),raw);
+                string output=Path.Combine(root,"window.jsonl");
+                input.Extractor.ExtractForTesting(input.Raw,input.Capability,
+                    input.Attestation,output);
+                AssertEx.Equal(true,File.Exists(output));
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
+        private static void RejectsEveryOtherRequestTopology()
+        {
+            byte[] kind3=ProducerRaw(false,true,true,false,true);
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["subject"]=
+                    S2PreconsumptionRequestObserver.MarkerToken),"topology");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["parent_token"]=1),"topology");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,4,2,0)),"topology");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,4,3,1)),"topology");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,0,0,0)),"topology");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>transfer["service_token"]=5),"owner");
+            AssertProducerRawRejection(kind3,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["subject"]=26),"candidate");
+
+            byte[] root=ProducerRaw();
+            AssertProducerRawRejection(root,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["subject"]=
+                    S2PreconsumptionRequestObserver.Kind3MarkerToken),
+                "topology");
+            AssertProducerRawRejection(root,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,4,3,0)),
+                "topology");
+        }
+
+        private static void MutateRequest(string[] lines,
+            Action<JObject,JObject> mutate)
+        {
+            for(int lineIndex=0;lineIndex<lines.Length;lineIndex++)
+            {
+                JObject frame=JObject.Parse(lines[lineIndex]);
+                if((string)frame["type"]!="frame")continue;
+                JArray events=(JArray)frame["events"];
+                foreach(JToken token in events)
+                {
+                    JObject marker=(JObject)token;
+                    if((int)marker["kind"]!=10
+                        ||(int)marker["pc"]!=0x10D6)continue;
+                    JObject transfer=(JObject)((JArray)
+                        frame["request_transfers"])[0];
+                    mutate(marker,transfer);
+                    lines[lineIndex]=Json(frame);
+                    return;
+                }
+            }
+            throw new InvalidOperationException("missing request marker");
+        }
+
+        private static void SetOwner(JObject marker,JObject transfer,
+            int token,int kind,int depth)
+        {
+            marker["service_token"]=token;
+            marker["service_kind"]=kind;
+            marker["depth"]=depth;
+            transfer["service_token"]=token;
+            transfer["service_kind"]=kind;
+            transfer["depth"]=depth;
+            JObject owner=(JObject)transfer["active_service_owner"];
+            owner["token"]=token;owner["kind"]=kind;owner["depth"]=depth;
+        }
+
         private static byte[] ProducerRaw()
         { return ProducerRaw(false, true); }
 
@@ -492,7 +606,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static byte[] ProducerRaw(bool followingRowPcm,
             bool includePostResetArmProof,bool includePostResetZ80,
-            bool repeatResetAndArm)
+            bool repeatResetAndArm,bool kind3Request=false)
         {
             var api = new ProducerTraceApi();
             var host = new ProducerHost(api);
@@ -513,9 +627,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 candidate.AdvanceRow(1, new Bk2Frame());
 
                 const uint a7 = 0x00FF1020;
-                api.Events = RequestAndOpenServiceEvents(a7,
-                    includePostResetArmProof,includePostResetZ80);
-                api.SuccessorOrdinal = 19;
+                api.Events = kind3Request
+                    ?RequestInsideRootKind3Events(a7)
+                    :RequestAndOpenServiceEvents(a7,
+                        includePostResetArmProof,includePostResetZ80);
+                api.SuccessorOrdinal = kind3Request
+                    ?FindMarkerOrdinal(api.Events):19;
                 host.Set("M68K D0", 0xB5);
                 host.Set("M68K D1", 3);
                 host.Set("M68K A7", a7);
@@ -1309,6 +1426,37 @@ namespace OpenGGF.BizHawk.Headless.Tests
             return values.ToArray();
         }
 
+        private static GpgxAudioTraceEvent[] RequestInsideRootKind3Events(
+            uint a7)
+        {
+            var values=new List<GpgxAudioTraceEvent>();
+            AddResumeCompletionEvents(values);
+            AddOneByteSnapshot(values,2,0,4,0,432,1);
+            values.Add(Native(values.Count,2,2,0,432,6,0,4,0,1));
+            values.Add(Native(values.Count,8,2,0,0,0,0,1,0,3));
+            AddOneByteSnapshot(values,2,0,1,0,0,3);
+            values.Add(Native(values.Count,9,2,0,0,0,0,1,0,3));
+            AddUploadProofEvents(values,3);
+            values.Add(Native(values.Count,1,4,0,56,1,0,3,0,1));
+            GpgxAudioTraceEvent marker=Native(values.Count,10,4,0,
+                S2PreconsumptionRequestObserver.Pc,
+                S2PreconsumptionRequestObserver.Kind3MarkerToken,
+                0,3,0,2,4);
+            marker.Value=3;marker.Payload=a7;values.Add(marker);
+            AddOneByteSnapshot(values,4,0,3,0,231,1);
+            values.Add(Native(values.Count,2,4,0,231,3,0,3,0,1));
+            return values.ToArray();
+        }
+
+        private static uint FindMarkerOrdinal(
+            IEnumerable<GpgxAudioTraceEvent> events)
+        {
+            foreach(GpgxAudioTraceEvent value in events)
+                if(value.Kind==10&&value.Pc==S2PreconsumptionRequestObserver.Pc)
+                    return value.Ordinal;
+            throw new InvalidOperationException("missing request marker");
+        }
+
         private static GpgxAudioTraceEvent[] ResetAndRearmEvents()
         {
             var values=new List<GpgxAudioTraceEvent>();
@@ -1619,8 +1767,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     {
                         JObject evt=(JObject)token; byte[] bytes=Canonical(evt);
                         allBytes.AddRange(bytes);allCount++;
+                        int subject=(int)evt["subject"];
                         bool marker=(int)evt["kind"]==10&&(int)evt["value"]==3
-                            &&(int)evt["pc"]==0x10D6&&(int)evt["subject"]==24;
+                            &&(int)evt["pc"]==0x10D6
+                            &&(subject==S2PreconsumptionRequestObserver.MarkerToken
+                                ||subject==S2PreconsumptionRequestObserver
+                                    .Kind3MarkerToken);
                         if(marker){markerBytes.AddRange(bytes);markerCount++;}
                         else {baseBytes.AddRange(bytes);baseCount++;}
                     }

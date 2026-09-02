@@ -15,24 +15,26 @@ namespace OpenGGF.BizHawk.Headless
         internal const string CandidateNativePatchFile =
             "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch";
         internal const string CandidateNativePatchSha256 =
-            "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b";
+            "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099";
         internal const string CandidateNativeRecipeFile =
             "bizhawk-headless/native/gpgx-audio-observer-candidates/s2-request-selftest-recipe.json";
         internal const string CandidateNativeRecipeSha256 =
-            "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312";
+            "39f4f96c04a8b924921ef136bb85f8b402fa443b025f4189ff1f7c386f07feb3";
 
         internal sealed class Candidate
         {
             internal Candidate(uint pc, string opcode, ushort markerToken,
-                bool productionBound)
+                ushort kind3MarkerToken, bool productionBound)
             {
                 Pc = pc; Opcode = opcode; MarkerToken = markerToken;
+                Kind3MarkerToken = kind3MarkerToken;
                 ProductionBound = productionBound;
             }
 
             internal uint Pc { get; private set; }
             internal string Opcode { get; private set; }
             internal ushort MarkerToken { get; private set; }
+            internal ushort Kind3MarkerToken { get; private set; }
             internal bool ProductionBound { get; private set; }
 
             internal void RequireProductionAuthority()
@@ -76,22 +78,28 @@ namespace OpenGGF.BizHawk.Headless
                 || RequiredString(transfer, "opcode") != "13801009"
                 || (int?)transfer["native_action"] != 7
                 || (int?)transfer["marker_event_kind"] != 10
-                || (int?)transfer["marker_value"] != 3
-                || (ushort?)transfer["marker_token"]
-                    != S2PreconsumptionRequestObserver.MarkerToken)
+                || (int?)transfer["marker_value"] != 3)
                 throw new InvalidDataException(
                     "The S2 request candidate fixed hook identity differs.");
-            JArray kinds = transfer["marker_expected_kinds"] as JArray;
-            if (kinds == null || kinds.Count != 1 || (int?)kinds[0] != 0)
+            if (transfer.Property("marker_token") != null
+                || transfer.Property("marker_expected_kinds") != null)
                 throw new InvalidDataException(
-                    "The S2 request candidate marker topology differs.");
+                    "The S2 request candidate marker token map has an ambiguous legacy field.");
+            JArray markers = transfer["marker_tokens_by_expected_kind"] as JArray;
+            if (markers == null || markers.Count != 2
+                || !IsExactMarker(markers[0] as JObject, 0,
+                    S2PreconsumptionRequestObserver.MarkerToken)
+                || !IsExactMarker(markers[1] as JObject, 3,
+                    S2PreconsumptionRequestObserver.Kind3MarkerToken))
+                throw new InvalidDataException(
+                    "The S2 request candidate marker token map differs.");
             RequireEqual("docs/s2disasm/s2.asm",
                 RequiredString(transfer, "source_file"), "source file");
             RequireEqual("sndDriverInput accepted M68K-to-Z80 transfer",
                 RequiredString(transfer, "source_label"), "source label");
             return new Candidate(S2PreconsumptionRequestObserver.Pc,
                 "13801009", S2PreconsumptionRequestObserver.MarkerToken,
-                false);
+                S2PreconsumptionRequestObserver.Kind3MarkerToken, false);
         }
 
         /// <summary>
@@ -110,6 +118,8 @@ namespace OpenGGF.BizHawk.Headless
                 || candidate.Opcode != "13801009"
                 || candidate.MarkerToken
                     != S2PreconsumptionRequestObserver.MarkerToken
+                || candidate.Kind3MarkerToken
+                    != S2PreconsumptionRequestObserver.Kind3MarkerToken
                 || candidate.ProductionBound)
                 throw new InvalidDataException(
                     "The S2 request candidate fixed hook profile differs.");
@@ -149,6 +159,20 @@ namespace OpenGGF.BizHawk.Headless
             if (string.IsNullOrEmpty(result)) throw new InvalidDataException(
                 "The S2 request candidate field is missing: " + name + ".");
             return result;
+        }
+
+        private static bool IsExactMarker(JObject value,
+            int expectedActiveKind, ushort markerToken)
+        {
+            if (value == null || value.Count != 2
+                || value.Property("expected_active_kind") == null
+                || value.Property("marker_token") == null)
+                return false;
+            foreach (JProperty property in value.Properties())
+                if (property.Name != "expected_active_kind"
+                    && property.Name != "marker_token") return false;
+            return (int?)value["expected_active_kind"] == expectedActiveKind
+                && (ushort?)value["marker_token"] == markerToken;
         }
 
         private static void RequireEqual(string expected, string actual,

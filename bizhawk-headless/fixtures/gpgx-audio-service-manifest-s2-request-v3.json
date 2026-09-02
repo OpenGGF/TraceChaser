@@ -3,9 +3,9 @@
   "production_bound": false,
   "base_service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
   "candidate_native_patch_file": "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch",
-  "candidate_native_patch_sha256": "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b",
+  "candidate_native_patch_sha256": "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099",
   "candidate_native_recipe_file": "bizhawk-headless/native/gpgx-audio-observer-candidates/s2-request-selftest-recipe.json",
-  "candidate_native_recipe_sha256": "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312",
+  "candidate_native_recipe_sha256": "39f4f96c04a8b924921ef136bb85f8b402fa443b025f4189ff1f7c386f07feb3",
   "request_transfer": {
     "cpu": "M68K",
     "pc": 4310,
@@ -13,8 +13,16 @@
     "native_action": 7,
     "marker_event_kind": 10,
     "marker_value": 3,
-    "marker_token": 24,
-    "marker_expected_kinds": [0],
+    "marker_tokens_by_expected_kind": [
+      {
+        "expected_active_kind": 0,
+        "marker_token": 24
+      },
+      {
+        "expected_active_kind": 3,
+        "marker_token": 25
+      }
+    ],
     "source_file": "docs/s2disasm/s2.asm",
     "source_label": "sndDriverInput accepted M68K-to-Z80 transfer"
   }

@@ -52,7 +52,7 @@ f9bf97848329b4d444c8c8791b9f8a584b58016852a6ba4b55db164726623ac7 clang/usr/lib/l
 8a3b835e2cbdc52db8259d8c03c5e32227fd1c350af22925438cd8b54fd2d2db sysroot/bin/ld.musl-clang
 9b8f89ee3105aad8b2a18805362677b6d983721e9d3706629359ddf7c9ec837b sysroot/lib/libc.a
 2f257b223dbee10ea0415e5f95385a71dc05bb94505a21a4be1d22ce733e624d sysroot/lib/linux/libclang_rt.builtins-x86_64.a
-7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307 zstd
+2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885 zstd
 LOCKED_TOOLCHAIN
 
 count=$(find "$toolchain_dir/sysroot" -type f | wc -l)
@@ -75,12 +75,12 @@ complete_tree_digest=$(
     fi
   done | sha256sum | cut -d' ' -f1
 )
-[[ "$complete_tree_digest" = 9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521 ]] \
+[[ "$complete_tree_digest" = 5faae28cb6b2f22f5bcfca545518e112cf227ea2c72847c9cd30658f02f813b9 ]] \
   || fail "wrong complete toolchain tree digest: $complete_tree_digest"
 
 identity=$(printf '%s\n%s\n%s\n%s\n' \
   427556b5ef3ac437eba754d90c5e7e9096c9a8df \
   fc06187ae45bcedeea4f76f33868ccb05a8c80831d5dce19adbd5eee6e6e06e1 \
-  7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307 \
+  2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885 \
   "$recipe_sha" | sha256sum | cut -d' ' -f1)
 printf '%s\n' "$identity"
