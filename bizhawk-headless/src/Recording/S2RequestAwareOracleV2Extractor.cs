@@ -54,34 +54,30 @@ namespace OpenGGF.BizHawk.Headless
             string attestationPath, string outputPath)
         { Extract(rawPath, capabilityPath, attestationPath, outputPath, false); }
 
-        /// <summary>Reserved production entry.  It refuses the current candidate
-        /// before parsing any raw evidence, because it has no bound authority.</summary>
-        internal void ExtractProduction(string rawPath, string capabilityPath,
-            string attestationPath, string outputPath)
-        { Extract(rawPath, capabilityPath, attestationPath, outputPath, true); }
-
         private void Extract(string rawPath, string capabilityPath,
             string attestationPath, string outputPath, bool production)
         {
-            FileEvidence raw = DigestFile(rawPath, "raw");
             JObject capability = ReadObject(capabilityPath, "capability");
-            ValidateCapability(capability, production);
-            ValidateAttestation(ReadObject(attestationPath, "attestation"), raw,
-                capability);
+            ValidateCapability(capability, false);
+            JObject attestation = ReadObject(attestationPath, "attestation");
             string stagedWindow = StagePath(outputPath);
             try
             {
-                Projection projection = ValidateAndProject(rawPath, raw, capability,
+                Projection projection = ValidateAndProject(rawPath, capability,
                     stagedWindow);
+                ValidateAttestation(attestation, projection.Raw, capability);
                 Publish(outputPath, stagedWindow, projection);
             }
             finally { TryDelete(stagedWindow); }
         }
 
-        private Projection ValidateAndProject(string rawPath, FileEvidence raw,
-            JObject capability, string stagedWindow)
+        private Projection ValidateAndProject(string rawPath, JObject capability,
+            string stagedWindow)
         {
-            using (var reader = new StreamReader(File.OpenRead(rawPath),
+            RequireExisting(rawPath,"raw");
+            using (var rawInput = new HashingReadStream(new FileStream(rawPath,
+                FileMode.Open, FileAccess.Read, FileShare.Read)))
+            using (var reader = new StreamReader(rawInput,
                 new UTF8Encoding(false, true), false, 65536))
             using (var window = new StreamWriter(new FileStream(stagedWindow,
                 FileMode.CreateNew, FileAccess.Write, FileShare.None),
@@ -133,6 +129,7 @@ namespace OpenGGF.BizHawk.Headless
                     {
                         if (reader.ReadLine() != null)
                             throw Invalid("raw records follow cutoff");
+                        FileEvidence raw=rawInput.Finish();
                         ValidateCutoff(value, sourceEnd);
                         Require(expectedRow == sourceEnd, "raw is truncated");
                         baseDigest.TransformFinalBlock(new byte[0], 0, 0);
@@ -433,6 +430,45 @@ namespace OpenGGF.BizHawk.Headless
         private sealed class FileEvidence
         {
             internal long ByteCount; internal string Sha256;
+        }
+        /// <summary>Hashes the one descriptor that the JSONL reader consumes.
+        /// It deliberately rejects byte forms StreamReader would otherwise
+        /// normalize (BOM, CRLF and missing final LF).</summary>
+        private sealed class HashingReadStream : Stream
+        {
+            private readonly Stream inner; private readonly SHA256 hash=SHA256.Create();
+            private long count; private int first=-1,last=-1; private bool finished;
+            internal HashingReadStream(Stream value) { inner=value; }
+            public override int Read(byte[] buffer,int offset,int length)
+            {
+                int read=inner.Read(buffer,offset,length);
+                if(read==0)return 0;
+                for(int i=0;i<read;i++)
+                {
+                    int value=buffer[offset+i];if(first<0)first=value;last=value;
+                    if(value==13)throw Invalid("raw contains CR; JSONL requires LF only");
+                }
+                hash.TransformBlock(buffer,offset,read,buffer,offset);count+=read;return read;
+            }
+            internal FileEvidence Finish()
+            {
+                if(finished)throw Invalid("raw hash already finalized");finished=true;
+                if(count==0||last!=10)throw Invalid("raw requires one terminal LF");
+                if(first==0xEF)throw Invalid("raw UTF-8 BOM is forbidden");
+                hash.TransformFinalBlock(new byte[0],0,0);
+                return new FileEvidence { ByteCount=count,Sha256=Hex(hash.Hash) };
+            }
+            public override bool CanRead { get { return inner.CanRead; } }
+            public override bool CanSeek { get { return false; } }
+            public override bool CanWrite { get { return false; } }
+            public override long Length { get { return inner.Length; } }
+            public override long Position { get { return inner.Position; } set { throw new NotSupportedException(); } }
+            public override void Flush() { }
+            public override long Seek(long offset,SeekOrigin origin) { throw new NotSupportedException(); }
+            public override void SetLength(long value) { throw new NotSupportedException(); }
+            public override void Write(byte[] buffer,int offset,int count) { throw new NotSupportedException(); }
+            protected override void Dispose(bool disposing)
+            { if(disposing){hash.Dispose();inner.Dispose();}base.Dispose(disposing); }
         }
         private static FileEvidence DigestFile(string path,string label)
         {

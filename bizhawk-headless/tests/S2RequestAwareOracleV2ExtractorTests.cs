@@ -22,8 +22,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests reject malformed candidate authority before output",
                 RejectMalformedCandidateAuthority));
             tests.Add(new TestMain.TestCase(
-                "S2RequestAwareOracleV2ExtractorTests reject unbound production publication",
-                RejectsUnboundProductionPublication));
+                "S2RequestAwareOracleV2ExtractorTests expose no production or CLI entry",
+                ExposesNoProductionOrCliEntry));
             tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject unknown raw fields and marker disagreement",
                 RejectUnknownRawFieldsAndMarkerDisagreement));
@@ -93,16 +93,20 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Throws<InvalidDataException>(() => input.Extractor
                     .ExtractForTesting(input.Raw, input.Capability,
                         input.Attestation, Path.Combine(root, "out.jsonl")),
-                    "attestation");
+                    "inventory");
                 AssertEx.Equal(false, File.Exists(Path.Combine(root, "out.jsonl")));
             });
         }
 
-        private static void RejectsUnboundProductionPublication()
+        private static void ExposesNoProductionOrCliEntry()
         {
-            WithSyntheticInputs((root, input) => AssertEx.Throws<InvalidDataException>(
-                () => input.Extractor.ExtractProduction(input.Raw, input.Capability,
-                    input.Attestation, Path.Combine(root, "out.jsonl")), "unbound"));
+            string source = File.ReadAllText(Path.Combine(EndToEndTests.ToolDirectory,
+                "src", "Recording", "S2RequestAwareOracleV2Extractor.cs"));
+            AssertEx.Equal(false, source.Contains("ExtractProduction"));
+            AssertEx.Equal(false, source.Contains("ExtractProduction("));
+            string program = File.ReadAllText(Path.Combine(EndToEndTests.ToolDirectory,
+                "src", "Program.cs"));
+            AssertEx.Equal(false, program.Contains("S2RequestAwareOracleV2Extractor"));
         }
 
         private static void RejectUnknownRawFieldsAndMarkerDisagreement()
@@ -199,7 +203,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 File.AppendAllText(input.Raw, " ");
                 AssertEx.Throws<InvalidDataException>(() => input.Extractor
                     .ExtractForTesting(input.Raw, input.Capability, input.Attestation,
-                        Path.Combine(root, "attestation.jsonl")), "attestation");
+                        Path.Combine(root, "attestation.jsonl")), "follow cutoff");
             });
         }
 
@@ -209,7 +213,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "src", "Recording", "S2RequestAwareOracleV2Extractor.cs"));
             AssertEx.Equal(false, source.Contains("File.ReadAllBytes(rawPath)"));
             AssertEx.Equal(false, source.Contains("ReadToEnd()"));
-            AssertEx.Equal(true, source.Contains("new StreamReader(File.OpenRead(rawPath)"));
+            AssertEx.Equal(true, source.Contains("new StreamReader(rawInput"));
             AssertEx.Equal(true, source.Contains(".s2-request-window-"));
         }
 
