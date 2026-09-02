@@ -104,7 +104,9 @@ namespace OpenGGF.BizHawk.Headless
                     != S2PreconsumptionRequestObserver.MarkerServiceToken
                 && transfer.ServiceKind
                     == S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
-                && transfer.Depth == S2PreconsumptionRequestObserver.MarkerDepth;
+                && (transfer.Depth
+                        == S2PreconsumptionRequestObserver.MarkerDepth
+                    || transfer.Depth == 1);
             return root || kind3;
         }
 

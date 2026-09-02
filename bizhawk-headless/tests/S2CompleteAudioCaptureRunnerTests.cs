@@ -64,7 +64,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             const int firstRow = 10150;
             const int exclusiveEnd = 10900;
             const string candidateCoreSha256 =
-                "aea422e8f98fda42a681310ce105dca177fe7ef7a14d415b5a0431b175a061b8";
+                "04555797c284358fe96dd018feed82aa9d6d4eaddc3cce8e1282a2f4fd636ffa";
             if (!Path.IsPathRooted(outputPath) || File.Exists(outputPath))
                 throw new InvalidOperationException(
                     "The live raw-v3 smoke output must be an absolute absent file.");

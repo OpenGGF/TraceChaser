@@ -15,11 +15,11 @@ namespace OpenGGF.BizHawk.Headless
         internal const string CandidateNativePatchFile =
             "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch";
         internal const string CandidateNativePatchSha256 =
-            "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099";
+            "1419e1fc4eb3399fec5e40973cd1cc826689378cdfc254677cf6fc60cad9035a";
         internal const string CandidateNativeRecipeFile =
             "bizhawk-headless/native/gpgx-audio-observer-candidates/s2-request-selftest-recipe.json";
         internal const string CandidateNativeRecipeSha256 =
-            "39f4f96c04a8b924921ef136bb85f8b402fa443b025f4189ff1f7c386f07feb3";
+            "880341f179b3369e58918af17a5a6465aca4021226f32abeace4af2d8c50d65f";
 
         internal sealed class Candidate
         {

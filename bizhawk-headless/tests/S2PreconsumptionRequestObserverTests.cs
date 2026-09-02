@@ -17,6 +17,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2PreconsumptionRequestObserverTests preserve the reviewed kind-3 marker owner through correlation",
                 PreservesKind3MarkerOwnerThroughCorrelation));
             tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests preserve the reviewed nested kind-3 marker owner through correlation",
+                PreservesNestedKind3MarkerOwnerThroughCorrelation));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject every other nested kind-3 marker owner topology",
+                RejectsEveryOtherNestedKind3MarkerOwnerTopology));
+            tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests use exact production GPGX M68K register names",
                 UsesExactProductionM68kRegisterNames));
             tests.Add(new TestMain.TestCase(
@@ -223,6 +229,88 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal((byte)0, transfers[0].Depth);
             AssertEx.Equal((byte)2, transfers[0].SourceCpu);
             DisposeIncompleteSession(observer);
+        }
+
+        private static void PreservesNestedKind3MarkerOwnerThroughCorrelation()
+        {
+            const ushort rootToken = 0x1234;
+            const ushort childToken = 0x2345;
+            var host = RequestHost(0xB5, 1, 0x00FFFDAE);
+            var api = new QueuedTraceApi();
+            var observer = OpenSession(host, api);
+            observer.AdvanceRow(0, () =>
+                api.Events = new[] { DpcmRootBegin(0, rootToken) });
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                observer.AdvanceRow(1, () =>
+                {
+                    GpgxAudioTraceEvent child = NestedKind3ServiceBegin(
+                        0, rootToken, childToken);
+                    api.Events = new[] { child };
+                    host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[]
+                    {
+                        child,
+                        NestedKind3Marker(0x00FFFDAE, 1,
+                            rootToken, childToken)
+                    };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(childToken, transfers[0].ServiceToken);
+            AssertEx.Equal((byte)3, transfers[0].ServiceKind);
+            AssertEx.Equal((byte)1, transfers[0].Depth);
+            DisposeIncompleteSession(observer);
+        }
+
+        private static void RejectsEveryOtherNestedKind3MarkerOwnerTopology()
+        {
+            AssertNestedTopologyRejected(marker =>
+                { marker.ParentToken = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ParentToken = 0x3456; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceToken = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceToken = 0x1234; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceKindId = 4; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.Depth = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.Depth = 2; return marker; },
+                "native audio observer returned");
+        }
+
+        private static void AssertNestedTopologyRejected(
+            Func<GpgxAudioTraceEvent, GpgxAudioTraceEvent> mutate,
+            string message)
+        {
+            const ushort rootToken = 0x1234;
+            const ushort childToken = 0x2345;
+            var host = RequestHost(0xB5, 1, 0x00FFFDAE);
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
+            {
+                observer.AdvanceRow(0, () =>
+                    api.Events = new[] { DpcmRootBegin(0, rootToken) });
+                AssertEx.Throws<InvalidOperationException>(() =>
+                    observer.AdvanceRow(1, () =>
+                    {
+                        GpgxAudioTraceEvent child = NestedKind3ServiceBegin(
+                            0, rootToken, childToken);
+                        api.Events = new[] { child };
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        GpgxAudioTraceEvent marker = NestedKind3Marker(
+                            0x00FFFDAE, 1, rootToken, childToken);
+                        marker = mutate(marker);
+                        api.Events = new[] { child, marker };
+                    }), message);
+            }
         }
 
         private static void RejectsMalformedCorrelation()
@@ -1024,6 +1112,37 @@ namespace OpenGGF.BizHawk.Headless.Tests
             };
         }
 
+        private static GpgxAudioTraceEvent DpcmRootBegin(
+            uint ordinal, ushort token)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 1, Ordinal = ordinal, ServiceToken = token,
+                ParentToken = 0, Pc = 0x002FE0, Subject = 32,
+                ServiceKindId = 4, Depth = 0, SourceCpu = 2
+            };
+        }
+
+        private static GpgxAudioTraceEvent NestedKind3ServiceBegin(
+            uint ordinal, ushort rootToken, ushort childToken)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 1, Ordinal = ordinal, ServiceToken = childToken,
+                ParentToken = rootToken, Pc = 0x002FE2, Subject = 33,
+                ServiceKindId = 3, Depth = 1, SourceCpu = 2
+            };
+        }
+
+        private static GpgxAudioTraceEvent NestedKind3Marker(uint a7,
+            uint ordinal, ushort rootToken, ushort childToken)
+        {
+            GpgxAudioTraceEvent marker = Kind3Marker(a7, ordinal, childToken);
+            marker.ParentToken = rootToken;
+            marker.Depth = 1;
+            return marker;
+        }
+
         private static GpgxAudioTraceEvent[] BootstrapAndKind3Begin()
         {
             const int ChunkCount = 1024;
@@ -1114,7 +1233,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AbiVersion = 4, StructSize = 64, KindSize = 16,
                 HookSize = 32, RangeSize = 16, EventSize = 32,
                 WatchMaskBytes = 8192, EventCapacity = 65536,
-                HookCount = 6, KindCount = 2,
+                HookCount = 8, KindCount = 3,
                 MaxContinuationFrames = 4
             };
             var hooks = new[]
@@ -1149,6 +1268,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 new GpgxAudioObserverAdapter.ServiceHook
                 {
                     HookToken = 30, Action = 7, Cpu = 2, Pc = 0x002000
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 32, Action = 1, Cpu = 2, Pc = 0x002FE0,
+                    ServiceKindId = 4, ExpectedActiveKind = 0
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 33, Action = 1, Cpu = 2, Pc = 0x002FE2,
+                    ServiceKindId = 3, ExpectedActiveKind = 4
                 }
             };
             return new CompleteRunAudioObserver(api, config, new byte[8192],
@@ -1158,6 +1287,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     new GpgxAudioObserverAdapter.ServiceKind
                     {
                         KindId = 3, Flags = 6, ContinuationFrameLimit = 4
+                    },
+                    new GpgxAudioObserverAdapter.ServiceKind
+                    {
+                        KindId = 4, Flags = 7, ContinuationFrameLimit = 4
                     }
                 }, hooks,
                 new GpgxAudioObserverAdapter.SnapshotRange[0]);

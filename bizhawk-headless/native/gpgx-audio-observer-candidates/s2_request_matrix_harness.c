@@ -10,7 +10,7 @@ uint32_t selftest_m68k_a7;
 #include "audio_trace.c"
 
 static struct gpgx_audio_trace_config_v1 config;
-static struct gpgx_audio_service_kind_v1 kinds[2];
+static struct gpgx_audio_service_kind_v1 kinds[3];
 static struct gpgx_audio_service_hook_v1 hooks[3];
 static struct gpgx_audio_snapshot_range_v1 range;
 static uint8_t mask[8192];
@@ -34,10 +34,10 @@ static void fixture(void)
   config.max_opcode_bytes = 8;
   config.reset_service_kind = 1;
   config.watch_mask_bytes = 8192;
-  config.kind_count = 2;
+  config.kind_count = 3;
   config.hook_count = 2;
   config.range_count = 1;
-  config.snapshot_bytes_total = 2;
+  config.snapshot_bytes_total = 3;
   config.event_capacity = 65536;
   config.max_service_tokens_per_frame = 65535;
   config.max_continuation_frames = 4;
@@ -48,6 +48,11 @@ static void fixture(void)
   kinds[1].flags = KIND_ALLOW_CONTINUATION | KIND_ALLOW_CHILDREN;
   kinds[1].cancellation_range_count = 1;
   kinds[1].continuation_frame_limit = 4;
+  kinds[2].kind_id = 4;
+  kinds[2].flags = KIND_TYPED_ASYNC | KIND_ALLOW_CONTINUATION
+    | KIND_ALLOW_CHILDREN;
+  kinds[2].cancellation_range_count = 1;
+  kinds[2].continuation_frame_limit = 4;
   range.range_id = 1;
   range.length = 1;
   hooks[0].hook_token = 24;
@@ -78,6 +83,21 @@ static void install_kind3_topology(uint16_t token, uint16_t parent,
   trace_stack[0].kind = kind;
   trace_stack[0].depth = depth;
   trace_depth = 1;
+}
+
+static void install_nested_kind3_topology(uint16_t root_token,
+  uint16_t child_token)
+{
+  memset(trace_stack, 0, sizeof(trace_stack));
+  trace_stack[0].token = root_token;
+  trace_stack[0].parent = 0;
+  trace_stack[0].kind = 4;
+  trace_stack[0].depth = 0;
+  trace_stack[1].token = child_token;
+  trace_stack[1].parent = root_token;
+  trace_stack[1].kind = 3;
+  trace_stack[1].depth = 1;
+  trace_depth = 2;
 }
 
 static void clear_test_topology(void)
@@ -213,6 +233,45 @@ static void kind3_successor_boundary(void)
   assert(gpgx_audio_trace_disable() == TRACE_OK);
 }
 
+static void nested_kind3_successor_boundary(void)
+{
+  struct gpgx_audio_trace_event events[1];
+  uint8_t rom[65536];
+  uint8_t previous;
+  uint32_t i, ordinal, count;
+  const uint8_t opcode[4] = { 0x13, 0x80, 0x10, 0x09 };
+
+  memset(rom, 0, sizeof(rom));
+  memset(&m68k, 0, sizeof(m68k));
+  for (i = 0; i < sizeof(opcode); i++)
+    rom[((0x10d6u + i) & 0xffffu) ^ 1u] = opcode[i];
+  m68k.memory_map[0].base = rom;
+
+  fixture();
+  assert(configure() == TRACE_OK);
+  assert(gpgx_audio_trace_begin_frame() == TRACE_OK);
+  previous = gpgx_audio_trace_enter_cpu(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(0x2345, 0x3456);
+  gpgx_audio_trace_s2_request_callback_begin(0x10d6);
+  assert(gpgx_audio_trace_s2_request_successor_ordinal(&ordinal) == TRACE_OK
+    && ordinal == 0);
+  gpgx_audio_trace_s2_request_callback_end();
+  gpgx_audio_trace_instruction(GPGX_AUDIO_TRACE_CPU_M68K, 0x10d6);
+  assert(trace_event_count_value == 1);
+  assert(trace_events[0].kind == EVENT_HOOK_MARKER);
+  assert(trace_events[0].subject == 25);
+  assert(trace_events[0].service_token == 0x3456);
+  assert(trace_events[0].parent_token == 0x2345);
+  assert(trace_events[0].service_kind == 3);
+  assert(trace_events[0].depth == 1);
+  gpgx_audio_trace_leave_cpu(previous);
+  assert(gpgx_audio_trace_end_frame() == TRACE_OK);
+  assert(gpgx_audio_trace_drain(events, 1, &count) == TRACE_OK);
+  assert(count == 1);
+  assert(events[0].subject == 25 && events[0].service_token == 0x3456);
+  assert(gpgx_audio_trace_disable() == TRACE_OK);
+}
+
 static void rejects_nonreviewed_topologies(void)
 {
   uint8_t previous, depth;
@@ -253,7 +312,49 @@ static void rejects_nonreviewed_topologies(void)
   install_kind3_topology(1, 0, 3, 1);
   EXPECT_REJECT_AND_END();
 
-  for (depth = 2; depth <= TRACE_MAX_DEPTH; depth++)
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(0, 2);
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[0].parent = 3;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[0].kind = 3;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[0].depth = 1;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 0);
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 1);
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[1].parent = 3;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[1].kind = 4;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
+  trace_stack[1].depth = 0;
+  EXPECT_REJECT_AND_END();
+
+  for (depth = 3; depth <= TRACE_MAX_DEPTH; depth++)
   {
     BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
     install_kind3_topology(1, 0, 3, 0);
@@ -267,6 +368,11 @@ static void rejects_nonreviewed_topologies(void)
 
   BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
   install_kind3_topology(1, 0, 3, 0);
+  trace_deferred_begin.pending = 1;
+  EXPECT_REJECT_AND_END();
+
+  BEGIN_CALLBACK(GPGX_AUDIO_TRACE_CPU_M68K);
+  install_nested_kind3_topology(1, 2);
   trace_deferred_begin.pending = 1;
   EXPECT_REJECT_AND_END();
 
@@ -328,6 +434,7 @@ int main(void)
 {
   fixed_successor_boundary();
   kind3_successor_boundary();
+  nested_kind3_successor_boundary();
   rejects_nonreviewed_topologies();
   rejects_marker_inventory_mutations();
   return 0;

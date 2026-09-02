@@ -22,7 +22,7 @@ index f1104ac..06a2b21 100644
  ECL_INVISIBLE static uint8_t trace_reset_active;
  ECL_INVISIBLE static uint8_t trace_issue_source;
  ECL_INVISIBLE static uint8_t trace_depth;
-@@ -1438,1 +1439,66 @@ void gpgx_audio_trace_leave_cpu(uint8_t previous) { trace_issue_source = previous; }
+@@ -1438,1 +1439,76 @@ void gpgx_audio_trace_leave_cpu(uint8_t previous) { trace_issue_source = previous; }
 +void gpgx_audio_trace_s2_request_callback_begin(uint32_t pc)
 +{
 +  trace_s2_request_callback_active =
@@ -65,13 +65,23 @@ index f1104ac..06a2b21 100644
 +
 +static int has_fixed_s2_request_topology(void)
 +{
-+  const struct trace_stack_entry *active;
++  const struct trace_stack_entry *root, *active;
 +  if (trace_deferred_begin.pending) return 0;
 +  if (trace_depth == 0u) return 1;
-+  if (trace_depth != 1u) return 0;
-+  active = &trace_stack[0];
-+  return active->token != 0u && active->parent == 0u
-+    && active->kind == 3u && active->depth == 0u;
++  if (trace_depth == 1u)
++  {
++    active = &trace_stack[0];
++    return active->token != 0u && active->parent == 0u
++      && active->kind == 3u && active->depth == 0u;
++  }
++  if (trace_depth != 2u) return 0;
++  root = &trace_stack[0];
++  active = &trace_stack[1];
++  return root->token != 0u && root->parent == 0u
++    && root->kind == 4u && root->depth == 0u
++    && active->token != 0u && active->token != root->token
++    && active->parent == root->token
++    && active->kind == 3u && active->depth == 1u;
 +}
 +
 +ECL_EXPORT int32_t gpgx_audio_trace_s2_request_successor_ordinal(
@@ -89,7 +99,7 @@ index f1104ac..06a2b21 100644
 +}
 +
  void gpgx_audio_trace_instruction(uint8_t cpu, uint32_t pc)
-@@ -1711,6 +1777,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_begin_frame(void)
+@@ -1711,6 +1786,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_begin_frame(void)
    trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
    trace_runtime_error = trace_ready_invalid = trace_reset_active = 0; trace_issue_source = 0;
    trace_ready_drained = 0;
@@ -97,7 +107,7 @@ index f1104ac..06a2b21 100644
    trace_z80_instruction_pc = trace_m68k_instruction_pc = 0; trace_next_token = 1;
    for (i = 0; i < trace_depth; i++)
      while (trace_next_token == trace_stack[i].token) trace_next_token++;
-@@ -1780,6 +1847,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_abort_frame(void)
+@@ -1780,6 +1856,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_abort_frame(void)
    { fail_runtime(GPGX_AUDIO_TRACE_FAULT_SERVICE); return TRACE_ABI_OR_CONFIG_LIMIT; }
    trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
    trace_runtime_error = trace_ready_invalid = trace_reset_active = 0; trace_issue_source = 0;
@@ -105,7 +115,7 @@ index f1104ac..06a2b21 100644
    trace_ready_drained = 0;
    trace_z80_instruction_pc = trace_m68k_instruction_pc = 0;
    trace_depth = 0; memset(trace_stack, 0, sizeof(trace_stack));
-@@ -1802,6 +1870,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_disable(void)
+@@ -1802,6 +1879,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_disable(void)
    trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
    trace_runtime_error = trace_ready_invalid = trace_z80_proofs_armed = trace_prepublication = 0;
    trace_ready_drained = trace_reset_active = trace_issue_source = trace_depth = 0;

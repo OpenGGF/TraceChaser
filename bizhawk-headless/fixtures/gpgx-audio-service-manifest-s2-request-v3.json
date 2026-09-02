@@ -3,9 +3,9 @@
   "production_bound": false,
   "base_service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
   "candidate_native_patch_file": "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch",
-  "candidate_native_patch_sha256": "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099",
+  "candidate_native_patch_sha256": "1419e1fc4eb3399fec5e40973cd1cc826689378cdfc254677cf6fc60cad9035a",
   "candidate_native_recipe_file": "bizhawk-headless/native/gpgx-audio-observer-candidates/s2-request-selftest-recipe.json",
-  "candidate_native_recipe_sha256": "39f4f96c04a8b924921ef136bb85f8b402fa443b025f4189ff1f7c386f07feb3",
+  "candidate_native_recipe_sha256": "880341f179b3369e58918af17a5a6465aca4021226f32abeace4af2d8c50d65f",
   "request_transfer": {
     "cpu": "M68K",
     "pc": 4310,

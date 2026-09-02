@@ -58,6 +58,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests accept the reviewed kind-3 request topology",
                 AcceptsReviewedKind3RequestTopology));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept the reviewed nested kind-3 request topology",
+                AcceptsReviewedNestedKind3RequestTopology));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject every other request topology",
                 RejectsEveryOtherRequestTopology));
             tests.Add(new TestMain.TestCase(
@@ -528,6 +531,31 @@ namespace OpenGGF.BizHawk.Headless.Tests
             finally { try { Directory.Delete(root,true); } catch { } }
         }
 
+        private static void AcceptsReviewedNestedKind3RequestTopology()
+        {
+            byte[] raw=ProducerRaw(false,true,true,false,false,true);
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-nested-kind3-extractor");
+            try
+            {
+                Directory.CreateDirectory(root);
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        1,4,2,3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"nested-kind3.raw.jsonl"),
+                    Capability=Path.Combine(root,"nested-kind3.capability.json"),
+                    Attestation=Path.Combine(root,"nested-kind3.attestation.json") };
+                File.WriteAllBytes(input.Raw,raw);
+                WriteAuthority(input,Capability(raw,2,3),raw);
+                string output=Path.Combine(root,"window.jsonl");
+                input.Extractor.ExtractForTesting(input.Raw,input.Capability,
+                    input.Attestation,output);
+                AssertEx.Equal(true,File.Exists(output));
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
         private static void RejectsEveryOtherRequestTopology()
         {
             byte[] kind3=ProducerRaw(false,true,true,false,true);
@@ -551,10 +579,71 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertProducerRawRejection(root,lines=>MutateRequest(lines,
                 (marker,transfer)=>marker["subject"]=
                     S2PreconsumptionRequestObserver.Kind3MarkerToken),
-                "topology");
+                "S2 request-aware extractor");
             AssertProducerRawRejection(root,lines=>MutateRequest(lines,
                 (marker,transfer)=>SetOwner(marker,transfer,4,3,0)),
-                "topology");
+                "S2 request-aware extractor");
+
+            byte[] nested=ProducerRaw(false,true,true,false,false,true);
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["subject"]=
+                    S2PreconsumptionRequestObserver.MarkerToken),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["parent_token"]=0),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["parent_token"]=5),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>marker["parent_token"]=6),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,0,3,1)),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,4,3,1)),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,5,4,1)),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,5,3,0)),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,lines=>MutateRequest(lines,
+                (marker,transfer)=>SetOwner(marker,transfer,5,3,2)),
+                "S2 request-aware extractor");
+            AssertProducerRawRejection(nested,MutateNestedRootKind,
+                "S2 request-aware extractor");
+        }
+
+        private static void MutateNestedRootKind(string[] lines)
+        {
+            for(int lineIndex=0;lineIndex<lines.Length;lineIndex++)
+            {
+                JObject frame=JObject.Parse(lines[lineIndex]);
+                if((string)frame["type"]!="frame")continue;
+                JArray events=(JArray)frame["events"];
+                bool containsMarker=false;
+                foreach(JToken token in events)
+                {
+                    JObject value=(JObject)token;
+                    if((int)value["kind"]==10
+                        &&(int)value["pc"]==0x10D6)
+                        containsMarker=true;
+                }
+                if(!containsMarker)continue;
+                foreach(JToken token in events)
+                {
+                    JObject value=(JObject)token;
+                    if((int)value["kind"]!=1||(int)value["subject"]!=5)
+                        continue;
+                    value["service_kind"]=3;
+                    lines[lineIndex]=Json(frame);
+                    return;
+                }
+            }
+            throw new InvalidOperationException("missing nested root begin");
         }
 
         private static void MutateRequest(string[] lines,
@@ -606,7 +695,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static byte[] ProducerRaw(bool followingRowPcm,
             bool includePostResetArmProof,bool includePostResetZ80,
-            bool repeatResetAndArm,bool kind3Request=false)
+            bool repeatResetAndArm,bool kind3Request=false,
+            bool nestedKind3Request=false)
         {
             var api = new ProducerTraceApi();
             var host = new ProducerHost(api);
@@ -627,11 +717,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 candidate.AdvanceRow(1, new Bk2Frame());
 
                 const uint a7 = 0x00FF1020;
-                api.Events = kind3Request
-                    ?RequestInsideRootKind3Events(a7)
-                    :RequestAndOpenServiceEvents(a7,
-                        includePostResetArmProof,includePostResetZ80);
-                api.SuccessorOrdinal = kind3Request
+                api.Events = nestedKind3Request
+                    ?RequestInsideNestedKind3Events(a7)
+                    :kind3Request
+                        ?RequestInsideRootKind3Events(a7)
+                        :RequestAndOpenServiceEvents(a7,
+                            includePostResetArmProof,includePostResetZ80);
+                api.SuccessorOrdinal = kind3Request||nestedKind3Request
                     ?FindMarkerOrdinal(api.Events):19;
                 host.Set("M68K D0", 0xB5);
                 host.Set("M68K D1", 3);
@@ -1445,6 +1537,31 @@ namespace OpenGGF.BizHawk.Headless.Tests
             marker.Value=3;marker.Payload=a7;values.Add(marker);
             AddOneByteSnapshot(values,4,0,3,0,231,1);
             values.Add(Native(values.Count,2,4,0,231,3,0,3,0,1));
+            return values.ToArray();
+        }
+
+        private static GpgxAudioTraceEvent[] RequestInsideNestedKind3Events(
+            uint a7)
+        {
+            var values=new List<GpgxAudioTraceEvent>();
+            AddResumeCompletionEvents(values);
+            AddOneByteSnapshot(values,2,0,4,0,432,1);
+            values.Add(Native(values.Count,2,2,0,432,6,0,4,0,1));
+            values.Add(Native(values.Count,8,2,0,0,0,0,1,0,3));
+            AddOneByteSnapshot(values,2,0,1,0,0,3);
+            values.Add(Native(values.Count,9,2,0,0,0,0,1,0,3));
+            AddUploadProofEvents(values,3);
+            values.Add(Native(values.Count,1,4,0,378,5,0,4,0,1));
+            values.Add(Native(values.Count,1,5,4,56,2,0,3,1,1));
+            GpgxAudioTraceEvent marker=Native(values.Count,10,5,4,
+                S2PreconsumptionRequestObserver.Pc,
+                S2PreconsumptionRequestObserver.Kind3MarkerToken,
+                0,3,1,2,4);
+            marker.Value=3;marker.Payload=a7;values.Add(marker);
+            AddOneByteSnapshot(values,5,4,3,1,231,1);
+            values.Add(Native(values.Count,2,5,4,231,3,0,3,1,1));
+            AddOneByteSnapshot(values,4,0,4,0,432,1);
+            values.Add(Native(values.Count,2,4,0,432,6,0,4,0,1));
             return values.ToArray();
         }
 

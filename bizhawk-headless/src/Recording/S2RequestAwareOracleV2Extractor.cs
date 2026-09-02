@@ -27,13 +27,13 @@ namespace OpenGGF.BizHawk.Headless
         private const int DefaultWindowFirst = 10150;
         private const int DefaultWindowEnd = 10900;
         private const string CandidateManifestSha256 =
-            "8dee3a7b11bc7df8748c3cf61a2a6bca0137127d7d5178e945ad86ddfa82645d";
+            "375a6bc5433f62e75e2991283f495a8d9e9e6c77fed9c91144d15124ed39e669";
         private const string CandidatePatchSha256 =
-            "c857b5297ce8252e41a85d868466280931d700964dbd4082575c61d1ddc34099";
+            "1419e1fc4eb3399fec5e40973cd1cc826689378cdfc254677cf6fc60cad9035a";
         private const string CandidateRecipeSha256 =
-            "39f4f96c04a8b924921ef136bb85f8b402fa443b025f4189ff1f7c386f07feb3";
+            "880341f179b3369e58918af17a5a6465aca4021226f32abeace4af2d8c50d65f";
         private const string CandidateProfileSha256 =
-            "740dff2f4a6ae04dc84fe08c8b5e33b084c417d4beeeaeb04843fa0320139d88";
+            "3f9b408755dbdf1c3060c1c947b19bd6f925d7193915d45ffb8a1efd525e4b05";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
         private readonly bool syntheticTestSeam;
         private readonly string serviceManifestPath;
@@ -573,7 +573,8 @@ namespace OpenGGF.BizHawk.Headless
                     &&depth==S2PreconsumptionRequestObserver.MarkerDepth)
                 ||(token!=S2PreconsumptionRequestObserver.MarkerServiceToken
                     &&kind==S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
-                    &&depth==S2PreconsumptionRequestObserver.MarkerDepth);
+                    &&(depth==S2PreconsumptionRequestObserver.MarkerDepth
+                        ||depth==1));
         }
 
         private static bool Marker(JObject value)
@@ -591,15 +592,18 @@ namespace OpenGGF.BizHawk.Headless
                 &&Byte(value,"service_kind")
                     ==S2PreconsumptionRequestObserver.MarkerServiceKind
                 &&Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth;
+            int kind3Token=Integer(value,"service_token");
+            int kind3Parent=Integer(value,"parent_token");
+            int kind3Depth=Byte(value,"depth");
             bool kind3=Unsigned(value,"subject")
                     ==S2PreconsumptionRequestObserver.Kind3MarkerToken
-                &&Integer(value,"service_token")
-                    !=S2PreconsumptionRequestObserver.MarkerServiceToken
-                &&Integer(value,"parent_token")
-                    ==S2PreconsumptionRequestObserver.MarkerServiceToken
+                &&kind3Token!=S2PreconsumptionRequestObserver.MarkerServiceToken
                 &&Byte(value,"service_kind")
                     ==S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
-                &&Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth;
+                &&((kind3Parent==S2PreconsumptionRequestObserver.MarkerServiceToken
+                        &&kind3Depth==S2PreconsumptionRequestObserver.MarkerDepth)
+                    ||(kind3Parent!=S2PreconsumptionRequestObserver.MarkerServiceToken
+                        &&kind3Parent!=kind3Token&&kind3Depth==1));
             return common&&(root||kind3);
         }
         private static bool MarkerCandidate(JObject value)
