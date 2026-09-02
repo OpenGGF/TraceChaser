@@ -36,13 +36,15 @@ namespace OpenGGF.BizHawk.Headless
             "e955877eb60bc1ba7c281cc63bd3b9f7146e086cb14162dfaf09e38fae227719";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
         private readonly bool syntheticTestSeam;
+        private readonly string serviceManifestPath;
 
         internal S2RequestAwareOracleV2Extractor()
             : this(DefaultSourceFirst, DefaultSourceEnd,
-                DefaultWindowFirst, DefaultWindowEnd, false) { }
+                DefaultWindowFirst, DefaultWindowEnd, false, null) { }
 
         private S2RequestAwareOracleV2Extractor(int sourceStart, int sourceStop,
-            int windowStart, int windowStop, bool testing)
+            int windowStart, int windowStop, bool testing,
+            string manifestPath)
         {
             if (sourceStart < 0 || sourceStop <= sourceStart
                 || windowStart <= sourceStart || windowStop > sourceStop
@@ -51,12 +53,14 @@ namespace OpenGGF.BizHawk.Headless
             sourceFirst = sourceStart; sourceEnd = sourceStop;
             windowFirst = windowStart; windowEnd = windowStop;
             syntheticTestSeam=testing;
+            serviceManifestPath=manifestPath;
         }
 
         internal static S2RequestAwareOracleV2Extractor ForTesting(
-            int sourceStart, int sourceStop, int windowStart, int windowStop)
+            int sourceStart, int sourceStop, int windowStart, int windowStop,
+            string manifestPath)
         { return new S2RequestAwareOracleV2Extractor(sourceStart, sourceStop,
-            windowStart, windowStop, true); }
+            windowStart, windowStop, true, manifestPath); }
 
         /// <summary>Friend-test validation of the committed candidate shape.
         /// It deliberately does not create an extraction or publication route.</summary>
@@ -64,7 +68,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             var extractor=new S2RequestAwareOracleV2Extractor(
                 DefaultSourceFirst,DefaultSourceEnd,DefaultWindowFirst,
-                DefaultWindowEnd,true);
+                DefaultWindowEnd,true,null);
             extractor.ValidateCapability(ReadObject(path,"capability"));
         }
 
@@ -95,6 +99,9 @@ namespace OpenGGF.BizHawk.Headless
             string stagedWindow)
         {
             RequireExisting(rawPath,"raw");
+            byte[] serviceManifestBytes=VerifiedBytes(serviceManifestPath,
+                "service manifest",
+                S2AudioObserverProfile.ServiceManifestSha256);
             using (var rawInput = new HashingReadStream(new FileStream(rawPath,
                 FileMode.Open, FileAccess.Read, FileShare.Read)))
             using (var reader = new StreamReader(rawInput,
@@ -133,13 +140,24 @@ namespace OpenGGF.BizHawk.Headless
                 "raw identity differs from capability");
 
             JObject firstBaseline = ParseLine(ReadLine(reader, "baseline"), "baseline");
-            ValidateBaseline(firstBaseline, sourceFirst, false);
-            int latch0 = Integer(firstBaseline, "ym_port0_latch");
-            int latch1 = Integer(firstBaseline, "ym_port1_latch");
+            CompleteRunAudioObserver.CutoffFrontier baseline =
+                ValidateBaseline(firstBaseline, sourceFirst, false);
+            var replayApi = new RawReplayApi();
+            CompleteRunAudioObserver replay =
+                GpgxAudioServiceManifest.LoadS2RequestCandidate(
+                    serviceManifestBytes,
+                    new S2AudioObserverProfile.PrepublicationApi(replayApi));
+            try { replay.RestorePublicationBaselineForValidation(baseline,
+                sourceFirst); }
+            catch(Exception error)
+            { throw Invalid("baseline lifecycle differs",error); }
+            int latch0 = replay.YmPort0Address;
+            int latch1 = replay.YmPort1Address;
             int precedingLatch0 = 0, precedingLatch1 = 0;
             JObject preceding = null;
             long baseCount = 0, allCount = 0, markerCount = 0, requestCount = 0;
             int occupancy = 0, nextGlobal = 0, expectedRow = sourceFirst;
+            var resumePcm = new ResumePcmValidator();
             using (SHA256 baseDigest = SHA256.Create())
             using (SHA256 allDigest = SHA256.Create())
             using (SHA256 markerDigest = SHA256.Create())
@@ -154,7 +172,12 @@ namespace OpenGGF.BizHawk.Headless
                         if (reader.ReadLine() != null)
                             throw Invalid("raw records follow cutoff");
                         FileEvidence raw=rawInput.Finish();
-                        ValidateCutoff(value, sourceEnd);
+                        CompleteRunAudioObserver.CutoffFrontier expectedCutoff =
+                            ValidateCutoff(value, sourceEnd);
+                        Require(FrontiersEqual(expectedCutoff,
+                            replay.CaptureCutoffFrontier()),
+                            "raw cutoff frontier differs from replay");
+                        resumePcm.Complete();
                         Require(expectedRow == sourceEnd, "raw is truncated");
                         Require(Integer(value,"ym_port0_latch")==latch0
                             && Integer(value,"ym_port1_latch")==latch1,
@@ -180,6 +203,14 @@ namespace OpenGGF.BizHawk.Headless
                         Require(Hex(Sha256(StateBytes(String(value, "state_hex"))))
                             == String(capability, "terminal_state_sha256"),
                             "raw terminal state differs from capability");
+                        Require(resumePcm.ResumeCount
+                                ==Integer(capability,"override_resume_count")
+                            &&resumePcm.PcmCount==Integer(capability,"pcm_count")
+                            &&resumePcm.ResumeDigest
+                                ==String(capability,"override_resume_sha256")
+                            &&resumePcm.PcmDigest
+                                ==String(capability,"pcm_sha256"),
+                            "raw override/PCM inventory differs from capability");
                         if (preceding == null || expectedRow != sourceEnd)
                             throw Invalid("raw has no complete bounded window");
                         return new Projection(metadata, preceding, precedingLatch0,
@@ -187,11 +218,14 @@ namespace OpenGGF.BizHawk.Headless
                     }
                     ValidateFrame(value, expectedRow);
                     JArray events = Array(value, "events");
+                    var nativeEvents = new GpgxAudioTraceEvent[events.Count];
                     var markers = new Dictionary<uint, JObject>();
                     uint nativeOrdinal=0;
-                    foreach (JToken token in events)
+                    for (int eventIndex=0;eventIndex<events.Count;eventIndex++)
                     {
+                        JToken token=events[eventIndex];
                         JObject evt = Object(token, "event"); ValidateEvent(evt);
+                        nativeEvents[eventIndex]=NativeEvent(evt);
                         Require(Unsigned(evt,"ordinal")==nativeOrdinal++,
                             "native ordinal is not zero-based contiguous");
                         byte[] eventBytes = Canonical(evt); allDigest.TransformBlock(
@@ -212,8 +246,21 @@ namespace OpenGGF.BizHawk.Headless
                             baseDigest.TransformBlock(eventBytes, 0,
                                 eventBytes.Length, null, 0); baseCount++;
                         }
-                        FoldLatch(evt, ref latch0, ref latch1);
                     }
+                    replayApi.Queue(nativeEvents);
+                    CompleteRunAudioObserver.FrameCapture replayed;
+                    try
+                    {
+                        replayed=replay.CaptureCanonicalFrame(expectedRow,
+                            () => { });
+                    }
+                    catch(Exception error)
+                    {
+                        throw Invalid("native ABI/lifecycle differs",error);
+                    }
+                    latch0=replay.YmPort0Address;
+                    latch1=replay.YmPort1Address;
+                    resumePcm.Frame(value,replayed,expectedRow);
                     JArray transfers = Array(value, "request_transfers");
                     if (transfers.Count > 4) throw Invalid("request occupancy exceeds slots");
                     occupancy = Math.Max(occupancy, transfers.Count);
@@ -292,7 +339,8 @@ namespace OpenGGF.BizHawk.Headless
             });
         }
 
-        private static void ValidateBaseline(JObject value, int row,
+        private static CompleteRunAudioObserver.CutoffFrontier ValidateBaseline(
+            JObject value, int row,
             bool bounded)
         {
             if (bounded) Exact(value,"baseline","type","row","source_preceding_row",
@@ -306,10 +354,22 @@ namespace OpenGGF.BizHawk.Headless
             Byte(value,"ym_port1_latch");
             if(!bounded)
             {
-                Integer64(value,"native_arm_epoch"); Boolean(value,"native_armed");
-                ValidateServices(Array(value,"active_services"),"active services");
-                ValidateServices(Array(value,"pending_descendants"),"pending descendants");
+                long epoch=Integer64(value,"native_arm_epoch");
+                Require(epoch>0,"baseline arm epoch differs");
+                Boolean(value,"native_armed");
+                List<CompleteRunAudioObserver.ServiceBuilder> active =
+                    ParseServices(Array(value,"active_services"),
+                        "active services",false);
+                List<CompleteRunAudioObserver.ServiceBuilder> pending =
+                    ParseServices(Array(value,"pending_descendants"),
+                        "pending descendants",true);
+                return new CompleteRunAudioObserver.CutoffFrontier(active,
+                    pending,Byte(value,"ym_port0_latch"),
+                    Byte(value,"ym_port1_latch"),
+                    epoch,
+                    Boolean(value,"native_armed"));
             }
+            return null;
         }
 
         private static void ValidateFrame(JObject value, int row)
@@ -321,8 +381,6 @@ namespace OpenGGF.BizHawk.Headless
             if (value["lag"] == null || value["lag"].Type != JTokenType.Boolean)
                 throw Invalid("frame lag differs");
             State(value,"state_hex");
-            ValidateOverrideResume(value["override_resume"]);
-            ValidatePcm(value["pcm"],row);
         }
 
         private static void ValidateEvent(JObject value)
@@ -330,13 +388,33 @@ namespace OpenGGF.BizHawk.Headless
             Exact(value,"event","ordinal","service_token","parent_token","pc",
                 "subject","offset","kind","service_kind","depth","source_cpu",
                 "payload_length","value","flags","reserved","payload");
-            Unsigned(value,"ordinal"); Unsigned(value,"pc"); Unsigned(value,"subject");
-            Unsigned(value,"offset"); Byte(value,"kind"); Byte(value,"service_kind");
+            Unsigned(value,"ordinal"); UShort(value,"service_token");
+            UShort(value,"parent_token");Unsigned(value,"pc");
+            UShort(value,"subject");UShort(value,"offset");
+            Byte(value,"kind"); Byte(value,"service_kind");
             Byte(value,"depth"); Byte(value,"source_cpu"); Byte(value,"payload_length");
-            Unsigned(value,"value"); Unsigned(value,"flags"); Unsigned(value,"reserved");
+            Byte(value,"value"); Byte(value,"flags"); Byte(value,"reserved");
             ulong parsed; if (!ulong.TryParse(String(value,"payload"), out parsed)
                 || String(value,"payload")!=parsed.ToString())
                 throw Invalid("event payload differs");
+        }
+
+        private static GpgxAudioTraceEvent NativeEvent(JObject value)
+        {
+            ulong payload;
+            if(!ulong.TryParse(String(value,"payload"),out payload))
+                throw Invalid("event payload differs");
+            return new GpgxAudioTraceEvent {
+                Ordinal=Unsigned(value,"ordinal"),
+                ServiceToken=UShort(value,"service_token"),
+                ParentToken=UShort(value,"parent_token"),
+                Pc=Unsigned(value,"pc"),Subject=UShort(value,"subject"),
+                Offset=UShort(value,"offset"),Kind=Byte(value,"kind"),
+                ServiceKindId=Byte(value,"service_kind"),
+                Depth=Byte(value,"depth"),SourceCpu=Byte(value,"source_cpu"),
+                PayloadLength=Byte(value,"payload_length"),
+                Value=Byte(value,"value"),Flags=Byte(value,"flags"),
+                Reserved=Byte(value,"reserved"),Payload=payload };
         }
 
         private static void ValidateTransfer(JObject value, int row, int order,
@@ -399,7 +477,8 @@ namespace OpenGGF.BizHawk.Headless
             if(subject==0)latch0=data; else if(subject==2)latch1=data;
         }
 
-        private static void ValidateCutoff(JObject value, int end)
+        private static CompleteRunAudioObserver.CutoffFrontier ValidateCutoff(
+            JObject value, int end)
         {
             Exact(value,"cutoff","type","state_hex","ym_port0_latch",
                 "ym_port1_latch","native_arm_epoch","native_armed",
@@ -407,9 +486,19 @@ namespace OpenGGF.BizHawk.Headless
             Require(String(value,"type")=="cutoff" && Integer(value,"exclusive_end")==end,
                 "raw cutoff differs"); State(value,"state_hex");
             Byte(value,"ym_port0_latch"); Byte(value,"ym_port1_latch");
-            Integer64(value,"native_arm_epoch"); Boolean(value,"native_armed");
-            ValidateServices(Array(value,"active_services"),"active services");
-            ValidateServices(Array(value,"pending_descendants"),"pending descendants");
+            Require(Integer64(value,"native_arm_epoch")>0,
+                "cutoff arm epoch differs");
+            Boolean(value,"native_armed");
+            List<CompleteRunAudioObserver.ServiceBuilder> active =
+                ParseServices(Array(value,"active_services"),
+                    "active services",false);
+            List<CompleteRunAudioObserver.ServiceBuilder> pending =
+                ParseServices(Array(value,"pending_descendants"),
+                    "pending descendants",true);
+            return new CompleteRunAudioObserver.CutoffFrontier(active,pending,
+                Byte(value,"ym_port0_latch"),Byte(value,"ym_port1_latch"),
+                Integer64(value,"native_arm_epoch"),
+                Boolean(value,"native_armed"));
         }
 
         private static void ValidateOverrideResume(JToken value)
@@ -424,13 +513,16 @@ namespace OpenGGF.BizHawk.Headless
             Require(String(resume,"request")=="cfFadeInToPrevious"
                 && String(resume,"admission")=="native_service_completion"
                 && Unsigned(resume,"request_pc")==0x0D35
-                && Unsigned(resume,"pc")==0x0DB4 && Integer(resume,"fix_driver_bugs")==0,
+                && Unsigned(resume,"pc")==0x0DB4
+                && Integer(resume,"fix_driver_bugs")==0
+                && Boolean(resume,"restores_saved_priority")
+                && !Boolean(resume,"restores_psg_noise"),
                 "override resume identity differs");
-            Unsigned(resume,"service_token"); Unsigned(resume,"service_begin_ordinal");
+            UShort(resume,"service_token"); Unsigned(resume,"service_begin_ordinal");
             Unsigned(resume,"native_ordinal"); Integer(resume,"frame");
-            Boolean(resume,"restores_saved_priority"); Boolean(resume,"restores_psg_noise");
             JArray writes=Array(resume,"writes"); Require(writes.Count>0,"override resume has no writes");
-            foreach(JToken write in writes) ValidateChip(Object(write,"override write"));
+            foreach(JToken write in writes)
+                ValidateOverrideWrite(Object(write,"override write"));
         }
 
         private static void ValidatePcm(JToken value,int row)
@@ -442,7 +534,7 @@ namespace OpenGGF.BizHawk.Headless
                 "format","stereo_frames","byte_count","pcm_hex","sha256");
             Require((String(pcm,"selection")=="service_frame" || String(pcm,"selection")=="following_row")
                 && Integer(pcm,"row")==row && Integer(pcm,"offset")>=0
-                && Integer(pcm,"sample_rate")>0 && Integer(pcm,"channels")==2
+                && Integer(pcm,"sample_rate")==44100 && Integer(pcm,"channels")==2
                 && String(pcm,"format")=="s16le-interleaved-stereo"
                 && Integer64(pcm,"stereo_frames")>=0 && Integer64(pcm,"byte_count")>=0,
                 "PCM identity differs");
@@ -451,9 +543,12 @@ namespace OpenGGF.BizHawk.Headless
                 "PCM byte count differs");
         }
 
-        private static void ValidateServices(JArray services,string label)
+        private static List<CompleteRunAudioObserver.ServiceBuilder>
+            ParseServices(JArray services,string label,bool complete)
         {
-            var seen=new HashSet<uint>();
+            var result=new List<CompleteRunAudioObserver.ServiceBuilder>();
+            var seen=new HashSet<ushort>();
+            long previousBegin=-1;
             foreach(JToken token in services)
             {
                 JObject service=Object(token,label); Exact(service,label,"token","parent_token",
@@ -461,28 +556,194 @@ namespace OpenGGF.BizHawk.Headless
                     "begin_row","begin_native_ordinal","end_coordinate","begin_pc","end_pc",
                     "begin_hook_token","end_hook_token","begin_source_cpu","cancelled","complete",
                     "chips","snapshots","ancestry_transitions");
-                uint serviceToken=Unsigned(service,"token");
+                ushort serviceToken=UShort(service,"token");
                 Require(seen.Add(serviceToken),label+" has duplicate service token");
-                Unsigned(service,"parent_token"); Byte(service,"kind"); Byte(service,"depth");
-                Unsigned(service,"current_parent_token"); Byte(service,"current_depth");
-                Integer64(service,"begin_coordinate"); Integer(service,"begin_row");
-                Unsigned(service,"begin_native_ordinal"); Integer64(service,"end_coordinate");
-                Unsigned(service,"begin_pc"); Unsigned(service,"end_pc"); Unsigned(service,"begin_hook_token");
-                Unsigned(service,"end_hook_token"); Byte(service,"begin_source_cpu");
-                Boolean(service,"cancelled"); Boolean(service,"complete");
-                foreach(JToken chip in Array(service,"chips")) ValidateChip(Object(chip,"chip"));
-                foreach(JToken snapshot in Array(service,"snapshots")) ValidateSnapshot(Object(snapshot,"snapshot"));
-                foreach(JToken transition in Array(service,"ancestry_transitions")) ValidateTransition(Object(transition,"ancestry transition"));
+                Require(Boolean(service,"complete")==complete,
+                    label+" completion state differs");
+                var value=new CompleteRunAudioObserver.ServiceBuilder {
+                    Token=serviceToken,
+                    ParentToken=UShort(service,"parent_token"),
+                    Kind=Byte(service,"kind"),Depth=Byte(service,"depth"),
+                    CurrentParentToken=UShort(service,"current_parent_token"),
+                    CurrentDepth=Byte(service,"current_depth"),
+                    BeginCoordinate=Integer64(service,"begin_coordinate"),
+                    BeginRow=Integer(service,"begin_row"),
+                    BeginNativeOrdinal=Unsigned(service,"begin_native_ordinal"),
+                    EndCoordinate=Integer64(service,"end_coordinate"),
+                    BeginPc=Unsigned(service,"begin_pc"),
+                    EndPc=Unsigned(service,"end_pc"),
+                    BeginHookToken=UShort(service,"begin_hook_token"),
+                    EndHookToken=UShort(service,"end_hook_token"),
+                    BeginSourceCpu=Byte(service,"begin_source_cpu"),
+                    Cancelled=Boolean(service,"cancelled") };
+                foreach(JToken chipToken in Array(service,"chips"))
+                {
+                    JObject chip=Object(chipToken,"chip");ValidateChip(chip);
+                    byte eventKind=Byte(chip,"event_kind");
+                    byte subject=Byte(chip,"subject");
+                    bool data=Boolean(chip,"data");
+                    Require((eventKind==3||eventKind==4)
+                        &&(eventKind!=3||subject<=3)
+                        &&(eventKind!=4||subject==0)
+                        &&data==(eventKind==4||subject==1||subject==3),
+                        "chip shape differs");
+                    value.AddChip(new CompleteRunAudioObserver.WriteRecord {
+                        Coordinate=Integer64(chip,"coordinate"),
+                        Ordinal=Unsigned(chip,"native_ordinal"),
+                        Pc=Unsigned(chip,"pc"),Token=serviceToken,
+                        Kind=eventKind,Subject=subject,
+                        Value=Byte(chip,"value"),
+                        SourceCpu=Byte(chip,"source_cpu"),
+                        Port=Byte(chip,"port"),
+                        Register=Byte(chip,"register") });
+                }
+                foreach(JToken snapshotToken in Array(service,"snapshots"))
+                {
+                    JObject snapshot=Object(snapshotToken,"snapshot");
+                    ValidateSnapshot(snapshot);
+                    byte[] bytes=DecodeHex(String(snapshot,"bytes_hex"),
+                        "snapshot bytes");
+                    value.AddSnapshot(new CompleteRunAudioObserver.SnapshotRecord {
+                        RangeId=UShort(snapshot,"range_id"),
+                        SourceCpu=Byte(snapshot,"source_cpu"),
+                        Pc=Unsigned(snapshot,"pc"),Bytes=bytes,
+                        Length=bytes.Length });
+                }
+                foreach(JToken transitionToken in
+                    Array(service,"ancestry_transitions"))
+                {
+                    JObject transition=Object(transitionToken,
+                        "ancestry transition");
+                    ValidateTransition(transition);
+                    value.AddAncestry(
+                        new CompleteRunAudioObserver.AncestryRecord {
+                            Coordinate=Integer64(transition,"coordinate"),
+                            NativeOrdinal=Unsigned(transition,"native_ordinal"),
+                            PreviousParentToken=UShort(transition,
+                                "previous_parent_token"),
+                            PreviousDepth=Byte(transition,"previous_depth"),
+                            CurrentParentToken=UShort(transition,
+                                "current_parent_token"),
+                            CurrentDepth=Byte(transition,"current_depth"),
+                            HookToken=UShort(transition,"hook_token"),
+                            SourceCpu=Byte(transition,"source_cpu"),
+                            Pc=Unsigned(transition,"pc") });
+                }
+                if(result.Count!=0&&value.BeginCoordinate<=previousBegin)
+                    throw Invalid(label+" begin order differs");
+                previousBegin=value.BeginCoordinate;
+                result.Add(value);
             }
+            return result;
+        }
+
+        private static bool FrontiersEqual(
+            CompleteRunAudioObserver.CutoffFrontier expected,
+            CompleteRunAudioObserver.CutoffFrontier actual)
+        {
+            if(expected==null||actual==null
+                ||expected.YmPort0Address!=actual.YmPort0Address
+                ||expected.YmPort1Address!=actual.YmPort1Address
+                ||expected.ArmEpoch!=actual.ArmEpoch
+                ||expected.IsArmed!=actual.IsArmed
+                ||expected.PendingDeferredBegin!=null
+                ||actual.PendingDeferredBegin!=null
+                ||expected.ActiveServices.Count!=actual.ActiveServices.Count
+                ||expected.PendingServices.Count!=actual.PendingServices.Count)
+                return false;
+            for(int index=0;index<expected.ActiveServices.Count;index++)
+                if(!ServicesEqual(expected.ActiveServices[index],
+                    actual.ActiveServices[index]))return false;
+            for(int index=0;index<expected.PendingServices.Count;index++)
+                if(!ServicesEqual(expected.PendingServices[index],
+                    actual.PendingServices[index]))return false;
+            return true;
+        }
+
+        private static bool ServicesEqual(
+            CompleteRunAudioObserver.DriverService expected,
+            CompleteRunAudioObserver.DriverService actual)
+        {
+            if(expected.Token!=actual.Token
+                ||expected.ParentToken!=actual.ParentToken
+                ||expected.Kind!=actual.Kind||expected.Depth!=actual.Depth
+                ||expected.CurrentParentToken!=actual.CurrentParentToken
+                ||expected.CurrentDepth!=actual.CurrentDepth
+                ||expected.BeginCoordinate!=actual.BeginCoordinate
+                ||expected.BeginRow!=actual.BeginRow
+                ||expected.BeginNativeOrdinal!=actual.BeginNativeOrdinal
+                ||expected.EndCoordinate!=actual.EndCoordinate
+                ||expected.BeginPc!=actual.BeginPc||expected.EndPc!=actual.EndPc
+                ||expected.BeginHookToken!=actual.BeginHookToken
+                ||expected.EndHookToken!=actual.EndHookToken
+                ||expected.BeginSourceCpu!=actual.BeginSourceCpu
+                ||expected.Cancelled!=actual.Cancelled
+                ||expected.IsComplete!=actual.IsComplete
+                ||expected.OwnedChipEvents.Count!=actual.OwnedChipEvents.Count
+                ||expected.Snapshots.Count!=actual.Snapshots.Count
+                ||expected.AncestryTransitions.Count
+                    !=actual.AncestryTransitions.Count)return false;
+            for(int index=0;index<expected.OwnedChipEvents.Count;index++)
+            {
+                CompleteRunAudioObserver.OwnedChipEvent left=
+                    expected.OwnedChipEvents[index];
+                CompleteRunAudioObserver.OwnedChipEvent right=
+                    actual.OwnedChipEvents[index];
+                if(left.Coordinate!=right.Coordinate
+                    ||left.NativeOrdinal!=right.NativeOrdinal
+                    ||left.EventKind!=right.EventKind
+                    ||left.Subject!=right.Subject||left.Value!=right.Value
+                    ||left.Pc!=right.Pc||left.SourceCpu!=right.SourceCpu
+                    ||left.IsData!=right.IsData||left.Port!=right.Port
+                    ||left.Register!=right.Register)return false;
+            }
+            for(int index=0;index<expected.Snapshots.Count;index++)
+            {
+                CompleteRunAudioObserver.SnapshotGroup left=
+                    expected.Snapshots[index];
+                CompleteRunAudioObserver.SnapshotGroup right=
+                    actual.Snapshots[index];
+                if(left.RangeId!=right.RangeId
+                    ||left.SourceCpu!=right.SourceCpu||left.Pc!=right.Pc
+                    ||!BytesEqual(left.Bytes,right.Bytes))return false;
+            }
+            for(int index=0;index<expected.AncestryTransitions.Count;index++)
+            {
+                CompleteRunAudioObserver.AncestryTransition left=
+                    expected.AncestryTransitions[index];
+                CompleteRunAudioObserver.AncestryTransition right=
+                    actual.AncestryTransitions[index];
+                if(left.Coordinate!=right.Coordinate
+                    ||left.NativeOrdinal!=right.NativeOrdinal
+                    ||left.PreviousParentToken!=right.PreviousParentToken
+                    ||left.PreviousDepth!=right.PreviousDepth
+                    ||left.CurrentParentToken!=right.CurrentParentToken
+                    ||left.CurrentDepth!=right.CurrentDepth
+                    ||left.HookToken!=right.HookToken
+                    ||left.SourceCpu!=right.SourceCpu||left.Pc!=right.Pc)
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool BytesEqual(byte[] left,byte[] right)
+        {
+            if(left==null||right==null||left.Length!=right.Length)return false;
+            for(int index=0;index<left.Length;index++)
+                if(left[index]!=right[index])return false;
+            return true;
         }
 
         private static void ValidateChip(JObject value)
         { Exact(value,"chip","coordinate","native_ordinal","event_kind","subject","value","pc","source_cpu","data","port","register");
-          Integer64(value,"coordinate");Unsigned(value,"native_ordinal");Byte(value,"event_kind");Unsigned(value,"subject");Unsigned(value,"value");Unsigned(value,"pc");Byte(value,"source_cpu");Boolean(value,"data");Byte(value,"port");Byte(value,"register"); }
+          Integer64(value,"coordinate");Unsigned(value,"native_ordinal");Byte(value,"event_kind");Byte(value,"subject");Byte(value,"value");Unsigned(value,"pc");Byte(value,"source_cpu");Boolean(value,"data");Byte(value,"port");Byte(value,"register"); }
+        private static void ValidateOverrideWrite(JObject value)
+        { Exact(value,"override write","native_ordinal","event_kind","subject","value","pc","source_cpu","data","port","register");
+          Unsigned(value,"native_ordinal");Byte(value,"event_kind");Byte(value,"subject");Byte(value,"value");Unsigned(value,"pc");Byte(value,"source_cpu");Boolean(value,"data");Byte(value,"port");Byte(value,"register"); }
         private static void ValidateSnapshot(JObject value)
-        { Exact(value,"snapshot","range_id","source_cpu","pc","bytes_hex");Unsigned(value,"range_id");Byte(value,"source_cpu");Unsigned(value,"pc");HexData(String(value,"bytes_hex")); }
+        { Exact(value,"snapshot","range_id","source_cpu","pc","bytes_hex");UShort(value,"range_id");Byte(value,"source_cpu");Unsigned(value,"pc");HexData(String(value,"bytes_hex")); }
         private static void ValidateTransition(JObject value)
-        { Exact(value,"ancestry transition","coordinate","native_ordinal","previous_parent_token","previous_depth","current_parent_token","current_depth","hook_token","source_cpu","pc");Integer64(value,"coordinate");Unsigned(value,"native_ordinal");Unsigned(value,"previous_parent_token");Byte(value,"previous_depth");Unsigned(value,"current_parent_token");Byte(value,"current_depth");Unsigned(value,"hook_token");Byte(value,"source_cpu");Unsigned(value,"pc"); }
+        { Exact(value,"ancestry transition","coordinate","native_ordinal","previous_parent_token","previous_depth","current_parent_token","current_depth","hook_token","source_cpu","pc");Integer64(value,"coordinate");Unsigned(value,"native_ordinal");UShort(value,"previous_parent_token");Byte(value,"previous_depth");UShort(value,"current_parent_token");Byte(value,"current_depth");UShort(value,"hook_token");Byte(value,"source_cpu");Unsigned(value,"pc"); }
 
         private void ValidateCapability(JObject value)
         {
@@ -494,7 +755,9 @@ namespace OpenGGF.BizHawk.Headless
                 "first_row","exclusive_end","window_first_row","window_exclusive_end",
                 "base_event_count","all_event_count","marker_event_count","request_count",
                 "base_event_sha256","all_event_sha256","marker_event_sha256","request_sha256",
-                "max_request_occupancy","cutoff_frontier_sha256","terminal_state_sha256",
+                "max_request_occupancy","override_resume_count",
+                "override_resume_sha256","pcm_count","pcm_sha256",
+                "cutoff_frontier_sha256","terminal_state_sha256",
                 "digest_domains");
             Require(String(value,"schema")==CapabilitySchema
                 && String(value,"producer")=="s2-complete-audio-request-candidate"
@@ -518,9 +781,12 @@ namespace OpenGGF.BizHawk.Headless
                 "candidate_profile_sha256"}) HexString(String(value,name));
             JObject domains=Object(value["digest_domains"],"digest domains");
             Exact(domains,"digest domains","raw_sha256","event_and_request_sha256",
+                "override_resume_sha256","pcm_sha256",
                 "cutoff_frontier_sha256","terminal_state_sha256");
             Require(String(domains,"raw_sha256")=="raw-file-bytes-v1"
                 && String(domains,"event_and_request_sha256")=="compact-json-lf-v1"
+                && String(domains,"override_resume_sha256")=="compact-json-lf-v1"
+                && String(domains,"pcm_sha256")=="compact-json-lf-v1"
                 && String(domains,"cutoff_frontier_sha256")=="compact-json-lf-v1"
                 && String(domains,"terminal_state_sha256")=="decoded-z80-state-bytes-v1",
                 "capability digest domains differ");
@@ -530,16 +796,28 @@ namespace OpenGGF.BizHawk.Headless
                 && Null(value,"base_event_sha256") && Null(value,"all_event_sha256")
                 && Null(value,"marker_event_sha256") && Null(value,"request_sha256")
                 && Null(value,"max_request_occupancy")
+                && Null(value,"override_resume_count")
+                && Null(value,"override_resume_sha256")
+                && Null(value,"pcm_count")&&Null(value,"pcm_sha256")
                 && Null(value,"cutoff_frontier_sha256")
                 && Null(value,"terminal_state_sha256");
             if(allUnbound)return;
             Require(syntheticTestSeam,"unbound candidate has no authenticated inventory");
             foreach(string name in new[]{"harness_executable_sha256",
                 "base_event_sha256","all_event_sha256","marker_event_sha256",
-                "request_sha256","cutoff_frontier_sha256","terminal_state_sha256"})
+                "request_sha256","override_resume_sha256","pcm_sha256",
+                "cutoff_frontier_sha256","terminal_state_sha256"})
                 HexString(String(value,name));
+            Require(String(value,"harness_executable_sha256")
+                    ==DigestFile(typeof(GpgxHost).Assembly.Location,
+                        "harness executable").Sha256,
+                "capability executable identity differs");
             if(Integer64(value,"base_event_count")<0 || Integer64(value,"all_event_count")<0
                 || Integer64(value,"marker_event_count")<0 || Integer64(value,"request_count")<0
+                || Integer(value,"override_resume_count")<0
+                || Integer(value,"override_resume_count")>1
+                || Integer(value,"pcm_count")<0||Integer(value,"pcm_count")>1
+                || Integer(value,"override_resume_count")!=Integer(value,"pcm_count")
                 || Integer(value,"max_request_occupancy")<0 || Integer(value,"max_request_occupancy")>4)
                 throw Invalid("capability inventory range differs");
         }
@@ -626,6 +904,223 @@ namespace OpenGGF.BizHawk.Headless
                 return new FileEvidence { ByteCount=count,Sha256=Hex(digest.Hash) };
             }
         }
+        private static byte[] VerifiedBytes(string path,string label,
+            string expectedSha256)
+        {
+            RequireExisting(path,label);
+            byte[] bytes=File.ReadAllBytes(path);
+            Require(Hex(Sha256(bytes))==expectedSha256,
+                label+" identity differs");
+            return bytes;
+        }
+
+        /// <summary>
+        /// Replays parsed ABI-4 rows through the authoritative managed
+        /// observer. It has no host, callback, capture, or publication route.
+        /// </summary>
+        private sealed class RawReplayApi : IGpgxAudioTraceApi
+        {
+            private GpgxAudioTraceEvent[] queued;
+            private int phase;
+            public uint AbiVersion { get { return 4; } }
+            public uint EventSize { get { return 32; } }
+            public uint Capacity { get { return 65536; } }
+            internal void Queue(GpgxAudioTraceEvent[] events)
+            {
+                if(phase!=1||queued!=null)
+                    throw Invalid("raw replay row overlap");
+                queued=events??throw new ArgumentNullException("events");
+            }
+            public int Configure(ref GpgxAudioObserverAdapter.Config config,
+                byte[] mask,GpgxAudioObserverAdapter.ServiceKind[] kinds,
+                GpgxAudioObserverAdapter.ServiceHook[] hooks,
+                GpgxAudioObserverAdapter.SnapshotRange[] ranges)
+            {
+                if(config.AbiVersion!=4||config.EventSize!=32
+                    ||config.EventCapacity!=Capacity||config.Flags!=1)
+                    return -3;
+                phase=1;return 0;
+            }
+            public int BeginFrame()
+            {if(phase!=1||queued==null)return -2;phase=2;return 0;}
+            public int EndFrame()
+            {if(phase!=2)return -2;phase=3;return 0;}
+            public int EventCount(out uint count,out uint overflow)
+            {count=phase==3?(uint)queued.Length:0;overflow=0;return phase==3?0:-2;}
+            public int Drain(GpgxAudioTraceEvent[] events,uint capacity,
+                out uint count)
+            {
+                if(phase!=3){count=0;return -2;}
+                count=(uint)queued.Length;
+                if(capacity<count||(count!=0&&events==null))return -3;
+                if(count!=0)System.Array.Copy(queued,events,queued.Length);
+                queued=null;phase=1;return 0;
+            }
+            public int GetFirstFault(
+                out GpgxAudioObserverAdapter.FirstFault fault)
+            {fault=new GpgxAudioObserverAdapter.FirstFault();return 0;}
+            public int BeginPublicationEpoch(){return phase==1?0:-2;}
+            public int AbortFrame(){queued=null;phase=1;return 0;}
+            public int Disable(){queued=null;phase=0;return 0;}
+        }
+
+        private sealed class ResumePcmValidator
+        {
+            private JObject resume;
+            private JObject pcm;
+            private bool qualifyingSeen;
+            private int resumeRow=-1;
+            private bool awaitingFollowing;
+
+            internal int ResumeCount { get { return resume==null?0:1; } }
+            internal int PcmCount { get { return pcm==null?0:1; } }
+            internal string ResumeDigest
+            {get{return Hex(Sha256(resume==null?new byte[0]:Canonical(resume)));}}
+            internal string PcmDigest
+            {get{return Hex(Sha256(pcm==null?new byte[0]:Canonical(pcm)));}}
+
+            internal void Frame(JObject frame,
+                CompleteRunAudioObserver.FrameCapture capture,int row)
+            {
+                CompleteRunAudioObserver.DriverService selected=null;
+                foreach(CompleteRunAudioObserver.DriverService service
+                    in capture.Services)
+                {
+                    if(service.Kind!=9||service.Cancelled||!service.IsComplete
+                        ||service.BeginPc!=0x0110||service.BeginHookToken!=21
+                        ||service.EndPc!=0x0DB4||service.EndHookToken!=23
+                        ||service.BeginSourceCpu!=1)continue;
+                    if(selected!=null)
+                        throw Invalid("override resume service is ambiguous");
+                    selected=service;
+                }
+
+                JToken resumeToken=frame["override_resume"];
+                if(resumeToken==null)
+                    throw Invalid("v2 override envelope is incomplete");
+                JObject rowResume=resumeToken.Type==JTokenType.Null
+                    ?null:Object(resumeToken,"override resume");
+                if(selected!=null&&!qualifyingSeen)
+                {
+                    if(rowResume==null)
+                        throw Invalid("override resume selection is missing");
+                    ValidateResume(rowResume,selected,capture,row);
+                    resume=(JObject)rowResume.DeepClone();
+                    resumeRow=row;qualifyingSeen=true;
+                }
+                else
+                {
+                    if(rowResume!=null)
+                        throw Invalid("override resume selection is duplicated");
+                    if(selected!=null)qualifyingSeen=true;
+                }
+
+                JToken pcmToken=frame["pcm"];
+                if(pcmToken==null)
+                    throw Invalid("v2 PCM envelope is incomplete");
+                JObject rowPcm=pcmToken.Type==JTokenType.Null
+                    ?null:Object(pcmToken,"PCM");
+                if(rowResume!=null)
+                {
+                    if(rowPcm==null)awaitingFollowing=true;
+                    else
+                    {
+                        ValidatePcm(rowPcm,row,"service_frame",0);
+                        RecordPcm(rowPcm);
+                    }
+                }
+                else if(awaitingFollowing)
+                {
+                    if(row!=resumeRow+1||rowPcm==null)
+                        throw Invalid(
+                            "override resume following row has no PCM packet");
+                    ValidatePcm(rowPcm,row,"following_row",1);
+                    RecordPcm(rowPcm);awaitingFollowing=false;
+                }
+                else if(rowPcm!=null)
+                    throw Invalid("PCM packet has no override resume selection");
+            }
+
+            private void RecordPcm(JObject value)
+            {
+                if(pcm!=null)throw Invalid("PCM selection is duplicated");
+                pcm=(JObject)value.DeepClone();
+            }
+
+            internal void Complete()
+            {
+                if(awaitingFollowing)
+                    throw Invalid("override resume ended before following PCM");
+                if((resume==null)!=(pcm==null))
+                    throw Invalid("override resume and PCM inventory differ");
+            }
+
+            private static void ValidateResume(JObject value,
+                CompleteRunAudioObserver.DriverService selected,
+                CompleteRunAudioObserver.FrameCapture capture,int row)
+            {
+                ValidateOverrideResume(value);
+                Require(Integer(value,"frame")==row
+                    &&Boolean(value,"restores_saved_priority")
+                    &&!Boolean(value,"restores_psg_noise")
+                    &&UShort(value,"service_token")==selected.Token
+                    &&Unsigned(value,"service_begin_ordinal")
+                        ==selected.BeginNativeOrdinal,
+                    "override resume identity differs");
+                GpgxAudioTraceEvent? completion=null;
+                foreach(GpgxAudioTraceEvent evt in capture.RawEvents)
+                {
+                    if(evt.Kind!=2||evt.Subject!=23||evt.Pc!=0x0DB4
+                        ||evt.ServiceToken!=selected.Token
+                        ||evt.ServiceKindId!=9||evt.SourceCpu!=1)continue;
+                    if(completion.HasValue)
+                        throw Invalid("override resume completion is ambiguous");
+                    completion=evt;
+                }
+                Require(completion.HasValue
+                    &&Unsigned(value,"native_ordinal")
+                        ==completion.Value.Ordinal,
+                    "override resume completion differs");
+                JArray writes=Array(value,"writes");
+                Require(writes.Count==selected.OwnedChipEvents.Count
+                    &&writes.Count>0,"override resume writes differ");
+                for(int index=0;index<writes.Count;index++)
+                {
+                    JObject raw=Object(writes[index],"override write");
+                    ValidateOverrideWrite(raw);
+                    CompleteRunAudioObserver.OwnedChipEvent expected=
+                        selected.OwnedChipEvents[index];
+                    Require(Unsigned(raw,"native_ordinal")==expected.NativeOrdinal
+                        &&Byte(raw,"event_kind")==expected.EventKind
+                        &&Byte(raw,"subject")==expected.Subject
+                        &&Byte(raw,"value")==expected.Value
+                        &&Unsigned(raw,"pc")==expected.Pc
+                        &&Byte(raw,"source_cpu")==expected.SourceCpu
+                        &&Boolean(raw,"data")==expected.IsData
+                        &&Byte(raw,"port")==expected.Port
+                        &&Byte(raw,"register")==expected.Register,
+                        "override resume write differs");
+                }
+            }
+
+            private static void ValidatePcm(JObject value,int row,
+                string selection,int offset)
+            {
+                S2RequestAwareOracleV2Extractor.ValidatePcm(value,row);
+                Require(String(value,"selection")==selection
+                    &&Integer(value,"offset")==offset,
+                    "PCM selection differs");
+                long frames=Integer64(value,"stereo_frames");
+                long bytes=Integer64(value,"byte_count");
+                Require(frames>0&&frames<=int.MaxValue
+                    &&bytes==checked(frames*4)&&bytes<=int.MaxValue,
+                    "PCM frame/byte count differs");
+                byte[] decoded=DecodeHex(String(value,"pcm_hex"),"PCM");
+                Require(decoded.LongLength==bytes
+                    &&Hex(Sha256(decoded))==String(value,"sha256"),
+                    "PCM digest differs");
+            }
+        }
         private static string StagePath(string outputPath)
         {
             if(string.IsNullOrEmpty(outputPath)||!Path.IsPathRooted(outputPath))
@@ -643,8 +1138,12 @@ namespace OpenGGF.BizHawk.Headless
         private static JObject ReadObject(string path,string label)
         {
             RequireExisting(path,label);
-            using(var input=new StreamReader(File.OpenRead(path),new UTF8Encoding(false,true),false,65536))
-            using(var reader=new JsonTextReader(input))
+            byte[] bytes=File.ReadAllBytes(path);
+            string json=StrictUtf8(bytes,label);
+            if(json.Length!=0&&json[0]=='\uFEFF')
+                throw Invalid(label+" contains a byte-order mark");
+            RejectNonstandardJson(json,label);
+            using(var reader=new JsonTextReader(new StringReader(json)))
             {
                 try
                 {
@@ -660,10 +1159,45 @@ namespace OpenGGF.BizHawk.Headless
         private static string ReadLine(StreamReader input,string label)
         { string line=input.ReadLine();if(line==null)throw Invalid(label+" ended early");return line; }
         private static JObject ParseLine(string line,string label)
-        { try{using(var reader=new JsonTextReader(new StringReader(line)))
-          { return Object(JObject.Load(reader,new JsonLoadSettings {
-              DuplicatePropertyNameHandling=DuplicatePropertyNameHandling.Error }),label); }}catch(Exception error)
+        { RejectNonstandardJson(line,label);try{using(var reader=new JsonTextReader(new StringReader(line)))
+          { JObject result=Object(JObject.Load(reader,new JsonLoadSettings {
+              DuplicatePropertyNameHandling=DuplicatePropertyNameHandling.Error }),label);
+            if(reader.Read())throw Invalid(label+" has trailing JSON value");
+            if(!string.Equals(line,result.ToString(Formatting.None),
+                StringComparison.Ordinal))
+                throw Invalid(label+" is not exact producer JSON");
+            return result; }}catch(InvalidDataException){throw;}catch(Exception error)
           {throw Invalid(label+" is not strict JSON",error);} }
+        private static void RejectNonstandardJson(string value,string label)
+        {
+            bool inString=false,escaped=false;
+            for(int index=0;index<value.Length;index++)
+            {
+                char current=value[index];
+                if(inString)
+                {
+                    if(escaped)escaped=false;
+                    else if(current=='\\')escaped=true;
+                    else if(current=='\"')inString=false;
+                    continue;
+                }
+                if(current=='\"'){inString=true;continue;}
+                if(current=='\'')
+                    throw Invalid(label+" contains a single-quoted string");
+                if(current=='/'&&index+1<value.Length
+                    &&(value[index+1]=='/'||value[index+1]=='*'))
+                    throw Invalid(label+" contains a JSON comment");
+                if(current==',')
+                {
+                    int next=index+1;
+                    while(next<value.Length
+                        &&(value[next]==' '||value[next]=='\t'))next++;
+                    if(next<value.Length
+                        &&(value[next]=='}'||value[next]==']'))
+                        throw Invalid(label+" contains a trailing comma");
+                }
+            }
+        }
         private static JObject Object(JToken value,string label)
         { JObject result=value as JObject;if(result==null)throw Invalid(label+" is not an object");return result; }
         private static JArray Array(JObject value,string name)
@@ -680,10 +1214,12 @@ namespace OpenGGF.BizHawk.Headless
         { JToken token=value[name];if(token==null||token.Type!=JTokenType.Integer)throw Invalid("missing integer: "+name);try{return token.Value<long>();}catch(Exception){throw Invalid("integer range differs: "+name);} }
         private static uint Unsigned(JObject value,string name)
         { JToken token=value[name];if(token==null||token.Type!=JTokenType.Integer)throw Invalid("missing unsigned integer: "+name);try{return token.Value<uint>();}catch(Exception){throw Invalid("unsigned range differs: "+name);} }
+        private static ushort UShort(JObject value,string name)
+        { uint result=Unsigned(value,name);if(result>ushort.MaxValue)throw Invalid(name+" is outside ushort range");return (ushort)result; }
         private static byte Byte(JObject value,string name)
         { int result=Integer(value,name);if(result<0||result>255)throw Invalid(name+" is outside byte range");return (byte)result; }
         private static void State(JObject value,string name)
-        { string state=String(value,name);if(state.Length!=0x4000)throw Invalid("state snapshot differs");for(int i=0;i<state.Length;i++)if(!Uri.IsHexDigit(state[i]))throw Invalid("state snapshot is not hex"); }
+        { string state=String(value,name);if(state.Length!=0x4000)throw Invalid("state snapshot differs");for(int i=0;i<state.Length;i++)if(!((state[i]>='0'&&state[i]<='9')||(state[i]>='a'&&state[i]<='f')))throw Invalid("state snapshot is not lowercase hex"); }
         private static byte[] StateBytes(string state)
         { if(state.Length!=0x4000)throw Invalid("state snapshot differs");var bytes=new byte[0x2000];for(int i=0;i<bytes.Length;i++){int high=Nibble(state[i*2]),low=Nibble(state[i*2+1]);bytes[i]=(byte)((high<<4)|low);}return bytes; }
         private static int Nibble(char value)
@@ -700,6 +1236,8 @@ namespace OpenGGF.BizHawk.Headless
         { if(value.Length!=64)throw Invalid("digest length differs");for(int i=0;i<value.Length;i++)if(!Uri.IsHexDigit(value[i])||char.IsUpper(value[i]))throw Invalid("digest differs"); }
         private static void HexData(string value)
         { if((value.Length&1)!=0)throw Invalid("hex data length differs");for(int i=0;i<value.Length;i++)if(!Uri.IsHexDigit(value[i])||char.IsUpper(value[i]))throw Invalid("hex data differs"); }
+        private static byte[] DecodeHex(string value,string label)
+        { HexData(value);var result=new byte[value.Length/2];for(int index=0;index<result.Length;index++)result[index]=(byte)((Nibble(value[index*2])<<4)|Nibble(value[index*2+1]));return result; }
         private static string StrictUtf8(byte[] value,string label)
         { try{return new UTF8Encoding(false,true).GetString(value);}catch(DecoderFallbackException error){throw Invalid(label+" is not strict UTF-8",error);} }
         private static void Write(TextWriter output,JObject value)

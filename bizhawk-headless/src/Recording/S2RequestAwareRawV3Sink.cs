@@ -21,16 +21,29 @@ namespace OpenGGF.BizHawk.Headless
         private readonly StringWriter v2Output = new StringWriter(CultureInfo.InvariantCulture);
         private readonly S2CompleteAudioRawSink v2;
         private readonly TextWriter output;
+        private readonly int firstRow;
+        private readonly int exclusiveEnd;
         private int lastRow = -1;
         private long nextTransferOrdinal;
         private bool begun, complete;
 
-        internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
+        internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer,
+            int sourceFirstRow, int sourceExclusiveEnd)
         {
             if (state == null) throw new ArgumentNullException("state");
+            if (sourceFirstRow < 0 || sourceExclusiveEnd <= sourceFirstRow)
+                throw new ArgumentOutOfRangeException("sourceFirstRow");
             output = writer ?? throw new ArgumentNullException("writer");
-            v2 = new S2CompleteAudioRawSink(state, v2Output);
+            firstRow = sourceFirstRow;
+            exclusiveEnd = sourceExclusiveEnd;
+            v2 = new S2CompleteAudioRawSink(state, v2Output, firstRow,
+                exclusiveEnd);
         }
+
+        internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
+            : this(state,writer,S2AudioObserverProfile.FirstRow,
+                S2AudioObserverProfile.ExclusiveEnd)
+        { }
 
         internal void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
         {
@@ -44,7 +57,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (!begun || complete) throw new InvalidOperationException("The unbound S2 raw-v3 epoch is not active.");
             if (frame == null || transfers == null) throw new ArgumentNullException(frame == null ? "frame" : "transfers");
-            if (frame.Bk2Row != row || row != (lastRow < 0 ? S2AudioObserverProfile.FirstRow : lastRow + 1) || row >= S2AudioObserverProfile.ExclusiveEnd)
+            if (frame.Bk2Row != row || row != (lastRow < 0 ? firstRow : lastRow + 1) || row >= exclusiveEnd)
                 throw new InvalidDataException("The S2 raw-v3 rows are not contiguous.");
             JArray values = Transfers(row, transfers);
             v2.Frame(row, frame, audio);
@@ -56,7 +69,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (!begun || complete) throw new InvalidOperationException("The unbound S2 raw-v3 epoch is not active.");
             if (cutoff == null) throw new ArgumentNullException("cutoff");
-            if (lastRow != S2AudioObserverProfile.ExclusiveEnd - 1)
+            if (lastRow != exclusiveEnd - 1)
                 throw new InvalidDataException("The S2 raw-v3 candidate rejects an early or empty cutoff.");
             v2.Complete(cutoff); Flush(false, null); complete = true;
         }

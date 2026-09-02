@@ -69,6 +69,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 RejectsMalformedTailAndResetOrdering,
                 serial: true));
             tests.Add(new TestMain.TestCase(
+                "CompleteRunAudioObserverTests reject a tail successor outside the exact drain",
+                RejectsTailSuccessorOutsideExactDrain,
+                serial: true));
+            tests.Add(new TestMain.TestCase(
                 "CompleteRunAudioObserverTests discard bounded state at a capture cutoff",
                 DiscardsBoundedCutoffState,
                 serial: true));
@@ -1355,6 +1359,30 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Throws<InvalidOperationException>(()=>CreateCanonical(badZ80ResetChip).CaptureCanonicalFrame(()=>{}),"reset chip source/PC");
         }
 
+        private static void RejectsTailSuccessorOutsideExactDrain()
+        {
+            var api=new FakeTraceApi{Events=new[]{
+                Canonical(0,1,1,0,2,0,1,0x100,0)}};
+            CompleteRunAudioObserver observer=CreateSelfTail(api);
+            observer.CaptureCanonicalFrame(()=>{});
+            api.Events=new[]{
+                Canonical(0,2,1,0,2,0,5,0x130,0),
+                Canonical(1,1,2,0,2,0,5,0x130,0),
+                Canonical(2,2,2,0,2,0,5,0x130,0),
+                Canonical(3,1,4,0,2,0,5,0x130,0)};
+            observer.CaptureCanonicalFrame(()=>{});
+            api.Events=new[]{
+                Canonical(0,2,4,0,2,0,5,0x130,0),
+                Canonical(1,1,2,0,2,0,5,0x130,0)};
+            observer.CaptureCanonicalFrame(()=>{});
+            api.Events=new[]{
+                Canonical(0,4,2,0,2,0,0,0x132,0,value:0x9F),
+                Canonical(1,4,2,0,2,0,0,0x133,0,value:0x9E),
+                Canonical(2,2,2,0,2,0,5,0x130,0)};
+            AssertEx.Throws<InvalidOperationException>(
+                ()=>observer.CaptureCanonicalFrame(()=>{}),"tail");
+        }
+
         private static void DiscardsBoundedCutoffState()
         {
             var api=new FakeTraceApi{Events=new[]{
@@ -1487,6 +1515,26 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static CompleteRunAudioObserver CreateCanonical(FakeTraceApi api)
         {
             return CreateCanonical(api, false);
+        }
+
+        private static CompleteRunAudioObserver CreateSelfTail(FakeTraceApi api)
+        {
+            var config=new GpgxAudioObserverAdapter.Config {
+                Magic=0x31544147,AbiVersion=1,StructSize=64,KindSize=16,
+                HookSize=32,RangeSize=16,EventSize=32,MaxDepth=8,
+                WatchMaskBytes=8192,HookCount=2,EventCapacity=65536,
+                KindCount=2,ResetServiceKind=1 };
+            var kinds=new[]{
+                new GpgxAudioObserverAdapter.ServiceKind{KindId=1},
+                new GpgxAudioObserverAdapter.ServiceKind{KindId=2} };
+            var hooks=new[]{
+                new GpgxAudioObserverAdapter.ServiceHook{HookToken=1,
+                    Action=1,Cpu=1,Pc=0x100,ServiceKindId=2},
+                new GpgxAudioObserverAdapter.ServiceHook{HookToken=5,
+                    Action=4,Cpu=1,Pc=0x130,ServiceKindId=2,
+                    ExpectedActiveKind=2} };
+            return new CompleteRunAudioObserver(api,config,new byte[8192],
+                kinds,hooks,new GpgxAudioObserverAdapter.SnapshotRange[0]);
         }
 
         private static CompleteRunAudioObserver CreateCanonical(FakeTraceApi api,

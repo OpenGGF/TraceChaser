@@ -45,6 +45,36 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests keep the raw path line-streamed",
                 KeepsRawPathLineStreamed));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject a second JSON value on one raw line",
+                RejectsSecondJsonValueOnRawLine));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept bytes from the closed raw-v3 producer",
+                AcceptsBytesFromClosedRawV3Producer));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests accept producer following-row PCM",
+                AcceptsProducerFollowingRowPcm));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject native ABI and lifecycle mutations",
+                RejectsNativeAbiAndLifecycleMutations));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject native continuation overflow across rows",
+                RejectsNativeContinuationOverflowAcrossRows));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject exact ABI-4 kind and field mutations",
+                RejectsExactAbi4KindAndFieldMutations));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject override and PCM mutations",
+                RejectsOverrideAndPcmMutations));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject every static identity mutation",
+                RejectsEveryStaticIdentityMutation));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject noncanonical JSONL byte forms",
+                RejectsNoncanonicalJsonlByteForms));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject nonstandard authority JSON",
+                RejectsNonstandardAuthorityJson));
         }
 
         private static void DefinesClosedContract()
@@ -108,6 +138,21 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         input.Attestation, Path.Combine(root, "out.jsonl")),
                     "inventory");
                 AssertEx.Equal(false, File.Exists(Path.Combine(root, "out.jsonl")));
+                byte[] raw=SyntheticRaw();
+                capability=Capability(raw);
+                capability["override_resume_sha256"]=new string('0',64);
+                WriteAuthority(input,capability,raw);
+                AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                    .ExtractForTesting(input.Raw,input.Capability,
+                        input.Attestation,Path.Combine(root,"resume.jsonl")),
+                    "override/PCM inventory");
+                capability=Capability(raw);
+                capability["pcm_sha256"]=new string('0',64);
+                WriteAuthority(input,capability,raw);
+                AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                    .ExtractForTesting(input.Raw,input.Capability,
+                        input.Attestation,Path.Combine(root,"pcm.jsonl")),
+                    "override/PCM inventory");
             });
         }
 
@@ -151,7 +196,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 lines = File.ReadAllText(input.Raw).Split(new[] { '\n' },
                     StringSplitOptions.RemoveEmptyEntries);
                 JObject markerFrame = JObject.Parse(lines[4]);
-                ((JArray)markerFrame["events"])[2]["source_cpu"] = 1;
+                ((JArray)markerFrame["events"])[0]["source_cpu"] = 1;
                 lines[4] = markerFrame.ToString(Formatting.None);
                 RefreshAuthority(input, string.Join("\n", lines) + "\n");
                 AssertEx.Throws<InvalidDataException>(() => input.Extractor
@@ -164,9 +209,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             WithSyntheticInputs((root,input) => AssertRawRejection(input,root,lines =>
             {
-                JObject frame=JObject.Parse(lines[4]);
+                JObject frame=JObject.Parse(lines[5]);
                 ((JArray)frame["events"])[1]["ordinal"]=8;
-                lines[4]=Json(frame);
+                lines[5]=Json(frame);
             },"native ordinal"));
         }
 
@@ -238,6 +283,795 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(false, source.Contains("ReadToEnd()"));
             AssertEx.Equal(true, source.Contains("new StreamReader(rawInput"));
             AssertEx.Equal(true, source.Contains(".s2-request-window-"));
+            AssertEx.Equal(true, source.Contains(
+                "byte[] serviceManifestBytes=VerifiedBytes(serviceManifestPath"));
+            AssertEx.Equal(true, source.Contains(
+                "LoadS2RequestCandidate(\n                    serviceManifestBytes"));
+            AssertEx.Equal(false, source.Contains(
+                "LoadS2RequestCandidate(\n                    serviceManifestPath"));
+        }
+
+        private static void RejectsSecondJsonValueOnRawLine()
+        {
+            WithSyntheticInputs((root, input) =>
+            {
+                string[] lines = Encoding.UTF8.GetString(SyntheticRaw()).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                lines[2] += " {}";
+                byte[] malformed = Encoding.UTF8.GetBytes(
+                    string.Join("\n", lines) + "\n");
+                File.WriteAllBytes(input.Raw, malformed);
+                WriteAuthority(input, Capability(SyntheticRaw()), malformed);
+                AssertEx.Throws<InvalidDataException>(() => input.Extractor
+                    .ExtractForTesting(input.Raw, input.Capability,
+                        input.Attestation, Path.Combine(root, "second.jsonl")),
+                    "strict JSON");
+            });
+        }
+
+        private static void AcceptsBytesFromClosedRawV3Producer()
+        {
+            string root = TestScratch.CreateRootPath(
+                "s2-request-aware-producer-extractor");
+            try
+            {
+                Directory.CreateDirectory(root);
+                byte[] raw = ProducerRaw();
+                var input = new Inputs
+                {
+                    Extractor = S2RequestAwareOracleV2Extractor.ForTesting(
+                        1, 4, 2, 3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw = Path.Combine(root, "producer.raw.jsonl"),
+                    Capability = Path.Combine(root, "producer.capability.json"),
+                    Attestation = Path.Combine(root, "producer.attestation.json")
+                };
+                File.WriteAllBytes(input.Raw, raw);
+                WriteAuthority(input, Capability(raw, 2, 3), raw);
+                string output = Path.Combine(root, "window.jsonl");
+
+                input.Extractor.ExtractForTesting(input.Raw, input.Capability,
+                    input.Attestation, output);
+
+                AssertEx.Equal(true, File.Exists(output));
+                string[] records = File.ReadAllText(input.Raw).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                AssertEx.Equal(1,((JArray)JObject.Parse(records[1])
+                    ["active_services"]).Count);
+                AssertEx.Equal(2,((JArray)JObject.Parse(records[1])
+                    ["pending_descendants"]).Count);
+                JObject frontierWrite=(JObject)((JArray)((JArray)
+                    JObject.Parse(records[1])["active_services"])[0]
+                    ["chips"])[0];
+                AssertEx.Equal(true,frontierWrite.ContainsKey("coordinate"));
+                JObject resume = (JObject)JObject.Parse(records[3])
+                    ["override_resume"];
+                JObject write = (JObject)((JArray)resume["writes"])[0];
+                AssertEx.Equal(false, write.ContainsKey("coordinate"));
+                AssertEx.Equal(1, ((JArray)JObject.Parse(records[5])
+                    ["active_services"]).Count);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+            }
+        }
+
+        private static byte[] ProducerRaw()
+        { return ProducerRaw(false); }
+
+        private static byte[] ProducerRaw(bool followingRowPcm)
+        {
+            var api = new ProducerTraceApi();
+            var host = new ProducerHost(api);
+            var output = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+            using (S2CompleteAudioCaptureRunner.RequestAwareRawV3Candidate candidate =
+                S2CompleteAudioCaptureRunner
+                    .OpenRequestAwareRawV3CandidateForTesting(
+                        Fixture("gpgx-audio-service-manifest-s2-request-v3.json"),
+                        Fixture("gpgx-audio-service-manifests-v1.json"),
+                        host, output, 1, 4))
+            {
+                api.Events = UploadEvents();
+                host.AudioAfterAdvance = new short[0];
+                candidate.AdvanceRow(0, new Bk2Frame());
+
+                api.Events = ResumeEvents();
+                host.AudioAfterAdvance = new short[0];
+                candidate.AdvanceRow(1, new Bk2Frame());
+
+                const uint a7 = 0x00FF1020;
+                api.Events = RequestAndOpenServiceEvents(a7);
+                api.SuccessorOrdinal = 19;
+                host.Set("M68K D0", 0xB5);
+                host.Set("M68K D1", 3);
+                host.Set("M68K A7", a7);
+                host.ExecuteCallbackOnAdvance = true;
+                host.AudioAfterAdvance = followingRowPcm
+                    ?new short[0]:new short[] { 1, -2 };
+                candidate.AdvanceRow(2, new Bk2Frame());
+
+                api.Events = new GpgxAudioTraceEvent[0];
+                host.AudioAfterAdvance = followingRowPcm
+                    ?new short[] { 1, -2 }:new short[0];
+                candidate.AdvanceRow(3,new Bk2Frame());
+                candidate.Complete();
+            }
+            return Encoding.UTF8.GetBytes(output.ToString());
+        }
+
+        private static void AcceptsProducerFollowingRowPcm()
+        {
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-following-pcm");
+            try
+            {
+                Directory.CreateDirectory(root);
+                byte[] raw=ProducerRaw(true);
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        1,4,2,3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"following.raw.jsonl"),
+                    Capability=Path.Combine(root,"capability.json"),
+                    Attestation=Path.Combine(root,"attestation.json") };
+                File.WriteAllBytes(input.Raw,raw);
+                WriteAuthority(input,Capability(raw,2,3),raw);
+                input.Extractor.ExtractForTesting(input.Raw,input.Capability,
+                    input.Attestation,Path.Combine(root,"out.jsonl"));
+                string[] lines=Encoding.UTF8.GetString(raw).Split(
+                    new[]{'\n'},StringSplitOptions.RemoveEmptyEntries);
+                AssertEx.Equal(JTokenType.Null,
+                    JObject.Parse(lines[3])["pcm"].Type);
+                JObject pcm=(JObject)JObject.Parse(lines[4])["pcm"];
+                AssertEx.Equal("following_row",(string)pcm["selection"]);
+                AssertEx.Equal(1,(int)pcm["offset"]);
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
+        private static void RejectsNativeAbiAndLifecycleMutations()
+        {
+            AssertProducerRawRejection(lines =>
+            {
+                JObject frame = JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[0]["subject"] = 11;
+                lines[3] = Json(frame);
+            }, "native ABI");
+            AssertProducerRawRejection(lines =>
+            {
+                JObject cutoff = JObject.Parse(lines[5]);
+                ((JArray)cutoff["active_services"])[0]["parent_token"] = 44;
+                lines[5] = Json(cutoff);
+            }, "frontier");
+        }
+
+        private static void RejectsNativeContinuationOverflowAcrossRows()
+        {
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-continuation-overflow");
+            try
+            {
+                Directory.CreateDirectory(root);
+                string[] produced=Encoding.UTF8.GetString(ProducerRaw()).Split(
+                    new[]{'\n'},StringSplitOptions.RemoveEmptyEntries);
+                JObject metadata=JObject.Parse(produced[0]);
+                metadata["exclusive_end"]=8;
+                var lines=new List<string>{Json(metadata),produced[1],
+                    produced[2],produced[3],produced[4]};
+                JObject empty=JObject.Parse(produced[4]);
+                for(int row=4;row<8;row++)
+                {
+                    empty["row"]=row;
+                    lines.Add(Json(empty));
+                }
+                JObject cutoff=JObject.Parse(produced[5]);
+                cutoff["exclusive_end"]=8;
+                lines.Add(Json(cutoff));
+                byte[] raw=Encoding.UTF8.GetBytes(
+                    string.Join("\n",lines)+"\n");
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        1,8,2,3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"overflow.raw.jsonl"),
+                    Capability=Path.Combine(root,"capability.json"),
+                    Attestation=Path.Combine(root,"attestation.json") };
+                File.WriteAllBytes(input.Raw,raw);
+                WriteAuthority(input,Capability(raw,2,3),raw);
+                AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                    .ExtractForTesting(input.Raw,input.Capability,
+                        input.Attestation,Path.Combine(root,"out.jsonl")),
+                    "native ABI");
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
+        private static void RejectsExactAbi4KindAndFieldMutations()
+        {
+            foreach(string name in new[]{"service_token","parent_token",
+                "subject","offset"})
+                AssertProducerRawRejection(lines=>
+                {
+                    JObject frame=JObject.Parse(lines[3]);
+                    ((JArray)frame["events"])[19][name]=65536;
+                    lines[3]=Json(frame);
+                },"extractor");
+            foreach(string name in new[]{"value","flags","reserved"})
+                AssertProducerRawRejection(lines=>
+                {
+                    JObject frame=JObject.Parse(lines[3]);
+                    ((JArray)frame["events"])[19][name]=256;
+                    lines[3]=Json(frame);
+                },"extractor");
+            foreach(string name in new[]{"offset","flags","reserved"})
+                AssertProducerRawRejection(lines=>
+                {
+                    JObject frame=JObject.Parse(lines[3]);
+                    ((JArray)frame["events"])[19][name]=1;
+                    lines[3]=Json(frame);
+                },"extractor");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[14]["subject"]=1;
+                lines[3]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[18]["flags"]=1;
+                lines[3]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[20]["kind"]=11;
+                lines[3]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[4]["kind"]=6;
+                lines[3]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[2]);
+                ((JArray)frame["events"])[1]["parent_token"]=0;
+                lines[2]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[2]);
+                ((JArray)frame["events"])[0]["pc"]=57;
+                lines[2]=Json(frame);
+            },"native ABI");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                ((JArray)baseline["active_services"])[0]
+                    ["current_parent_token"]=99;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                ((JArray)baseline["active_services"])[0]["begin_row"]=1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject pending=(JObject)((JArray)
+                    baseline["pending_descendants"])[0];
+                pending["end_coordinate"]=pending["begin_coordinate"];
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject pending=(JObject)((JArray)
+                    baseline["pending_descendants"])[0];
+                pending["depth"]=2;pending["current_depth"]=2;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JArray chips=(JArray)((JArray)
+                    baseline["active_services"])[0]["chips"];
+                ((JObject)chips[1])["coordinate"]=chips[0]["coordinate"];
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JArray pending=(JArray)baseline["pending_descendants"];
+                JToken first=pending[0];pending[0]=pending[1];pending[1]=first;
+                lines[1]=Json(baseline);
+            },"pending");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                baseline["native_armed"]=false;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                baseline["native_arm_epoch"]=0;
+                lines[1]=Json(baseline);
+                JObject cutoff=JObject.Parse(lines[5]);
+                cutoff["native_arm_epoch"]=0;
+                lines[5]=Json(cutoff);
+            },"arm epoch");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                ((JArray)baseline["active_services"])[0]
+                    ["begin_native_ordinal"]=65536;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                ((JArray)((JArray)baseline["active_services"])[0]
+                    ["chips"])[0]["native_ordinal"]=65536;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject chip=(JObject)((JArray)((JArray)
+                    baseline["active_services"])[0]["chips"])[0];
+                chip["native_ordinal"]=(long)chip["coordinate"]+1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JArray chips=(JArray)((JArray)
+                    baseline["active_services"])[0]["chips"];
+                ((JObject)chips[0])["native_ordinal"]=
+                    (long)((JObject)chips[0])["native_ordinal"]-1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JArray chips=(JArray)((JArray)
+                    baseline["active_services"])[0]["chips"];
+                ((JObject)chips[1])["native_ordinal"]=
+                    (long)((JObject)chips[1])["coordinate"]-1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject active=(JObject)((JArray)
+                    baseline["active_services"])[0];
+                active["begin_native_ordinal"]=
+                    (long)active["begin_coordinate"]+1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject pending=(JObject)((JArray)
+                    baseline["pending_descendants"])[0];
+                pending["begin_native_ordinal"]=
+                    (long)pending["begin_native_ordinal"]-1;
+                lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[2]);
+                string state=(string)frame["state_hex"];
+                frame["state_hex"]="A"+state.Substring(1);
+                lines[2]=Json(frame);
+            },"state snapshot");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JArray active=(JArray)baseline["active_services"];
+                JObject child=(JObject)active[0];
+                JObject parent=(JObject)child.DeepClone();
+                parent["token"]=1;parent["parent_token"]=0;
+                parent["kind"]=6;parent["depth"]=0;
+                parent["current_parent_token"]=0;
+                parent["current_depth"]=0;
+                parent["begin_coordinate"]=(long)child["begin_coordinate"]-1;
+                parent["begin_native_ordinal"]=
+                    (long)child["begin_native_ordinal"]-1;
+                parent["begin_pc"]=0;parent["begin_hook_token"]=11;
+                parent["chips"]=new JArray();
+                parent["snapshots"]=new JArray();
+                parent["ancestry_transitions"]=new JArray();
+                child["parent_token"]=1;child["depth"]=1;
+                child["current_parent_token"]=1;
+                child["current_depth"]=1;
+                child["begin_hook_token"]=13;child["begin_pc"]=378;
+                active.Insert(0,parent);lines[1]=Json(baseline);
+            },"baseline");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JArray)frame["events"])[20]["service_token"]=2;
+                lines[3]=Json(frame);
+                JObject cutoff=JObject.Parse(lines[5]);
+                ((JArray)cutoff["active_services"])[0]["token"]=2;
+                lines[5]=Json(cutoff);
+            },"native ABI");
+        }
+
+        private static void RejectsOverrideAndPcmMutations()
+        {
+            AssertProducerRawRejection(lines =>
+            {
+                JObject frame = JObject.Parse(lines[3]);
+                ((JObject)frame["override_resume"])
+                    ["restores_saved_priority"] = false;
+                lines[3] = Json(frame);
+            }, "override");
+            AssertProducerRawRejection(lines =>
+            {
+                JObject frame = JObject.Parse(lines[3]);
+                ((JObject)frame["pcm"])["sha256"] = new string('0', 64);
+                lines[3] = Json(frame);
+            }, "PCM");
+            foreach(string name in new[]{"request","admission","request_pc",
+                "pc","service_token","service_begin_ordinal","native_ordinal",
+                "frame","fix_driver_bugs","restores_psg_noise"})
+                AssertProducerRawRejection(lines=>
+                {
+                    JObject frame=JObject.Parse(lines[3]);
+                    JObject resume=(JObject)frame["override_resume"];
+                    if(resume[name].Type==JTokenType.String)resume[name]="wrong";
+                    else if(resume[name].Type==JTokenType.Boolean)
+                        resume[name]=!(bool)resume[name];
+                    else resume[name]=(long)resume[name]+1;
+                    lines[3]=Json(frame);
+                },"extractor");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                JArray writes=(JArray)frame["override_resume"]["writes"];
+                JToken first=writes[0];writes[0]=writes[1];writes[1]=first;
+                lines[3]=Json(frame);
+            },"override");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject baseline=JObject.Parse(lines[1]);
+                JObject write=(JObject)((JArray)((JArray)
+                    baseline["active_services"])[0]["chips"])[0];
+                write.Remove("coordinate");
+                lines[1]=Json(baseline);
+            },"chip");
+            AssertProducerRawRejection(lines=>
+            {
+                JObject frame=JObject.Parse(lines[3]);
+                ((JObject)((JArray)frame["override_resume"]["writes"])[0])
+                    ["coordinate"]=0;
+                lines[3]=Json(frame);
+            },"override write");
+            foreach(string name in new[]{"selection","row","offset",
+                "sample_rate","channels","format","stereo_frames",
+                "byte_count","pcm_hex"})
+                AssertProducerRawRejection(lines=>
+                {
+                    JObject frame=JObject.Parse(lines[3]);
+                    JObject pcm=(JObject)frame["pcm"];
+                    if(name=="selection"||name=="format")pcm[name]="wrong";
+                    else if(name=="pcm_hex")pcm[name]="00";
+                    else pcm[name]=(long)pcm[name]+1;
+                    lines[3]=Json(frame);
+                },"PCM");
+            AssertProducerRawRejection(ProducerRaw(true),lines=>
+            {
+                JObject frame=JObject.Parse(lines[4]);
+                ((JObject)frame["pcm"])["selection"]="service_frame";
+                lines[4]=Json(frame);
+            },"PCM selection");
+            AssertProducerRawRejection(ProducerRaw(true),lines=>
+            {
+                JObject frame=JObject.Parse(lines[4]);
+                frame["pcm"]=JValue.CreateNull();
+                lines[4]=Json(frame);
+            },"extractor");
+        }
+
+        private static void RejectsEveryStaticIdentityMutation()
+        {
+            WithSyntheticInputs((root,input) =>
+            {
+                byte[] raw=SyntheticRaw();
+                foreach(string name in new[]{"rom_sha1","bk2_sha256",
+                    "service_manifest_sha256","candidate_manifest_sha256",
+                    "candidate_patch_sha256","candidate_recipe_sha256",
+                    "candidate_profile_sha256","harness_executable_sha256"})
+                {
+                    JObject capability=Capability(raw);
+                    string value=(string)capability[name];
+                    capability[name]=(value[0]=='0'?'1':'0')+value.Substring(1);
+                    WriteAuthority(input,capability,raw);
+                    AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                        .ExtractForTesting(input.Raw,input.Capability,
+                            input.Attestation,Path.Combine(root,name+".jsonl")),
+                        "identity");
+                }
+            });
+        }
+
+        private static void RejectsNoncanonicalJsonlByteForms()
+        {
+            byte[] canonical=SyntheticRaw();
+            string text=Encoding.UTF8.GetString(canonical);
+            foreach(string suffix in new[]{" {}"," []"," 0"," //hidden"})
+            {
+                string[] lines=text.Split(new[]{'\n'},
+                    StringSplitOptions.RemoveEmptyEntries);
+                lines[2]+=suffix;
+                AssertMalformedRaw(Encoding.UTF8.GetBytes(
+                    string.Join("\n",lines)+"\n"),"extractor");
+            }
+            AssertMalformedRaw(Encoding.UTF8.GetBytes(text.Replace(
+                "\"type\":\"frame\",\"row\":10148",
+                "\"type\":\"frame\",/*hidden*/\"row\":10148")),
+                "extractor");
+            string[] trailingComma=text.Split(new[]{'\n'},
+                StringSplitOptions.RemoveEmptyEntries);
+            trailingComma[2]=trailingComma[2].Substring(0,
+                trailingComma[2].Length-1)+",}";
+            AssertMalformedRaw(Encoding.UTF8.GetBytes(
+                string.Join("\n",trailingComma)+"\n"),"extractor");
+            foreach(string noncanonical in new[]{
+                " "+trailingComma[2].Substring(0,
+                    trailingComma[2].Length-2)+"}",
+                trailingComma[2].Substring(0,
+                    trailingComma[2].Length-2).Replace("\"type\"","'type'")+"}",
+                trailingComma[2].Substring(0,
+                    trailingComma[2].Length-2).Replace(
+                        "\"row\":10148","\"row\":0x27a4")+"}"})
+            {
+                string[] lines=text.Split(new[]{'\n'},
+                    StringSplitOptions.RemoveEmptyEntries);
+                lines[2]=noncanonical;
+                AssertMalformedRaw(Encoding.UTF8.GetBytes(
+                    string.Join("\n",lines)+"\n"),"extractor");
+            }
+            AssertMalformedRaw(Encoding.UTF8.GetBytes(text.Replace(
+                "\"type\":\"metadata\"",
+                "\"type\":\"metadata\",\"type\":\"metadata\"")),
+                "extractor");
+            var bom=new byte[canonical.Length+3];
+            bom[0]=0xEF;bom[1]=0xBB;bom[2]=0xBF;
+            Buffer.BlockCopy(canonical,0,bom,3,canonical.Length);
+            AssertMalformedRaw(bom,"extractor");
+            AssertMalformedRaw(Encoding.UTF8.GetBytes(text.Replace(
+                "\n","\r\n")),"extractor");
+            var missingLf=new byte[canonical.Length-1];
+            Buffer.BlockCopy(canonical,0,missingLf,0,missingLf.Length);
+            AssertMalformedRaw(missingLf,"extractor");
+        }
+
+        private static void AssertMalformedRaw(byte[] malformed,string message)
+        {
+            string root=TestScratch.CreateRootPath(
+                "s2-request-aware-byte-form");
+            try
+            {
+                Directory.CreateDirectory(root);
+                var input=new Inputs {
+                    Extractor=S2RequestAwareOracleV2Extractor.ForTesting(
+                        10148,10900,10150,10900,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw=Path.Combine(root,"malformed.raw.jsonl"),
+                    Capability=Path.Combine(root,"capability.json"),
+                    Attestation=Path.Combine(root,"attestation.json") };
+                File.WriteAllBytes(input.Raw,malformed);
+                WriteAuthority(input,Capability(SyntheticRaw()),malformed);
+                string output=Path.Combine(root,"out.jsonl");
+                AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                    .ExtractForTesting(input.Raw,input.Capability,
+                        input.Attestation,output),message);
+                AssertEx.Equal(false,File.Exists(output));
+            }
+            finally { try { Directory.Delete(root,true); } catch { } }
+        }
+
+        private static void RejectsNonstandardAuthorityJson()
+        {
+            WithSyntheticInputs((root,input)=>
+            {
+                string capability=File.ReadAllText(input.Capability);
+                string attestation=File.ReadAllText(input.Attestation);
+                foreach(Func<string,string> mutate in new Func<string,string>[] {
+                    InsertJsonComment,
+                    value=>value.Substring(0,value.Length-1)+",}",
+                    value=>value.Replace("\"schema\"","'schema'") })
+                {
+                    File.WriteAllText(input.Capability,mutate(capability));
+                    AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                        .ExtractForTesting(input.Raw,input.Capability,
+                            input.Attestation,Path.Combine(root,
+                                Guid.NewGuid().ToString("N")+".jsonl")),
+                        "capability");
+                    File.WriteAllText(input.Capability,capability);
+
+                    File.WriteAllText(input.Attestation,mutate(attestation));
+                    AssertEx.Throws<InvalidDataException>(()=>input.Extractor
+                        .ExtractForTesting(input.Raw,input.Capability,
+                            input.Attestation,Path.Combine(root,
+                                Guid.NewGuid().ToString("N")+".jsonl")),
+                        "attestation");
+                    File.WriteAllText(input.Attestation,attestation);
+                }
+            });
+        }
+
+        private static string InsertJsonComment(string value)
+        {
+            int comma=value.IndexOf(",\"",StringComparison.Ordinal);
+            if(comma<0)throw new InvalidOperationException(
+                "authority fixture has no second property");
+            return value.Substring(0,comma+1)+"/*hidden*/"
+                +value.Substring(comma+1);
+        }
+
+        private static void AssertProducerRawRejection(
+            Action<string[]> mutate, string message)
+        { AssertProducerRawRejection(ProducerRaw(),mutate,message); }
+
+        private static void AssertProducerRawRejection(byte[] original,
+            Action<string[]> mutate, string message)
+        {
+            string root = TestScratch.CreateRootPath(
+                "s2-request-aware-producer-mutation");
+            try
+            {
+                Directory.CreateDirectory(root);
+                string[] lines = Encoding.UTF8.GetString(original).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                mutate(lines);
+                byte[] raw = Encoding.UTF8.GetBytes(
+                    string.Join("\n", lines) + "\n");
+                var input = new Inputs
+                {
+                    Extractor = S2RequestAwareOracleV2Extractor.ForTesting(
+                        1, 4, 2, 3,
+                        Fixture("gpgx-audio-service-manifests-v1.json")),
+                    Raw = Path.Combine(root, "mutated.raw.jsonl"),
+                    Capability = Path.Combine(root, "mutated.capability.json"),
+                    Attestation = Path.Combine(root, "mutated.attestation.json")
+                };
+                File.WriteAllBytes(input.Raw, raw);
+                WriteAuthority(input, Capability(raw, 2, 3), raw);
+                AssertEx.Throws<InvalidDataException>(() => input.Extractor
+                    .ExtractForTesting(input.Raw, input.Capability,
+                        input.Attestation, Path.Combine(root, "out.jsonl")),
+                    message);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+            }
+        }
+
+        private static GpgxAudioTraceEvent[] UploadEvents()
+        {
+            var values = new List<GpgxAudioTraceEvent>();
+            values.Add(Native(values.Count, 1, 1, 0, 0x0EC000, 9,
+                0, 2, 0, 2));
+            values.Add(Native(values.Count, 5, 1, 0, 0x0EC036, 1,
+                0, 2, 0, 2));
+            for (int offset = 0; offset < 8192; offset += 8)
+                values.Add(Native(values.Count, 6, 1, 0, 0x0EC036,
+                    1, (ushort)offset, 2, 0, 2, 8));
+            values.Add(Native(values.Count, 7, 1, 0, 0x0EC036, 1,
+                8192, 2, 0, 2));
+            values.Add(Native(values.Count, 2, 1, 0, 0x0EC036, 10,
+                0, 2, 0, 2));
+            values.Add(Native(values.Count,1,2,0,378,5,0,4,0,1));
+            values.Add(Native(values.Count,1,3,2,56,2,0,3,1,1));
+            values.Add(Native(values.Count,1,4,3,272,21,0,9,2,1));
+            AddOneByteSnapshot(values,4,3,9,2,331,1);
+            values.Add(Native(values.Count,2,4,3,331,22,0,9,2,1));
+            AddOneByteSnapshot(values,3,2,3,1,231,1);
+            values.Add(Native(values.Count,2,3,2,231,3,0,3,1,1));
+            GpgxAudioTraceEvent psg=Native(values.Count,4,2,0,0x0200,
+                0,0,4,0,1);
+            psg.Value=0x9F;
+            values.Add(psg);
+            GpgxAudioTraceEvent secondPsg=Native(values.Count,4,2,0,
+                0x0201,0,0,4,0,1);
+            secondPsg.Value=0x9E;
+            values.Add(secondPsg);
+            return values.ToArray();
+        }
+
+        private static GpgxAudioTraceEvent[] ResumeEvents()
+        {
+            var values = new List<GpgxAudioTraceEvent>();
+            values.Add(Native(values.Count, 1, 1, 2, 56, 2,
+                0, 3, 1, 1));
+            values.Add(Native(values.Count, 1, 3, 1, 272, 21,
+                0, 9, 2, 1));
+            return values.ToArray();
+        }
+
+        private static void AddResumeCompletionEvents(
+            IList<GpgxAudioTraceEvent> values)
+        {
+            GpgxAudioTraceEvent write = Native(values.Count, 3, 3, 1,
+                0x0200, 0, 0, 9, 2, 1);
+            write.Value = 0x22;
+            values.Add(write);
+            GpgxAudioTraceEvent psg = Native(values.Count, 4, 3, 1,
+                0x0201, 0, 0, 9, 2, 1);
+            psg.Value = 0x9F;
+            values.Add(psg);
+            AddOneByteSnapshot(values, 3, 1, 9, 2, 3508, 1);
+            values.Add(Native(values.Count, 2, 3, 1, 3508, 23,
+                0, 9, 2, 1));
+            AddOneByteSnapshot(values, 1, 2, 3, 1, 231, 1);
+            values.Add(Native(values.Count, 2, 1, 2, 231, 3,
+                0, 3, 1, 1));
+        }
+
+        private static GpgxAudioTraceEvent[] RequestAndOpenServiceEvents(
+            uint a7)
+        {
+            var values=new List<GpgxAudioTraceEvent>();
+            AddResumeCompletionEvents(values);
+            AddOneByteSnapshot(values,2,0,4,0,432,1);
+            values.Add(Native(values.Count,2,2,0,432,6,0,4,0,1));
+            values.Add(Native(values.Count,8,2,0,0,0,0,1,0,3));
+            AddOneByteSnapshot(values,2,0,1,0,0,3);
+            values.Add(Native(values.Count,9,2,0,0,0,0,1,0,3));
+            GpgxAudioTraceEvent marker = Native(values.Count, 10, 0, 0,
+                S2PreconsumptionRequestObserver.Pc,
+                S2PreconsumptionRequestObserver.MarkerToken,
+                0, 0, 0, 2, 4);
+            marker.Value = 3;
+            marker.Payload = a7;
+            values.Add(marker);
+            values.Add(Native(values.Count, 1, 3, 0, 378, 5,
+                0, 4, 0, 1));
+            return values.ToArray();
+        }
+
+        private static void AddOneByteSnapshot(
+            IList<GpgxAudioTraceEvent> values, ushort token,
+            ushort parent, byte serviceKind, byte depth, uint pc,
+            byte sourceCpu)
+        {
+            values.Add(Native(values.Count, 5, token, parent, pc, 2,
+                0, serviceKind, depth, sourceCpu));
+            values.Add(Native(values.Count, 6, token, parent, pc, 2,
+                0, serviceKind, depth, sourceCpu, 1));
+            values.Add(Native(values.Count, 7, token, parent, pc, 2,
+                1, serviceKind, depth, sourceCpu));
+        }
+
+        private static GpgxAudioTraceEvent Native(int ordinal, byte kind,
+            ushort token, ushort parent, uint pc, ushort subject,
+            ushort offset, byte serviceKind, byte depth, byte sourceCpu,
+            byte payloadLength = 0)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Ordinal = (uint)ordinal, Kind = kind, ServiceToken = token,
+                ParentToken = parent, Pc = pc, Subject = subject,
+                Offset = offset, ServiceKindId = serviceKind, Depth = depth,
+                SourceCpu = sourceCpu, PayloadLength = payloadLength
+            };
+        }
+
+        private static string Fixture(string name)
+        {
+            return Path.GetFullPath(Path.Combine(EndToEndTests.ToolDirectory,
+                "fixtures", name));
         }
 
         private static void AssertRawRejection(Inputs input, string root,
@@ -259,6 +1093,120 @@ namespace OpenGGF.BizHawk.Headless.Tests
             internal string Raw, Capability, Attestation;
         }
 
+        private sealed class ProducerTraceApi : IGpgxAudioTraceApi,
+            IS2RequestSuccessorOrdinalApi
+        {
+            private int phase;
+            internal GpgxAudioTraceEvent[] Events =
+                new GpgxAudioTraceEvent[0];
+            internal uint SuccessorOrdinal;
+            public uint AbiVersion { get { return 4; } }
+            public uint EventSize { get { return 32; } }
+            public uint Capacity { get { return 65536; } }
+            public int Configure(ref GpgxAudioObserverAdapter.Config config,
+                byte[] mask, GpgxAudioObserverAdapter.ServiceKind[] kinds,
+                GpgxAudioObserverAdapter.ServiceHook[] hooks,
+                GpgxAudioObserverAdapter.SnapshotRange[] ranges)
+            { phase = 1; return config.AbiVersion == 4 ? 0 : -3; }
+            public int BeginFrame()
+            { if (phase != 1) return -2; phase = 2; return 0; }
+            public int EndFrame()
+            { if (phase != 2) return -2; phase = 3; return 0; }
+            public int EventCount(out uint count, out uint overflow)
+            {
+                count = phase == 3 ? (uint)Events.Length : 0;
+                overflow = 0;
+                return phase == 3 ? 0 : -2;
+            }
+            public int Drain(GpgxAudioTraceEvent[] target, uint capacity,
+                out uint count)
+            {
+                if (phase != 3) { count = 0; return -2; }
+                count = (uint)Events.Length;
+                if (target != null) Array.Copy(Events, target, Events.Length);
+                phase = 1;
+                return 0;
+            }
+            public int GetFirstFault(
+                out GpgxAudioObserverAdapter.FirstFault fault)
+            { fault = new GpgxAudioObserverAdapter.FirstFault(); return 0; }
+            public int BeginPublicationEpoch()
+            { return phase == 1 ? 0 : -2; }
+            public int AbortFrame() { phase = 1; return 0; }
+            public int Disable() { phase = 0; return 0; }
+            public int S2RequestSuccessorOrdinal(out uint ordinal)
+            { ordinal = SuccessorOrdinal; return phase == 2 ? 0 : -2; }
+        }
+
+        private sealed class ProducerHost :
+            IS2RequestAwareRawV3CandidateHost,
+            IOverrideResumeDiagnosticAudioHost
+        {
+            private readonly Dictionary<string, uint> registers =
+                new Dictionary<string, uint>(StringComparer.Ordinal);
+            private readonly ProducerTraceApi api;
+            private Action callback;
+            private bool audioReady;
+            internal bool ExecuteCallbackOnAdvance;
+            internal short[] AudioAfterAdvance = new short[0];
+            internal ProducerHost(ProducerTraceApi value) { api = value; }
+            internal void Set(string name, uint value)
+            { registers[name] = value; }
+            public int CompletedFrame { get; private set; }
+            public bool IsLagged { get { return false; } }
+            public int LagCount { get { return 0; } }
+            public int DiagnosticAudioSampleRate { get { return 44100; } }
+            public void ClearButtons() { }
+            public void SetButton(string name, bool pressed) { }
+            public IDisposable RegisterExecuteCallback(uint address,
+                Action value)
+            {
+                if (address != S2PreconsumptionRequestObserver.Pc)
+                    throw new InvalidOperationException("callback PC");
+                callback = value;
+                return new CallbackRegistration(this);
+            }
+            public void Advance()
+            {
+                if (ExecuteCallbackOnAdvance)
+                {
+                    ExecuteCallbackOnAdvance = false;
+                    callback();
+                }
+                CompletedFrame++;
+            }
+            public void AdvanceDiagnosticAudio()
+            { Advance(); audioReady = true; }
+            public short[] DrainDiagnosticAudio(out int stereoFrames)
+            {
+                short[] result = audioReady
+                    ? AudioAfterAdvance : new short[0];
+                audioReady = false;
+                stereoFrames = result.Length / 2;
+                return (short[])result.Clone();
+            }
+            public byte ReadMainRamByte(int offset) { return 0; }
+            public uint ReadCpuRegister(string name)
+            {
+                uint value;
+                if (!registers.TryGetValue(name, out value))
+                    throw new InvalidOperationException("missing register");
+                return value;
+            }
+            public byte[] CaptureDriverState() { return new byte[0x2000]; }
+            public IGpgxAudioTraceApi CreateRequestCandidateAudioTraceApi()
+            { return api; }
+            public void Dispose() { }
+            private sealed class CallbackRegistration : IDisposable
+            {
+                private ProducerHost host;
+                internal CallbackRegistration(ProducerHost value)
+                { host = value; }
+                public void Dispose()
+                { if (host != null) { host.callback = null; host = null; } }
+            }
+        }
+
         private static void WithSyntheticInputs(Action<string, Inputs> body)
         {
             string root = TestScratch.CreateRootPath("s2-request-aware-extractor");
@@ -266,7 +1214,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 Directory.CreateDirectory(root);
                 var inputs = new Inputs { Extractor = S2RequestAwareOracleV2Extractor
-                    .ForTesting(10148, 10900, 10150, 10900) };
+                    .ForTesting(10148, 10900, 10150, 10900,
+                        Fixture("gpgx-audio-service-manifests-v1.json")) };
                 inputs.Raw = Path.Combine(root, "input.raw.jsonl");
                 inputs.Capability = Path.Combine(root, "input.capability.json");
                 inputs.Attestation = Path.Combine(root, "input.attestation.json");
@@ -310,31 +1259,26 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ["state_exclusive_end"]=0x2000, ["production_bound"]=false,
                 ["request_manifest_schema"]="openggf.s2-preconsumption-request-manifest.v1" }));
             lines.Add(Json(new JObject { ["type"]="baseline", ["state_hex"]=state,
-                ["ym_port0_latch"]=1, ["ym_port1_latch"]=2,
+                ["ym_port0_latch"]=0, ["ym_port1_latch"]=0,
                 ["native_arm_epoch"]=1, ["native_armed"]=true,
                 ["active_services"]=new JArray(), ["pending_descendants"]=new JArray(),
                 ["row"]=10148 }));
             for (int row = 10148; row < 10900; row++)
             {
                 var events = new JArray();
-                if (row == 10148) events.Add(Event(0, 3, 0, 0x22));
-                else if (row == 10149)
-                { events.Add(Event(0, 3, 2, 0x33)); events.Add(Event(1, 8, 0, 0)); }
-                else events.Add(Event(0, 3, 1, 0x44));
                 var transfers = new JArray();
                 if (row == 10150)
                 {
-                    events.Add(Event(1, 3, 0, 0x99));
-                    events.Add(Event(2, 10, 24, 3, "16715808"));
-                    transfers.Add(Transfer(row, 0, 0, 0xB5, 3, 2,
+                    events.Add(Event(0, 10, 24, 3, "16715808"));
+                    transfers.Add(Transfer(row, 0, 0, 0xB5, 3, 0,
                         "16715808"));
                 }
                 if (row == 10151)
                 {
-                    events.Add(Event(1, 10, 24, 3, "20"));
-                    events.Add(Event(2, 10, 24, 3, "21"));
-                    transfers.Add(Transfer(row, 0, 1, 1, 0, 1, "20"));
-                    transfers.Add(Transfer(row, 1, 2, 2, 1, 2, "21"));
+                    events.Add(Event(0, 10, 24, 3, "20"));
+                    events.Add(Event(1, 10, 24, 3, "21"));
+                    transfers.Add(Transfer(row, 0, 1, 1, 0, 0, "20"));
+                    transfers.Add(Transfer(row, 1, 2, 2, 1, 1, "21"));
                 }
                 lines.Add(Json(new JObject { ["type"]="frame", ["row"]=row,
                     ["lag"]=false, ["state_hex"]=state, ["events"]=events,
@@ -342,7 +1286,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     ["request_transfers"]=transfers }));
             }
             lines.Add(Json(new JObject { ["type"]="cutoff", ["state_hex"]=state,
-                ["ym_port0_latch"]=0x99, ["ym_port1_latch"]=0,
+                ["ym_port0_latch"]=0, ["ym_port1_latch"]=0,
                 ["native_arm_epoch"]=1, ["native_armed"]=true,
                 ["active_services"]=new JArray(), ["pending_descendants"]=new JArray(),
                 ["exclusive_end"]=10900 }));
@@ -351,9 +1295,17 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static JObject Capability(byte[] raw)
         {
+            return Capability(raw, 10150, 10900);
+        }
+
+        private static JObject Capability(byte[] raw, int windowFirst,
+            int windowEnd)
+        {
             string[] lines = Encoding.UTF8.GetString(raw).Split(new[] { '\n' },
                 StringSplitOptions.RemoveEmptyEntries);
             long baseCount=0, allCount=0, markerCount=0, requestCount=0;
+            int maximumRequestOccupancy=0;
+            int resumeCount=0,pcmCount=0;
             var baseBytes=new List<byte>();
             var allBytes=new List<byte>();
             var markerBytes=new List<byte>();
@@ -375,6 +1327,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     }
                     foreach(JToken transfer in (JArray)record["request_transfers"])
                     { requestBytes.AddRange(Canonical(transfer));requestCount++; }
+                    maximumRequestOccupancy=Math.Max(maximumRequestOccupancy,
+                        ((JArray)record["request_transfers"]).Count);
+                    if(record["override_resume"].Type!=JTokenType.Null)
+                        resumeCount++;
+                    if(record["pcm"].Type!=JTokenType.Null)pcmCount++;
                 }
                 else if((string)record["type"]=="cutoff")cutoff=record;
             }
@@ -384,19 +1341,40 @@ namespace OpenGGF.BizHawk.Headless.Tests
             // The friend-only seam derives every reviewed identity and digest
             // domain from the committed candidate template. Only unavailable
             // full-run inventory evidence is synthetic.
-            capability["harness_executable_sha256"]=Digest(raw);
-            capability["first_row"]=10148; capability["exclusive_end"]=10900;
-            capability["window_first_row"]=10150; capability["window_exclusive_end"]=10900;
+            JObject metadata=JObject.Parse(lines[0]);
+            capability["harness_executable_sha256"]=Digest(
+                File.ReadAllBytes(typeof(GpgxHost).Assembly.Location));
+            capability["first_row"]=(int)metadata["first_row"];
+            capability["exclusive_end"]=(int)metadata["exclusive_end"];
+            capability["window_first_row"]=windowFirst;
+            capability["window_exclusive_end"]=windowEnd;
             capability["base_event_count"]=baseCount; capability["all_event_count"]=allCount;
             capability["marker_event_count"]=markerCount; capability["request_count"]=requestCount;
             capability["base_event_sha256"]=Digest(baseBytes.ToArray());
             capability["all_event_sha256"]=Digest(allBytes.ToArray());
             capability["marker_event_sha256"]=Digest(markerBytes.ToArray());
             capability["request_sha256"]=Digest(requestBytes.ToArray());
-            capability["max_request_occupancy"]=2;
+            capability["max_request_occupancy"]=maximumRequestOccupancy;
+            capability["override_resume_count"]=resumeCount;
+            capability["override_resume_sha256"]=Digest(resumeCount==0
+                ?new byte[0]:Canonical(FirstEnvelope(lines,"override_resume")));
+            capability["pcm_count"]=pcmCount;
+            capability["pcm_sha256"]=Digest(pcmCount==0
+                ?new byte[0]:Canonical(FirstEnvelope(lines,"pcm")));
             capability["cutoff_frontier_sha256"]=Digest(Canonical(cutoff));
             capability["terminal_state_sha256"]=Digest(new byte[0x2000]);
             return capability;
+        }
+
+        private static JToken FirstEnvelope(string[] lines,string name)
+        {
+            foreach(string line in lines)
+            {
+                JObject value=JObject.Parse(line);
+                if((string)value["type"]=="frame"
+                    &&value[name].Type!=JTokenType.Null)return value[name];
+            }
+            throw new InvalidOperationException("missing envelope: "+name);
         }
 
         private static JObject Event(uint ordinal, int kind, int subject, int value,

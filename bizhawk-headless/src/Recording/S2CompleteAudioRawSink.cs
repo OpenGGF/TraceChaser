@@ -40,6 +40,8 @@ namespace OpenGGF.BizHawk.Headless
         internal const string Schema = "openggf.s2-complete-run-audio-raw.v2";
         private readonly IS2CompleteAudioStateSource state;
         private readonly TextWriter output;
+        private readonly int firstRow;
+        private readonly int exclusiveEnd;
         private int lastRow = -1;
         private bool begun;
         private bool complete;
@@ -50,9 +52,19 @@ namespace OpenGGF.BizHawk.Headless
 
         internal S2CompleteAudioRawSink(IS2CompleteAudioStateSource stateSource,
             TextWriter writer)
+            : this(stateSource, writer, S2AudioObserverProfile.FirstRow,
+                S2AudioObserverProfile.ExclusiveEnd)
+        { }
+
+        internal S2CompleteAudioRawSink(IS2CompleteAudioStateSource stateSource,
+            TextWriter writer, int sourceFirstRow, int sourceExclusiveEnd)
         {
+            if (sourceFirstRow < 0 || sourceExclusiveEnd <= sourceFirstRow)
+                throw new ArgumentOutOfRangeException("sourceFirstRow");
             state = stateSource ?? throw new ArgumentNullException("stateSource");
             output = writer ?? throw new ArgumentNullException("writer");
+            firstRow = sourceFirstRow;
+            exclusiveEnd = sourceExclusiveEnd;
         }
 
         public void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
@@ -65,13 +77,13 @@ namespace OpenGGF.BizHawk.Headless
                 ["rom_sha1"]=S2AudioObserverProfile.RomSha1,
                 ["bk2_sha256"]=S2AudioObserverProfile.MovieSha256,
                 ["service_manifest_sha256"]=S2AudioObserverProfile.ServiceManifestSha256,
-                ["first_row"]=S2AudioObserverProfile.FirstRow,
-                ["exclusive_end"]=S2AudioObserverProfile.ExclusiveEnd,
+                ["first_row"]=firstRow,
+                ["exclusive_end"]=exclusiveEnd,
                 ["state_start"]=S2AudioObserverProfile.DriverStateStart,
                 ["state_exclusive_end"]=S2AudioObserverProfile.DriverStateExclusiveEnd
             });
             JObject baseline = Boundary("baseline", boundary);
-            baseline["row"] = S2AudioObserverProfile.FirstRow;
+            baseline["row"] = firstRow;
             Write(baseline);
             begun = true;
         }
@@ -82,8 +94,8 @@ namespace OpenGGF.BizHawk.Headless
             RequireActive();
             if (frame == null) throw new ArgumentNullException("frame");
             if (audio == null) throw new ArgumentNullException("audio");
-            int expected = lastRow < 0 ? S2AudioObserverProfile.FirstRow : lastRow + 1;
-            if (row != expected || row >= S2AudioObserverProfile.ExclusiveEnd)
+            int expected = lastRow < 0 ? firstRow : lastRow + 1;
+            if (row != expected || row >= exclusiveEnd)
                 throw new InvalidDataException("The S2 raw rows are not contiguous and in range.");
             var events = new JArray();
             foreach (GpgxAudioTraceEvent value in frame.RawEvents)
@@ -118,9 +130,9 @@ namespace OpenGGF.BizHawk.Headless
             if (cutoff == null) throw new ArgumentNullException("cutoff");
             JObject value = Boundary("cutoff", cutoff);
             value["exclusive_end"] = lastRow < 0
-                ? S2AudioObserverProfile.FirstRow : lastRow + 1;
+                ? firstRow : lastRow + 1;
             Write(value);
-            if (lastRow == S2AudioObserverProfile.ExclusiveEnd - 1
+            if (lastRow == exclusiveEnd - 1
                 && (!resumeSelected || !pcmSelected))
                 throw new InvalidDataException(
                     "The complete S2 raw capture has no exact override-resume service and PCM packet.");

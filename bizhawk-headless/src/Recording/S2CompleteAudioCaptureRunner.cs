@@ -101,6 +101,21 @@ namespace OpenGGF.BizHawk.Headless
                 baseServiceManifestPath, host, output);
         }
 
+        /// <summary>
+        /// Friend-test interval seam. It changes only publication bounds; the
+        /// closed observer, callback correlation, and raw-v3 producer remain
+        /// the production candidate implementations.
+        /// </summary>
+        internal static RequestAwareRawV3Candidate
+            OpenRequestAwareRawV3CandidateForTesting(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost host, TextWriter output,
+                int firstRow, int exclusiveEnd)
+        {
+            return RequestAwareRawV3Candidate.Open(candidateManifestPath,
+                baseServiceManifestPath, host, output, firstRow, exclusiveEnd);
+        }
+
         internal sealed partial class RequestAwareRawV3Candidate : IDisposable
         {
             private readonly IS2RequestAwareRawV3CandidateHost host;
@@ -111,12 +126,14 @@ namespace OpenGGF.BizHawk.Headless
             private bool completed;
             private bool failed;
             private bool disposed;
+            private readonly int firstRow;
+            private readonly int exclusiveEnd;
 
             private RequestAwareRawV3Candidate(
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 CompleteRunAudioObserver observer,
                 S2PreconsumptionRequestObserver requestObserver,
-                TextWriter output)
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
             {
                 host = candidateHost
                     ?? throw new ArgumentNullException("candidateHost");
@@ -124,14 +141,30 @@ namespace OpenGGF.BizHawk.Headless
                     ?? throw new ArgumentNullException("observer");
                 requests = requestObserver
                     ?? throw new ArgumentNullException("requestObserver");
+                if (sourceFirstRow < 0
+                    || sourceExclusiveEnd <= sourceFirstRow)
+                    throw new ArgumentOutOfRangeException("sourceFirstRow");
+                firstRow = sourceFirstRow;
+                exclusiveEnd = sourceExclusiveEnd;
                 sink = new RawV3Sink(host,
-                    output ?? throw new ArgumentNullException("output"));
+                    output ?? throw new ArgumentNullException("output"),
+                    firstRow, exclusiveEnd);
             }
 
             internal static RequestAwareRawV3Candidate Open(
                 string candidateManifestPath, string baseServiceManifestPath,
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 TextWriter output)
+            {
+                return Open(candidateManifestPath, baseServiceManifestPath,
+                    candidateHost, output, S2AudioObserverProfile.FirstRow,
+                    S2AudioObserverProfile.ExclusiveEnd);
+            }
+
+            internal static RequestAwareRawV3Candidate Open(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost candidateHost,
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
             {
                 if (candidateHost == null)
                     throw new ArgumentNullException("candidateHost");
@@ -147,7 +180,9 @@ namespace OpenGGF.BizHawk.Headless
                 {
                     return new RequestAwareRawV3Candidate(candidateHost,
                         observer, new S2PreconsumptionRequestObserver(
-                            candidate, candidateHost, observer), output);
+                            candidate, candidateHost, observer,
+                            sourceExclusiveEnd), output, sourceFirstRow,
+                            sourceExclusiveEnd);
                 }
                 catch
                 {
@@ -170,7 +205,7 @@ namespace OpenGGF.BizHawk.Headless
                 }
                 try
                 {
-                    if (row == S2AudioObserverProfile.FirstRow)
+                    if (row == firstRow)
                         sink.Begin(nativeObserver
                             .CaptureBoundaryFrontierAndResetPublication());
                     S1TraceCaptureRunner.ApplyFrame(frame, host);
@@ -196,7 +231,7 @@ namespace OpenGGF.BizHawk.Headless
                         || owned.Frame.Bk2Row != row)
                         throw new InvalidDataException(
                             "The closed S2 producer lost its owned frame origin.");
-                    if (row >= S2AudioObserverProfile.FirstRow)
+                    if (row >= firstRow)
                         sink.Frame(row, owned.Frame, audio, owned.Transfers);
                     nextRow++;
                 }
@@ -211,7 +246,7 @@ namespace OpenGGF.BizHawk.Headless
             {
                 if (disposed) throw new ObjectDisposedException(
                     "RequestAwareRawV3Candidate");
-                if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
+                if (nextRow != exclusiveEnd)
                 {
                     Dispose();
                     throw new InvalidDataException(

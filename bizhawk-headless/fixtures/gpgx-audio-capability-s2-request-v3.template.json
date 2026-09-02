@@ -23,11 +23,17 @@
   "marker_event_sha256": null,
   "request_sha256": null,
   "max_request_occupancy": null,
+  "override_resume_count": null,
+  "override_resume_sha256": null,
+  "pcm_count": null,
+  "pcm_sha256": null,
   "cutoff_frontier_sha256": null,
   "terminal_state_sha256": null,
   "digest_domains": {
     "raw_sha256": "raw-file-bytes-v1",
     "event_and_request_sha256": "compact-json-lf-v1",
+    "override_resume_sha256": "compact-json-lf-v1",
+    "pcm_sha256": "compact-json-lf-v1",
     "cutoff_frontier_sha256": "compact-json-lf-v1",
     "terminal_state_sha256": "decoded-z80-state-bytes-v1"
   }

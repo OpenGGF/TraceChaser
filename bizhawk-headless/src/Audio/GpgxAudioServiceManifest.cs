@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless
@@ -22,11 +23,31 @@ namespace OpenGGF.BizHawk.Headless
             return LoadCore(path, "s2", api, true);
         }
 
+        /// <summary>Loads the fixed candidate from caller-verified immutable
+        /// manifest bytes so identity and parsing cannot cross path opens.</summary>
+        internal static CompleteRunAudioObserver LoadS2RequestCandidate(
+            byte[] manifestBytes, IGpgxAudioTraceApi api)
+        {
+            if(manifestBytes==null)throw new ArgumentNullException(
+                "manifestBytes");
+            string json;
+            try { json=new UTF8Encoding(false,true).GetString(manifestBytes); }
+            catch(DecoderFallbackException error)
+            { throw new InvalidDataException("Service manifest is not UTF-8.",error); }
+            return LoadCore(JObject.Parse(json),"s2",api,true);
+        }
+
         private static CompleteRunAudioObserver LoadCore(string path,
             string game, IGpgxAudioTraceApi api, bool addS2RequestCandidate)
         {
             if (!Path.IsPathRooted(path)) throw new ArgumentException("Manifest path must be absolute.", "path");
-            JObject root = JObject.Parse(File.ReadAllText(path));
+            return LoadCore(JObject.Parse(File.ReadAllText(path)),game,api,
+                addS2RequestCandidate);
+        }
+
+        private static CompleteRunAudioObserver LoadCore(JObject root,
+            string game, IGpgxAudioTraceApi api, bool addS2RequestCandidate)
+        {
             if ((string)root["schema"] != "openggf.gpgx-audio-service-manifests.v1")
                 throw new InvalidDataException("Unsupported service-manifest schema.");
             JObject value = root["games"]?[game] as JObject;

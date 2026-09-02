@@ -40,6 +40,7 @@ namespace OpenGGF.BizHawk.Headless
         private bool disposed;
         private bool completed;
         private bool failed;
+        private readonly int expectedEnd;
 
         internal sealed class Transfer
         {
@@ -97,10 +98,20 @@ namespace OpenGGF.BizHawk.Headless
         internal S2PreconsumptionRequestObserver(
             S2PreconsumptionRequestProfile.Candidate candidate,
             IGpgxHost host, CompleteRunAudioObserver observer)
+            : this(candidate, host, observer,
+                S2AudioObserverProfile.ExclusiveEnd)
+        { }
+
+        internal S2PreconsumptionRequestObserver(
+            S2PreconsumptionRequestProfile.Candidate candidate,
+            IGpgxHost host, CompleteRunAudioObserver observer,
+            int expectedExclusiveEnd)
         {
             if (candidate == null) throw new ArgumentNullException("candidate");
             if (host == null) throw new ArgumentNullException("host");
             if (observer == null) throw new ArgumentNullException("observer");
+            if (expectedExclusiveEnd <= 0)
+                throw new ArgumentOutOfRangeException("expectedExclusiveEnd");
             if (candidate.Pc != Pc || candidate.Opcode != "13801009"
                 || candidate.MarkerToken != MarkerToken
                 || candidate.ProductionBound)
@@ -111,6 +122,7 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidOperationException(
                     "The fixed S2 request observer requires M68K register reads.");
             nativeObserver = observer;
+            expectedEnd = expectedExclusiveEnd;
             registration = host.RegisterExecuteCallback(Pc, OnTransfer);
             if (registration == null)
                 throw new InvalidOperationException(
@@ -165,7 +177,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (disposed) throw new ObjectDisposedException(
                 "S2PreconsumptionRequestObserver");
-            if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
+            if (nextRow != expectedEnd)
             {
                 DisposeAfterFailure();
                 throw new InvalidDataException(

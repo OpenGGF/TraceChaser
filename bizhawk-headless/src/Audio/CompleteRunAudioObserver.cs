@@ -44,6 +44,7 @@ namespace OpenGGF.BizHawk.Headless
         private bool armed;
         private bool capturing;
         private bool faulted;
+        private bool validateContinuationFrames;
 
         public byte YmPort0Address { get { return ymPort0Address; } }
         public byte YmPort1Address { get { return ymPort1Address; } }
@@ -195,6 +196,367 @@ namespace OpenGGF.BizHawk.Headless
             for(int i=0;i<activeServices.Count;i++)ResetPublishedOwnership(activeServices[i]);
             LastCapture=null;
             return frontier;
+        }
+
+        /// <summary>
+        /// Restores the exact state immediately after a raw sink's published
+        /// baseline. This is comparison-only replay support: completed
+        /// descendants belonged to the preceding epoch and are validated but
+        /// not carried into the next frame, while open services retain native
+        /// identity with fresh ownership inventories.
+        /// </summary>
+        internal void RestorePublicationBaselineForValidation(
+            CutoffFrontier frontier, int boundaryRow)
+        {
+            if (frontier == null) throw new ArgumentNullException("frontier");
+            if (boundaryRow < 0) throw new ArgumentOutOfRangeException(
+                "boundaryRow");
+            if (capturing || faulted || activeServices.Count != 0
+                || pendingCompleted.Count != 0 || activeTokens.Count != 0
+                || globalEventCoordinate != 0 || LastCapture != null)
+                throw new InvalidOperationException(
+                    "The validation baseline requires a pristine observer.");
+            if (frontier.PendingDeferredBegin != null)
+                throw Invalid("raw baseline cannot restore a deferred begin");
+            if (!frontier.IsArmed || frontier.ArmEpoch <= 0)
+                throw Invalid("raw baseline was not armed for publication");
+
+            var tokens = new HashSet<ushort>();
+            var active = new List<ServiceBuilder>();
+            long previousActiveBegin = -1;
+            for (int index = 0; index < frontier.ActiveServices.Count; index++)
+            {
+                DriverService service = frontier.ActiveServices[index];
+                ServiceBuilder value = ImportPublishedService(service, false,
+                    boundaryRow);
+                if (!tokens.Add(value.Token))
+                    throw Invalid("baseline duplicate service token");
+                if (index != 0
+                    && value.BeginCoordinate <= previousActiveBegin)
+                    throw Invalid("baseline active begin order");
+                previousActiveBegin = value.BeginCoordinate;
+                ushort parent = index == 0 ? (ushort)0
+                    : active[index - 1].Token;
+                if (value.CurrentParentToken != parent
+                    || value.CurrentDepth != index)
+                    throw Invalid("baseline active stack topology");
+                ValidateBaselineBeginParent(value,index==0?null:
+                    active[index-1]);
+                value.RootToken = index == 0
+                    ? value.Token : active[0].RootToken;
+                active.Add(value);
+            }
+            var pending = new List<ServiceBuilder>();
+            long previousPendingBegin = -1;
+            for (int index = 0; index < frontier.PendingServices.Count; index++)
+            {
+                ServiceBuilder value = ImportPublishedService(
+                    frontier.PendingServices[index], true,boundaryRow);
+                if (!tokens.Add(value.Token))
+                    throw Invalid("baseline duplicate service token");
+                if (index != 0
+                    && value.BeginCoordinate <= previousPendingBegin)
+                    throw Invalid("baseline pending begin order");
+                previousPendingBegin=value.BeginCoordinate;
+                pending.Add(value);
+            }
+            for(int index=0;index<pending.Count;index++)
+                if (!HasBaselineAncestor(pending[index],active,pending))
+                    throw Invalid("baseline pending service has no active root");
+            ValidateBaselineBeginCoordinates(active,pending);
+
+            activeServices.AddRange(active);
+            for (int index = 0; index < active.Count; index++)
+            {
+                ResetPublishedOwnership(active[index]);
+                activeTokens.Add(active[index].Token);
+            }
+            ymPort0Address = frontier.YmPort0Address;
+            ymPort1Address = frontier.YmPort1Address;
+            armEpoch = frontier.ArmEpoch;
+            armed = frontier.IsArmed;
+            validateContinuationFrames = true;
+        }
+
+        private void ValidateBaselineBeginCoordinates(
+            List<ServiceBuilder> active,List<ServiceBuilder> pending)
+        {
+            var services=new List<ServiceBuilder>(active.Count+pending.Count);
+            services.AddRange(active);services.AddRange(pending);
+            services.Sort((left,right)=>left.BeginCoordinate.CompareTo(
+                right.BeginCoordinate));
+            long previousCoordinate=-1,previousFrameStart=-1;
+            int previousRow=-1;
+            for(int index=0;index<services.Count;index++)
+            {
+                ServiceBuilder service=services[index];
+                if(service.BeginCoordinate<service.BeginNativeOrdinal
+                    ||index!=0&&service.BeginCoordinate<=previousCoordinate
+                    ||index!=0&&service.BeginRow<previousRow)
+                    throw Invalid("baseline begin coordinate/row order");
+                long frameStart=service.BeginCoordinate
+                    -(long)service.BeginNativeOrdinal;
+                if(index!=0&&(service.BeginRow==previousRow
+                        ?frameStart!=previousFrameStart
+                        :frameStart<=previousCoordinate))
+                    throw Invalid("baseline begin ordinal/coordinate relation");
+                previousCoordinate=service.BeginCoordinate;
+                previousFrameStart=frameStart;
+                previousRow=service.BeginRow;
+            }
+        }
+
+        private bool HasBaselineAncestor(ServiceBuilder value,
+            List<ServiceBuilder> active,
+            List<ServiceBuilder> pending)
+        {
+            ServiceBuilder child=value;
+            ushort parent = child.ParentToken;
+            var seen = new HashSet<ushort> { value.Token };
+            for (int step = 0; parent != 0 && step < config.MaxDepth; step++)
+            {
+                if (!seen.Add(parent)) return false;
+                for (int index = 0; index < active.Count; index++)
+                    if (active[index].Token == parent)
+                    {
+                        ValidateBaselineParentDepth(child,active[index]);
+                        return true;
+                    }
+                ServiceBuilder found = null;
+                for (int index = 0; index < pending.Count; index++)
+                    if (pending[index].Token == parent)
+                    { found = pending[index]; break; }
+                if (found == null) return false;
+                ValidateBaselineParentDepth(child,found);
+                child=found;
+                parent = found.ParentToken;
+            }
+            return false;
+        }
+
+        private void ValidateBaselineParentDepth(ServiceBuilder child,
+            ServiceBuilder parent)
+        {
+            if(child.Depth==0||parent.Depth+1!=child.Depth
+                ||parent.BeginCoordinate>=child.BeginCoordinate
+                ||parent.EndCoordinate!=0
+                    &&parent.EndCoordinate<=child.BeginCoordinate)
+                throw Invalid("baseline parent depth/coordinate topology");
+            ValidateBaselineBeginParent(child,parent);
+        }
+
+        private void ValidateBaselineBeginParent(ServiceBuilder child,
+            ServiceBuilder parent)
+        {
+            GpgxAudioObserverAdapter.ServiceHook hook=
+                RequireHook(child.BeginHookToken,"baseline begin parent");
+            if(hook.Action!=1&&hook.Action!=4&&hook.Action!=12)return;
+            byte parentKind=parent==null?(byte)0:parent.Kind;
+            if(child.ParentToken!=(parent==null?0:parent.Token)
+                ||child.Depth!=(parent==null?0:parent.Depth+1))
+                throw Invalid("baseline begin parent topology");
+            if(hook.Action==1&&(hook.ExpectedActiveKind!=parentKind
+                    ||parent!=null&&(RequireKind(parent.Kind).Flags&4)==0)
+                ||hook.Action==4&&parent!=null
+                    &&(RequireKind(parent.Kind).Flags&4)==0
+                ||hook.Action==12&&(parent==null
+                    ||hook.ExpectedActiveKind!=parentKind))
+                throw Invalid("baseline begin parent policy");
+        }
+
+        private ServiceBuilder ImportPublishedService(DriverService service,
+            bool complete,int boundaryRow)
+        {
+            if (service == null || service.Token == 0
+                || service.IsComplete != complete)
+                throw Invalid("baseline service completion shape");
+            GpgxAudioObserverAdapter.ServiceHook begin =
+                RequireHook(service.BeginHookToken, "baseline begin");
+            if ((begin.Action != 1 && begin.Action != 4
+                    && begin.Action != 12)
+                || begin.Pc != service.BeginPc
+                || begin.Cpu != service.BeginSourceCpu
+                || begin.ServiceKindId != service.Kind
+                || !hasKind[service.Kind])
+                throw Invalid("baseline begin hook identity");
+            var value = new ServiceBuilder
+            {
+                Token = service.Token,
+                ParentToken = service.ParentToken,
+                Kind = service.Kind,
+                Depth = service.Depth,
+                CurrentParentToken = service.CurrentParentToken,
+                CurrentDepth = service.CurrentDepth,
+                BeginCoordinate = service.BeginCoordinate,
+                BeginRow = service.BeginRow,
+                BeginNativeOrdinal = service.BeginNativeOrdinal,
+                EndCoordinate = service.EndCoordinate,
+                BeginPc = service.BeginPc,
+                EndPc = service.EndPc,
+                BeginHookToken = service.BeginHookToken,
+                EndHookToken = service.EndHookToken,
+                BeginSourceCpu = service.BeginSourceCpu,
+                Cancelled = service.Cancelled
+            };
+            if (value.BeginCoordinate < 0
+                || value.BeginCoordinate < value.BeginNativeOrdinal
+                || value.BeginRow < 0
+                || value.BeginRow >= boundaryRow
+                || value.BeginNativeOrdinal >= config.EventCapacity
+                || value.Depth >= config.MaxDepth
+                || value.CurrentDepth >= config.MaxDepth)
+                throw Invalid("baseline service range");
+            if (!complete)
+            {
+                if (value.Cancelled || value.EndCoordinate != 0
+                    || value.EndPc != 0 || value.EndHookToken != 0
+                    || service.Snapshots.Count != 0)
+                    throw Invalid("baseline active service terminal shape");
+            }
+            else if (value.EndCoordinate <= value.BeginCoordinate)
+                throw Invalid("baseline service coordinate order");
+            else if (value.Cancelled)
+            {
+                if (value.EndPc != 0 || value.EndHookToken != 0)
+                    throw Invalid("baseline cancelled service terminal shape");
+            }
+            else
+            {
+                GpgxAudioObserverAdapter.ServiceHook end =
+                    RequireHook(value.EndHookToken, "baseline completion");
+                if ((end.Action < 2 || end.Action > 5)
+                    && end.Action != 8 && end.Action != 9)
+                    throw Invalid("baseline completion hook action");
+                if (end.Pc != value.EndPc || end.Cpu != value.BeginSourceCpu
+                    || end.ExpectedActiveKind != value.Kind)
+                    throw Invalid("baseline completion hook identity");
+            }
+
+            long previousCoordinate = value.BeginCoordinate;
+            long previousChipFrameStart=value.BeginCoordinate
+                -(long)value.BeginNativeOrdinal;
+            foreach (OwnedChipEvent chip in service.OwnedChipEvents)
+            {
+                long chipFrameStart=chip.Coordinate-(long)chip.NativeOrdinal;
+                if (chip.Coordinate <= value.BeginCoordinate
+                    || chip.Coordinate < chip.NativeOrdinal
+                    || chipFrameStart!=previousChipFrameStart
+                        &&chipFrameStart<=previousCoordinate
+                    || complete && chip.Coordinate >= value.EndCoordinate
+                    || previousCoordinate >= 0
+                        && chip.Coordinate <= previousCoordinate
+                    || chip.NativeOrdinal >= config.EventCapacity
+                    || (chip.EventKind != 3 && chip.EventKind != 4)
+                    || chip.SourceCpu < 1 || chip.SourceCpu > 3
+                    || chip.EventKind == 3 && chip.Subject > 3
+                    || chip.EventKind == 4 && chip.Subject != 0
+                    || chip.IsData != (chip.EventKind == 4
+                        || chip.Subject == 1 || chip.Subject == 3)
+                    || chip.Port != (chip.Subject < 2 ? 0 : 1)
+                    || chip.SourceCpu == 1 && chip.Pc > 0xffff
+                    || chip.SourceCpu == 2 && chip.Pc > 0xffffff
+                    || chip.SourceCpu == 3 && chip.Pc != 0)
+                    throw Invalid("baseline chip ownership");
+                previousCoordinate = chip.Coordinate;
+                previousChipFrameStart=chipFrameStart;
+                value.AddChip(new WriteRecord
+                {
+                    Coordinate = chip.Coordinate,
+                    Ordinal = chip.NativeOrdinal,
+                    Pc = chip.Pc,
+                    Token = value.Token,
+                    Kind = chip.EventKind,
+                    Subject = chip.Subject,
+                    Value = chip.Value,
+                    SourceCpu = chip.SourceCpu,
+                    Port = chip.Port,
+                    Register = chip.Register
+                });
+            }
+            foreach (SnapshotGroup snapshot in service.Snapshots)
+            {
+                if (!hasRange[snapshot.RangeId]
+                    || snapshot.Bytes.Length != rangeById[snapshot.RangeId].Length)
+                    throw Invalid("baseline snapshot identity");
+                value.AddSnapshot(new SnapshotRecord
+                {
+                    RangeId = snapshot.RangeId,
+                    SourceCpu = snapshot.SourceCpu,
+                    Pc = snapshot.Pc,
+                    Bytes = snapshot.Bytes,
+                    Length = snapshot.Bytes.Length
+                });
+            }
+            if (complete)
+            {
+                if (value.Cancelled)
+                {
+                    GpgxAudioObserverAdapter.ServiceKind kind =
+                        RequireKind(value.Kind);
+                    ValidateSnapshots(value, kind.CancellationRangeFirst,
+                        kind.CancellationRangeCount, 3, 0);
+                }
+                else
+                {
+                    GpgxAudioObserverAdapter.ServiceHook end =
+                        RequireHook(value.EndHookToken,
+                            "baseline completion");
+                    ValidateSnapshots(value, end.RangeFirst, end.RangeCount,
+                        end.Cpu, end.Pc);
+                }
+            }
+            ushort transitionParent = value.ParentToken;
+            byte transitionDepth = value.Depth;
+            long previousTransitionCoordinate=value.BeginCoordinate;
+            long previousTransitionFrameStart=value.BeginCoordinate
+                -(long)value.BeginNativeOrdinal;
+            foreach (AncestryTransition transition
+                in service.AncestryTransitions)
+            {
+                long transitionFrameStart=transition.Coordinate
+                    -(long)transition.NativeOrdinal;
+                GpgxAudioObserverAdapter.ServiceHook transitionHook =
+                    RequireHook(transition.HookToken,
+                        "baseline ancestry transition");
+                if (transition.Coordinate <= value.BeginCoordinate
+                    || transition.Coordinate < transition.NativeOrdinal
+                    || transitionFrameStart!=previousTransitionFrameStart
+                        &&transitionFrameStart<=previousTransitionCoordinate
+                    || complete && transition.Coordinate >= value.EndCoordinate
+                    || previousTransitionCoordinate>=0
+                        &&transition.Coordinate<=previousTransitionCoordinate
+                    || transition.NativeOrdinal>=config.EventCapacity
+                    || transition.PreviousParentToken != transitionParent
+                    || transition.PreviousDepth != transitionDepth
+                    || transition.PreviousDepth==0
+                    || transition.CurrentDepth+1!=transition.PreviousDepth
+                    || (transitionHook.Action != 8
+                        && transitionHook.Action != 9)
+                    || transitionHook.Pc != transition.Pc
+                    || transitionHook.Cpu != transition.SourceCpu
+                    || transitionHook.ExpectedActiveKind!=value.Kind)
+                    throw Invalid("baseline ancestry transition order");
+                previousTransitionCoordinate=transition.Coordinate;
+                previousTransitionFrameStart=transitionFrameStart;
+                transitionParent = transition.CurrentParentToken;
+                transitionDepth = transition.CurrentDepth;
+                value.AddAncestry(new AncestryRecord
+                {
+                    Coordinate = transition.Coordinate,
+                    NativeOrdinal = transition.NativeOrdinal,
+                    PreviousParentToken = transition.PreviousParentToken,
+                    PreviousDepth = transition.PreviousDepth,
+                    CurrentParentToken = transition.CurrentParentToken,
+                    CurrentDepth = transition.CurrentDepth,
+                    HookToken = transition.HookToken,
+                    SourceCpu = transition.SourceCpu,
+                    Pc = transition.Pc
+                });
+            }
+            if (transitionParent != value.CurrentParentToken
+                || transitionDepth != value.CurrentDepth)
+                throw Invalid("baseline current ancestry differs");
+            return value;
         }
 
         private static void ResetPublishedOwnership(ServiceBuilder service)
@@ -424,6 +786,7 @@ namespace OpenGGF.BizHawk.Headless
             internal ushort RootToken;
             internal uint BeginPc,EndPc; internal ushort BeginHookToken;internal byte BeginSourceCpu;
             internal bool Cancelled,IsReset,ResetPower;
+            internal byte CarriedFrames;
             internal int EventCount;
             internal WriteRecord Chip0,Chip1,Chip2,Chip3;internal WriteRecord[] AdditionalChipRecords;
             internal int ChipRecordCount;
@@ -666,10 +1029,20 @@ namespace OpenGGF.BizHawk.Headless
                     RequireOk(api.Drain(null, 0, out drained), "empty drain");
                     drainedFrame = true;
                     if (drained != 0) throw new InvalidOperationException("An empty drain returned events.");
-                    var emptyCapture = new FrameCapture(EmptyEvents,new List<ServiceBuilder>(),
-                        new List<ResetRecord>(),globalEventCoordinate,pendingDeferredBegin,bk2Row);
-                    consume(EmptyEvents, 0);
-                    LastCapture=retainRaw?emptyCapture:null;
+                    if(validateContinuationFrames)
+                    {
+                        ProjectionResult emptyProjection=Project(EmptyEvents,0,
+                            retainRaw,bk2Row);
+                        consume(EmptyEvents,0);
+                        CommitProjection(emptyProjection);
+                    }
+                    else
+                    {
+                        var emptyCapture = new FrameCapture(EmptyEvents,new List<ServiceBuilder>(),
+                            new List<ResetRecord>(),globalEventCoordinate,pendingDeferredBegin,bk2Row);
+                        consume(EmptyEvents, 0);
+                        LastCapture=retainRaw?emptyCapture:null;
+                    }
                     return;
                 }
                 if (drainBuffer == null || drainBuffer.Length < count)
@@ -713,6 +1086,22 @@ namespace OpenGGF.BizHawk.Headless
         {
             var active=projectionActive;active.Clear();
             for(int i=0;i<activeServices.Count;i++)active.Add(Clone(activeServices[i]));
+            ushort nextValidationToken=0;
+            if(validateContinuationFrames)
+            {
+                nextValidationToken=1;
+                for(int i=0;i<active.Count;i++)
+                    while(nextValidationToken==active[i].Token)
+                        nextValidationToken=unchecked((ushort)
+                            (nextValidationToken+1));
+            }
+            if(validateContinuationFrames&&active.Count!=0)
+            {
+                ServiceBuilder current=active[active.Count-1];
+                if(current.CarriedFrames==byte.MaxValue)
+                    throw Invalid("native continuation frame counter overflow");
+                current.CarriedFrames++;
+            }
             var complete=projectionComplete;complete.Clear();
             var pending=projectionPending;pending.Clear();pending.AddRange(pendingCompleted);
             var resets=projectionResets;resets.Clear();
@@ -754,9 +1143,35 @@ namespace OpenGGF.BizHawk.Headless
                         ValidateTailBegin(events,i,ref e,hook);
                     if(e.Pc!=hook.Pc)throw Invalid("unexpected service begin PC");
                     if(e.SourceCpu!=hook.Cpu||e.ServiceKindId!=hook.ServiceKindId)throw Invalid("begin hook kind/source");
+                    // Native selection already enforces this before emitting a
+                    // production event. Re-apply it only for imported raw rows,
+                    // whose event array did not pass through the native hook
+                    // selector in this process.
+                    if(validateContinuationFrames&&hook.Action==1)
+                    {
+                        byte activeKind=active.Count==0?(byte)0:
+                            active[active.Count-1].Kind;
+                        if(hook.ExpectedActiveKind!=activeKind)
+                            throw Invalid("begin hook active kind");
+                        if(active.Count!=0
+                            &&(RequireKind(activeKind).Flags&4)==0)
+                            throw Invalid("parent kind forbids children");
+                    }
+                    if(validateContinuationFrames&&hook.Action==4
+                        &&active.Count!=0
+                        &&(RequireKind(active[active.Count-1].Kind).Flags&4)==0)
+                        throw Invalid("tail parent kind forbids children");
                     if(e.Offset!=0||e.PayloadLength!=0||e.Flags!=0
                         ||(hook.Flags&~2)!=0)throw Invalid("begin fields");
                     ushort parent=active.Count==0?(ushort)0:active[active.Count-1].Token;
+                    if(validateContinuationFrames)
+                    {
+                        ushort extra=hook.Action==4
+                            ?events[i-1].ServiceToken:(ushort)0;
+                        if(e.ServiceToken!=AllocateValidationToken(active,
+                            ref nextValidationToken,extra))
+                            throw Invalid("native service token allocation");
+                    }
                     if(e.ServiceToken==0||ContainsToken(active,e.ServiceToken)||e.ParentToken!=parent||e.Depth!=active.Count)
                         throw Invalid("begin token/parent/depth");
                     if(!hasKind[e.ServiceKindId])throw Invalid("unknown service kind");
@@ -811,7 +1226,7 @@ namespace OpenGGF.BizHawk.Headless
                             ||!HasDeferredConsumeRoute(completionHook.ServiceKindId,
                                 deferred.TargetKind))
                             throw Invalid("deferred blocker completion before consume");
-                        ValidateTailEnd(events,i,ref e,completionHook,b);
+                        ValidateTailEnd(events,count,i,ref e,completionHook,b);
                         ref GpgxAudioTraceEvent successor=ref events[i+1];
                         deferredTransfer=new DeferredOwnerTransfer
                         {Pending=true,BeginIndex=i+1,Token=successor.ServiceToken,
@@ -836,7 +1251,7 @@ namespace OpenGGF.BizHawk.Headless
                             &&hook.Action!=8&&hook.Action!=9)
                             throw Invalid("completion hook action");
                         if(hook.Action==4)
-                            ValidateTailEnd(events,i,ref e,hook,b);
+                            ValidateTailEnd(events,count,i,ref e,hook,b);
                         if(e.Pc!=hook.Pc||e.SourceCpu!=hook.Cpu
                             ||(hook.Action==8||hook.Action==9?hook.ServiceKindId!=b.Kind
                                 ||hook.ExpectedActiveKind!=active[active.Count-1].Kind
@@ -912,6 +1327,10 @@ namespace OpenGGF.BizHawk.Headless
                 {
                     if(deferred!=null&&!deferred.Consumed)
                         throw Invalid("reset during deferred begin");
+                    if(validateContinuationFrames
+                        &&e.ServiceToken!=AllocateValidationToken(active,
+                            ref nextValidationToken,0))
+                        throw Invalid("native reset token allocation");
                     if(reset!=null||e.SourceCpu!=3||e.Pc!=0||e.ServiceToken==0||e.ParentToken!=0||e.Depth!=0
                         ||e.ServiceKindId!=config.ResetServiceKind||e.Subject!=active.Count||(e.Flags&~1)!=0
                         ||e.Offset!=0||e.PayloadLength!=0||e.Payload!=0||e.Value!=0)
@@ -1071,6 +1490,15 @@ namespace OpenGGF.BizHawk.Headless
             if(deferredTransfer.Pending)throw Invalid("partial deferred tail transfer");
             if(reset!=null)throw Invalid("partial snapshot/reset state");
             for(int i=0;i<active.Count;i++)if(active[i].ActiveByteLength!=0)throw Invalid("partial snapshot/reset state");
+            if(validateContinuationFrames)
+                for(int i=0;i<active.Count;i++)
+                {
+                    GpgxAudioObserverAdapter.ServiceKind kind=
+                        RequireKind(active[i].Kind);
+                    if((kind.Flags&2)==0||active[i].CarriedFrames
+                        >kind.ContinuationFrameLimit)
+                        throw Invalid("native continuation frame limit");
+                }
             if((uint)pending.Count>config.EventCapacity)throw Invalid("pending service bound");
             ulong pendingEvents=0;for(int i=0;i<pending.Count;i++)pendingEvents+=(uint)pending[i].EventCount;
             ulong continuation=(ulong)(config.MaxContinuationFrames==0?1:config.MaxContinuationFrames+1);
@@ -1121,6 +1549,28 @@ namespace OpenGGF.BizHawk.Headless
         private static bool ContainsToken(List<ServiceBuilder> active,ushort token)
         {for(int i=0;i<active.Count;i++)if(active[i].Token==token)return true;return false;}
 
+        private static ushort AllocateValidationToken(
+            List<ServiceBuilder> active,ref ushort nextToken,
+            ushort extraActiveToken)
+        {
+            ushort candidate=nextToken;
+            for(int attempts=0;attempts<ushort.MaxValue;attempts++)
+            {
+                if(candidate==0)throw Invalid(
+                    "native service token allocation exhausted");
+                bool used=candidate==extraActiveToken;
+                for(int index=0;!used&&index<active.Count;index++)
+                    used=active[index].Token==candidate;
+                if(!used)
+                {
+                    nextToken=unchecked((ushort)(candidate+1));
+                    return candidate;
+                }
+                candidate=unchecked((ushort)(candidate+1));
+            }
+            throw Invalid("native service token allocation exhausted");
+        }
+
         private static bool MatchesCurrentOwner(DeferredBeginReservation deferred,
             ServiceBuilder service)
         {
@@ -1168,10 +1618,10 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
-        private static void ValidateTailEnd(GpgxAudioTraceEvent[] events,int index,
+        private static void ValidateTailEnd(GpgxAudioTraceEvent[] events,int count,int index,
             ref GpgxAudioTraceEvent end,GpgxAudioObserverAdapter.ServiceHook hook,ServiceBuilder oldService)
         {
-            if(index+1>=events.Length)throw Invalid("tail completion without adjacent begin");
+            if(index+1>=count)throw Invalid("tail completion without adjacent begin");
             ref GpgxAudioTraceEvent begin=ref events[index+1];
             if(begin.Kind!=1||begin.Ordinal!=end.Ordinal+1||begin.Subject!=end.Subject||begin.Pc!=end.Pc
                 ||begin.SourceCpu!=end.SourceCpu||begin.ServiceToken==0||begin.ServiceToken==oldService.Token
@@ -1347,7 +1797,7 @@ namespace OpenGGF.BizHawk.Headless
                 BeginRow=b.BeginRow,BeginNativeOrdinal=b.BeginNativeOrdinal,
                 BeginHookToken=b.BeginHookToken,BeginSourceCpu=b.BeginSourceCpu,
                 Cancelled=b.Cancelled,IsReset=b.IsReset,ResetPower=b.ResetPower,ActiveRange=b.ActiveRange,
-                EventCount=b.EventCount,
+                CarriedFrames=b.CarriedFrames,EventCount=b.EventCount,
                 EndHookToken=b.EndHookToken,
                 ActiveSnapshotSource=b.ActiveSnapshotSource,ActiveSnapshotPc=b.ActiveSnapshotPc,
                 ActiveByteCount=b.ActiveByteCount,ActiveByteLength=b.ActiveByteLength,ActivePayload=b.ActivePayload,
