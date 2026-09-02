@@ -77,74 +77,106 @@ namespace OpenGGF.BizHawk.Headless
         }
 
         /// <summary>
-        /// Pure candidate seam: the fixed observer is active around an entire
-        /// row and is correlated before a caller can pass its result to the
-        /// unbound raw-v3 sink. No production authority path calls this method.
+        /// Opens the unbound candidate at power-on. The returned session owns
+        /// the fixed callback registration and every row's native
+        /// BeginFrame/advance/EndFrame/drain/correlation sequence. It is not
+        /// reachable from the authenticated capture CLI while unbound.
         /// </summary>
-        internal static IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
-            CaptureRequestV3RowForTesting(string candidateManifestPath,
-                IGpgxHost host, int row, Action advance,
-                CompleteRunAudioObserver.FrameCapture frame)
+        internal static RequestCandidateSession OpenRequestCandidateSession(
+            string candidateManifestPath, IGpgxHost host,
+            CompleteRunAudioObserver nativeObserver)
         {
             if (host == null) throw new ArgumentNullException("host");
-            if (advance == null) throw new ArgumentNullException("advance");
-            if (frame == null || frame.Bk2Row != row)
-                throw new InvalidDataException(
-                    "The S2 request marker evidence is not bound to its advanced row.");
+            if (nativeObserver == null) throw new ArgumentNullException(
+                "nativeObserver");
             S2PreconsumptionRequestProfile.Candidate candidate =
                 S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
-            using (var requests = S2PreconsumptionRequestProfile.CreateObserver(
-                candidate, host))
+            return new RequestCandidateSession(
+                S2PreconsumptionRequestProfile.CreateObserver(candidate, host),
+                nativeObserver);
+        }
+
+        /// <summary>
+        /// Candidate-only power-on session. It deliberately has no frame or
+        /// event-list input: only CompleteRunAudioObserver may drain the native
+        /// record sequence that is correlated to the callback.
+        /// </summary>
+        internal sealed class RequestCandidateSession : IDisposable
+        {
+            private readonly S2PreconsumptionRequestObserver requests;
+            private readonly CompleteRunAudioObserver nativeObserver;
+            private readonly List<S2PreconsumptionRequestObserver.Transfer>
+                published = new List<S2PreconsumptionRequestObserver.Transfer>();
+            private int nextRow;
+            private bool disposed;
+
+            internal RequestCandidateSession(
+                S2PreconsumptionRequestObserver value,
+                CompleteRunAudioObserver observer)
             {
-                requests.BeginRow(row);
-                advance();
-                return requests.CorrelateRow(row, frame.RawEvents);
+                requests = value ?? throw new ArgumentNullException("value");
+                nativeObserver = observer ?? throw new ArgumentNullException(
+                    "observer");
             }
-        }
 
-        internal sealed class RequestV3Row
-        {
-            internal RequestV3Row(int row, Action advance,
-                CompleteRunAudioObserver.FrameCapture frame)
-            { Row = row; Advance = advance; Frame = frame; }
-            internal int Row { get; private set; }
-            internal Action Advance { get; private set; }
-            internal CompleteRunAudioObserver.FrameCapture Frame { get; private set; }
-        }
+            internal IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
+                PublishedTransfers { get { return published.AsReadOnly(); } }
 
-        internal static IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
-            CaptureRequestV3RowsForTesting(string candidateManifestPath,
-                IGpgxHost host, IEnumerable<RequestV3Row> rows)
-        {
-            if (host == null || rows == null) throw new ArgumentNullException(
-                host == null ? "host" : "rows");
-            S2PreconsumptionRequestProfile.Candidate candidate =
-                S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
-            var published = new List<S2PreconsumptionRequestObserver.Transfer>();
-            using (var requests = S2PreconsumptionRequestProfile.CreateObserver(
-                candidate, host))
+            internal IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
+                AdvanceRow(int row, Action advance)
             {
-                int expected = 0;
-                foreach (RequestV3Row value in rows)
+                if (disposed) throw new ObjectDisposedException(
+                    "RequestCandidateSession");
+                if (advance == null) throw new ArgumentNullException("advance");
+                if (row != nextRow)
+                    throw new InvalidDataException(
+                        "The S2 request candidate cannot carry evidence across rows.");
+                try
                 {
-                    if (value == null || value.Row != expected || value.Advance == null
-                        || value.Frame == null || value.Frame.Bk2Row != value.Row)
-                        throw new InvalidDataException(
-                            "The S2 request candidate rows are not continuous evidence from power-on.");
-                    requests.BeginRow(value.Row);
-                    value.Advance();
-                    IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
-                        requests.CorrelateRow(value.Row, value.Frame.RawEvents);
-                    if (value.Row >= S2AudioObserverProfile.FirstRow)
+                    requests.BeginRow(row);
+                    CompleteRunAudioObserver.FrameCapture frame =
+                        nativeObserver.CaptureCanonicalFrame(row, advance);
+                    IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
+                        transfers = requests.CompleteOwnedRow(row, frame.RawEvents);
+                    if (row >= S2AudioObserverProfile.FirstRow)
                         for (int index = 0; index < transfers.Count; index++)
                             published.Add(transfers[index]);
-                    expected++;
+                    nextRow++;
+                    return transfers;
                 }
-                if (expected <= S2AudioObserverProfile.FirstRow)
-                    throw new InvalidDataException(
-                        "The S2 request candidate ended before its publication boundary.");
+                catch
+                {
+                    DisposeAfterFailure();
+                    throw;
+                }
             }
-            return published.AsReadOnly();
+
+            internal void Complete()
+            {
+                if (disposed) throw new ObjectDisposedException(
+                    "RequestCandidateSession");
+                if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
+                {
+                    DisposeAfterFailure();
+                    throw new InvalidDataException(
+                        "The S2 request candidate ended before its full power-on interval.");
+                }
+                Dispose();
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                requests.Dispose();
+            }
+
+            private void DisposeAfterFailure()
+            {
+                if (disposed) return;
+                try { Dispose(); }
+                catch (InvalidOperationException) { }
+            }
         }
 
         private static void PublishRawWithAttestation(

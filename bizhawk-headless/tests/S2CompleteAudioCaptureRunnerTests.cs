@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using Newtonsoft.Json.Linq;
 
 namespace OpenGGF.BizHawk.Headless.Tests
 {
@@ -41,8 +43,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void DrainsPowerOnThenStreamsEveryComparisonRow()
         {
             var api = new S2AudioObserverProfileTests.RecordingTraceApi();
-            CompleteRunAudioObserver observer = S2AudioObserverProfile.CreateObserver(
-                ManifestPath(), CapabilityPath(), api);
+            CompleteRunAudioObserver observer = CreateCurrentHarnessObserver(api);
             var host = new FakeS1Host(null);
             var sink = new RecordingSink(host);
             var rows = new List<Bk2Frame>
@@ -82,8 +83,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void StopsPrefixWithoutConsumingPreservedTail()
         {
             var api = new S2AudioObserverProfileTests.RecordingTraceApi();
-            CompleteRunAudioObserver observer = S2AudioObserverProfile.CreateObserver(
-                ManifestPath(), CapabilityPath(), api);
+            CompleteRunAudioObserver observer = CreateCurrentHarnessObserver(api);
             var host = new FakeS1Host(null);
             var sink = new RecordingSink(host);
             S2CompleteAudioCaptureRunner.CaptureResult result =
@@ -154,8 +154,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             IEnumerable<Bk2Frame> rows, string message)
         {
             var api = new S2AudioObserverProfileTests.RecordingTraceApi();
-            CompleteRunAudioObserver observer = S2AudioObserverProfile.CreateObserver(
-                ManifestPath(), CapabilityPath(), api);
+            CompleteRunAudioObserver observer = CreateCurrentHarnessObserver(api);
             var host = new FakeS1Host(null);
             AssertEx.Throws<InvalidDataException>(
                 () => S2CompleteAudioCaptureRunner.CaptureIntervalForTesting(
@@ -178,6 +177,43 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             return Path.GetFullPath(Path.Combine(EndToEndTests.ToolDirectory,
                 "fixtures/gpgx-audio-capability-v1.json"));
+        }
+
+        private static CompleteRunAudioObserver CreateCurrentHarnessObserver(
+            IGpgxAudioTraceApi api)
+        {
+            string root = TestScratch.CreateRootPath("s2-runner-current-harness");
+            Directory.CreateDirectory(root);
+            try
+            {
+                string original = File.ReadAllText(CapabilityPath());
+                string pinnedExecutable = (string)JObject.Parse(original)
+                    ["task8_harness_executable_sha256"];
+                string capability = Path.Combine(root, "capability.json");
+                File.WriteAllText(capability, original.Replace(pinnedExecutable,
+                    Sha256File(typeof(GpgxHost).Assembly.Location)));
+                AssertEx.Equal(S2AudioObserverProfile.CapabilityTemplateSha256(
+                    CapabilityPath()), S2AudioObserverProfile.CapabilityTemplateSha256(
+                    capability));
+                return S2AudioObserverProfile.CreateObserver(
+                    ManifestPath(), capability, api);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static string Sha256File(string path)
+        {
+            using (SHA256 hash = SHA256.Create())
+            {
+                byte[] bytes = hash.ComputeHash(File.ReadAllBytes(path));
+                var value = new System.Text.StringBuilder(bytes.Length * 2);
+                for (int index = 0; index < bytes.Length; index++)
+                    value.Append(bytes[index].ToString("x2"));
+                return value.ToString();
+            }
         }
 
         private static string ReferenceMoviePath()

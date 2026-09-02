@@ -42,6 +42,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests reject invalid raw v3 request transfer fields",
                 RejectsInvalidRawV3RequestTransferFields));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests require the fixed M68K source on every raw v3 transfer",
+                RequiresFixedM68kSourceOnEveryRawV3Transfer));
             if (Environment.GetEnvironmentVariable(
                 "OPENGGF_S2_COMPLETE_AUDIO_REFERENCE") == "1")
             {
@@ -254,6 +257,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal("16715808", (string)transfers[0]["a7"]);
             AssertEx.Equal(17, (int)transfers[0]["native_ordinal"]);
             AssertEx.Equal(0, (int)transfers[0]["service_token"]);
+            AssertEx.Equal(2, (int)transfers[0]["source_cpu"]);
             JObject owner = (JObject)transfers[0]["active_service_owner"];
             AssertEx.Equal(0, (int)owner["token"]);
             AssertEx.Equal(0, (int)owner["kind"]);
@@ -272,6 +276,21 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     new S2PreconsumptionRequestObserver.Transfer(
                         S2AudioObserverProfile.FirstRow, 0, 4, 0x00FF1020,
                         17, 9, 3, 1)
+                }), "invalid request transfer");
+        }
+
+        private static void RequiresFixedM68kSourceOnEveryRawV3Transfer()
+        {
+            var sink = new S2RequestAwareRawV3Sink(
+                new FakeStateSource(new byte[0x2000]), new StringWriter());
+            sink.Begin(EmptyFrontier());
+            AssertEx.Throws<InvalidDataException>(() => sink.Frame(
+                S2AudioObserverProfile.FirstRow,
+                EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
+                {
+                    new S2PreconsumptionRequestObserver.Transfer(
+                        S2AudioObserverProfile.FirstRow, 1, 0, 0x10,
+                        17, 0, 0, 0, 1)
                 }), "invalid request transfer");
         }
 

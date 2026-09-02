@@ -29,10 +29,18 @@ namespace OpenGGF.BizHawk.Headless
             internal Transfer(int row, byte request, ushort slot, uint stack,
                 uint nativeOrdinal, ushort serviceToken, byte serviceKind,
                 byte depth)
+                : this(row, request, slot, stack, nativeOrdinal, serviceToken,
+                    serviceKind, depth, MarkerSourceCpu)
+            { }
+
+            internal Transfer(int row, byte request, ushort slot, uint stack,
+                uint nativeOrdinal, ushort serviceToken, byte serviceKind,
+                byte depth, byte sourceCpu)
             {
                 Row = row; Request = request; Slot = slot; Pc = S2PreconsumptionRequestObserver.Pc;
                 A7 = stack; NativeOrdinal = nativeOrdinal;
                 ServiceToken = serviceToken; ServiceKind = serviceKind; Depth = depth;
+                SourceCpu = sourceCpu;
             }
 
             internal int Row { get; private set; }
@@ -44,6 +52,7 @@ namespace OpenGGF.BizHawk.Headless
             internal ushort ServiceToken { get; private set; }
             internal byte ServiceKind { get; private set; }
             internal byte Depth { get; private set; }
+            internal byte SourceCpu { get; private set; }
         }
 
         private sealed class PendingTransfer
@@ -75,7 +84,12 @@ namespace OpenGGF.BizHawk.Headless
             activeRow = row;
         }
 
-        internal IReadOnlyList<Transfer> CorrelateRow(int row,
+        /// <summary>
+        /// Consumes the native drain owned by the request session immediately
+        /// after the same row's advance.  Callers cannot attach an arbitrary
+        /// frame capture to a callback from another advance.
+        /// </summary>
+        internal IReadOnlyList<Transfer> CompleteOwnedRow(int row,
             IEnumerable<GpgxAudioTraceEvent> events)
         {
             if (events == null) throw new ArgumentNullException("events");
@@ -85,6 +99,13 @@ namespace OpenGGF.BizHawk.Headless
             var transfers = new List<Transfer>();
             foreach (GpgxAudioTraceEvent value in events)
             {
+                if (!IsFixedMarkerCandidate(value))
+                {
+                    if (pending.Count != 0 && value.Kind == 2)
+                        throw new InvalidOperationException(
+                            "The S2 request terminal boundary preceded its marker.");
+                    continue;
+                }
                 if (pending.Count == 0)
                     throw new InvalidOperationException(
                         "The S2 request marker is orphaned or duplicated.");
@@ -105,13 +126,23 @@ namespace OpenGGF.BizHawk.Headless
                         "The S2 request marker A7 differs from the callback.");
                 transfers.Add(new Transfer(captured.Row, captured.Request,
                     captured.Slot, captured.A7, value.Ordinal,
-                    value.ServiceToken, value.ServiceKindId, value.Depth));
+                    value.ServiceToken, value.ServiceKindId, value.Depth,
+                    value.SourceCpu));
             }
             if (pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request callback has no exact native A7 marker.");
             activeRow = -1;
             return transfers.AsReadOnly();
+        }
+
+        private static bool IsFixedMarkerCandidate(GpgxAudioTraceEvent value)
+        {
+            // A known marker token identifies malformed kind/value/PC shapes;
+            // the fixed action-7 shape identifies a wrong token.  Everything
+            // else is an ordinary service/native record, not request evidence.
+            return value.Subject == MarkerToken
+                || (value.Kind == 10 && value.Value == 3 && value.Pc == Pc);
         }
 
         private void OnTransfer()
