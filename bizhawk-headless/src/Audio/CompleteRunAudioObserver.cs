@@ -548,21 +548,23 @@ namespace OpenGGF.BizHawk.Headless
             return LastCapture;
         }
 
-        /// <summary>
-        /// Fixed observer callbacks may snapshot only the current frame's
-        /// native record count while this observer owns the frame. This is an
-        /// ABI-4 ordering watermark, not a general event-drain surface.
-        /// </summary>
-        internal uint CurrentFrameEventCount()
+        /// <summary>Reads only the fixed S2 callback successor boundary.</summary>
+        internal uint CurrentS2RequestSuccessorOrdinal()
         {
             if (!capturing) throw new InvalidOperationException(
-                "The native event watermark is outside an active frame.");
-            uint count, overflow;
-            RequireOk(api.EventCount(out count, out overflow), "callback event count");
-            if (overflow != 0 || count > api.Capacity)
+                "The S2 request successor boundary is outside an active frame.");
+            IS2RequestSuccessorOrdinalApi boundary =
+                api as IS2RequestSuccessorOrdinalApi;
+            if (boundary == null)
                 throw new InvalidOperationException(
-                    "The native audio observer overflowed its bounded frame buffer.");
-            return count;
+                    "The native observer lacks the fixed S2 request successor boundary.");
+            uint ordinal;
+            RequireOk(boundary.S2RequestSuccessorOrdinal(out ordinal),
+                "S2 request successor ordinal");
+            if (ordinal > api.Capacity)
+                throw new InvalidOperationException(
+                    "The S2 request successor ordinal exceeds native capacity.");
+            return ordinal;
         }
 
         public void CaptureFrame(Action frameAdvance,

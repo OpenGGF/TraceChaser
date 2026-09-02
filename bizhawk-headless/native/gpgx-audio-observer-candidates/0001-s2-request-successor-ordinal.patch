@@ -1,0 +1,110 @@
+# Candidate-only layer over the authenticated observer patch; not a v2 trust root.
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+@@ -328,0 +329 @@
++    gpgx_audio_trace_s2_request_callback_begin(REG_PC);
+@@ -330,0 +332 @@
++    gpgx_audio_trace_s2_request_callback_end();
+diff --git a/waterbox/gpgx/cinterface/audio_trace.c b/waterbox/gpgx/cinterface/audio_trace.c
+--- a/waterbox/gpgx/cinterface/audio_trace.c
++++ b/waterbox/gpgx/cinterface/audio_trace.c
+@@ -188,6 +188,7 @@ ECL_INVISIBLE static uint8_t trace_prepublication;
+ ECL_INVISIBLE static uint8_t trace_ready_drained;
+ ECL_INVISIBLE static struct gpgx_audio_trace_first_fault_v1 trace_first_fault;
+ ECL_INVISIBLE static uint16_t trace_arm_hook_index;
++ECL_INVISIBLE static uint8_t trace_s2_request_callback_active;
+ ECL_INVISIBLE static uint8_t trace_reset_active;
+ ECL_INVISIBLE static uint8_t trace_issue_source;
+ ECL_INVISIBLE static uint8_t trace_depth;
+@@ -1437,0 +1438,48 @@ void gpgx_audio_trace_leave_cpu(uint8_t previous) { trace_issue_source = previous; }
++void gpgx_audio_trace_s2_request_callback_begin(uint32_t pc)
++{
++  trace_s2_request_callback_active =
++    gpgx_audio_trace_enabled && pc == 0x0010d6u;
++}
++
++void gpgx_audio_trace_s2_request_callback_end(void)
++{
++  trace_s2_request_callback_active = 0;
++}
++
++static int has_fixed_s2_request_marker(void)
++{
++  static const uint8_t opcode[4] = { 0x13u, 0x80u, 0x10u, 0x09u };
++  uint32_t i, matches = 0;
++  for (i = 0; i < trace_config.hook_count; i++)
++  {
++    const struct gpgx_audio_service_hook_v1 *hook = &trace_hooks[i];
++    if (hook->hook_token == 24u
++        && hook->action == ACTION_OBSERVATION_MARKER
++        && hook->cpu == GPGX_AUDIO_TRACE_CPU_M68K
++        && hook->pc == 0x0010d6u
++        && hook->service_kind == 0u
++        && hook->expected_active_kind == 0u
++        && hook->flags == 0u
++        && hook->opcode_length == 4u
++        && hook->range_first == 0u
++        && hook->range_count == 0u
++        && !memcmp(hook->opcode, opcode, sizeof(opcode))
++        && bytes_are_zero(hook->reserved, sizeof(hook->reserved))) matches++;
++  }
++  return matches == 1u;
++}
++
++ECL_EXPORT int32_t gpgx_audio_trace_s2_request_successor_ordinal(
++  uint32_t *ordinal)
++{
++  if (trace_ready_invalid) return TRACE_ABI_OR_CONFIG_LIMIT;
++  if (trace_phase != PHASE_RECORDING) return TRACE_INVALID_PHASE;
++  if (!ordinal) return TRACE_INVALID_ARGUMENT;
++  if (!trace_s2_request_callback_active
++      || trace_issue_source != GPGX_AUDIO_TRACE_CPU_M68K
++      || trace_depth != 0u || trace_deferred_begin.pending
++      || !has_fixed_s2_request_marker()) return TRACE_ABI_OR_CONFIG_LIMIT;
++  *ordinal = trace_event_count_value;
++  return TRACE_OK;
++}
++
+@@ -1706,6 +1754,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_begin_frame(void)
+   trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
+   trace_runtime_error = trace_ready_invalid = trace_reset_active = 0; trace_issue_source = 0;
+   trace_ready_drained = 0;
++  trace_s2_request_callback_active = 0;
+   trace_z80_instruction_pc = trace_m68k_instruction_pc = 0; trace_next_token = 1;
+   for (i = 0; i < trace_depth; i++)
+     while (trace_next_token == trace_stack[i].token) trace_next_token++;
+@@ -1780,6 +1829,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_abort_frame(void)
+   { fail_runtime(GPGX_AUDIO_TRACE_FAULT_SERVICE); return TRACE_ABI_OR_CONFIG_LIMIT; }
+   trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
+   trace_runtime_error = trace_ready_invalid = trace_reset_active = 0; trace_issue_source = 0;
++  trace_s2_request_callback_active = 0;
+   trace_ready_drained = 0;
+   trace_z80_instruction_pc = trace_m68k_instruction_pc = 0;
+   trace_depth = 0; memset(trace_stack, 0, sizeof(trace_stack));
+@@ -1790,6 +1839,7 @@ ECL_EXPORT int32_t gpgx_audio_trace_disable(void)
+   trace_event_count_value = trace_omitted_count = trace_protected_tail = 0;
+   trace_runtime_error = trace_ready_invalid = trace_z80_proofs_armed = trace_prepublication = 0;
+   trace_ready_drained = trace_reset_active = trace_issue_source = trace_depth = 0;
++  trace_s2_request_callback_active = 0;
+   trace_arm_hook_index = UINT16_MAX;
+   trace_z80_instruction_pc = trace_m68k_instruction_pc = 0; trace_next_token = 1;
+   trace_phase = PHASE_DISABLED; gpgx_audio_trace_enabled = 0;
+diff --git a/waterbox/gpgx/cinterface/audio_trace.h b/waterbox/gpgx/cinterface/audio_trace.h
+--- a/waterbox/gpgx/cinterface/audio_trace.h
++++ b/waterbox/gpgx/cinterface/audio_trace.h
+@@ -120,5 +120,7 @@ extern uint32_t trace_m68k_instruction_pc;
+ uint8_t gpgx_audio_trace_enter_cpu(uint8_t cpu);
+ void gpgx_audio_trace_leave_cpu(uint8_t previous);
++void gpgx_audio_trace_s2_request_callback_begin(uint32_t pc);
++void gpgx_audio_trace_s2_request_callback_end(void);
+ void gpgx_audio_trace_instruction(uint8_t cpu, uint32_t pc);
+ void gpgx_audio_trace_fm_write(uint32_t address, uint32_t data);
+ void gpgx_audio_trace_psg_write(uint32_t data);
+@@ -141,5 +143,7 @@ int32_t gpgx_audio_trace_event_count(uint32_t *required_count, uint32_t *overflow_count);
+ int32_t gpgx_audio_trace_drain(struct gpgx_audio_trace_event *out,
+   uint32_t out_capacity, uint32_t *out_count);
++int32_t gpgx_audio_trace_s2_request_successor_ordinal(
++  uint32_t *ordinal);
+ int32_t gpgx_audio_trace_abort_frame(void);
+ int32_t gpgx_audio_trace_disable(void);

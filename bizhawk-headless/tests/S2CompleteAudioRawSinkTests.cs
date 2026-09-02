@@ -312,8 +312,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         private static void ResetsNativeRequestOrdinalsAtEachRawV3Row()
         {
+            var output = new StringWriter();
             var sink = new S2RequestAwareRawV3Sink(
-                new FakeStateSource(new byte[0x2000]), new StringWriter());
+                new FakeStateSource(new byte[0x2000]), output);
             sink.Begin(EmptyFrontier());
             sink.Frame(S2AudioObserverProfile.FirstRow,
                 EmptyFrame(S2AudioObserverProfile.FirstRow), EmptyPacket(), new[]
@@ -329,6 +330,22 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         S2AudioObserverProfile.FirstRow + 1, 2, 1, 0x20,
                         0, 0, 0, 0)
                 });
+
+            string[] lines = output.ToString().Split(
+                new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var frames = new List<JObject>();
+            for (int index = 0; index < lines.Length; index++)
+            {
+                JObject value = JObject.Parse(lines[index]);
+                if ((string)value["type"] == "frame") frames.Add(value);
+            }
+            AssertEx.Equal(2, frames.Count);
+            JArray first = (JArray)frames[0]["request_transfers"];
+            JArray second = (JArray)frames[1]["request_transfers"];
+            AssertEx.Equal(0, (int)first[0]["global_transfer_ordinal"]);
+            AssertEx.Equal(1, (int)second[0]["global_transfer_ordinal"]);
+            AssertEx.Equal(0, (int)first[0]["native_ordinal"]);
+            AssertEx.Equal(0, (int)second[0]["native_ordinal"]);
         }
 
         private static void RejectsDuplicateNativeRequestOrdinals()

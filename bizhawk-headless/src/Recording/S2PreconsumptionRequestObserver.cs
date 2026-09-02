@@ -1,12 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
-    /// Fixed Sonic 2 REV01 observation of the accepted M68K-to-Z80 sound
-    /// transfer. This is evidence only: it neither writes emulated memory nor
-    /// feeds a request into any driver, queue, or playback owner.
+    /// Candidate-only native boundary used while the fixed M68K execute
+    /// callback is active. It reports the first native ordinal that can follow
+    /// that callback; ABI-4 EventCount remains ready-phase-only.
+    /// </summary>
+    internal interface IS2RequestSuccessorOrdinalApi
+    {
+        int S2RequestSuccessorOrdinal(out uint ordinal);
+    }
+
+    /// <summary>
+    /// Session-owned Sonic 2 REV01 observation of the accepted M68K-to-Z80
+    /// sound transfer. This is evidence only: it neither writes emulated
+    /// memory nor feeds a request into any driver, queue, or playback owner.
     /// </summary>
     internal sealed class S2PreconsumptionRequestObserver : IDisposable
     {
@@ -17,13 +28,18 @@ namespace OpenGGF.BizHawk.Headless
         internal const byte MarkerServiceKind = 0;
         internal const byte MarkerDepth = 0;
         private const int MaximumTransfersPerRow = 4;
+
         private readonly ICpuRegisterReader registers;
+        private readonly CompleteRunAudioObserver nativeObserver;
         private readonly IDisposable registration;
-        private readonly Func<uint> callbackWatermark;
         private readonly Queue<PendingTransfer> pending =
             new Queue<PendingTransfer>();
+        private readonly List<Transfer> published = new List<Transfer>();
         private int activeRow = -1;
+        private int nextRow;
         private bool disposed;
+        private bool completed;
+        private bool failed;
 
         internal sealed class Transfer
         {
@@ -38,10 +54,10 @@ namespace OpenGGF.BizHawk.Headless
                 uint nativeOrdinal, ushort serviceToken, byte serviceKind,
                 byte depth, byte sourceCpu)
             {
-                Row = row; Request = request; Slot = slot; Pc = S2PreconsumptionRequestObserver.Pc;
-                A7 = stack; NativeOrdinal = nativeOrdinal;
-                ServiceToken = serviceToken; ServiceKind = serviceKind; Depth = depth;
-                SourceCpu = sourceCpu;
+                Row = row; Request = request; Slot = slot;
+                Pc = S2PreconsumptionRequestObserver.Pc; A7 = stack;
+                NativeOrdinal = nativeOrdinal; ServiceToken = serviceToken;
+                ServiceKind = serviceKind; Depth = depth; SourceCpu = sourceCpu;
             }
 
             internal int Row { get; private set; }
@@ -58,55 +74,107 @@ namespace OpenGGF.BizHawk.Headless
 
         private sealed class PendingTransfer
         {
-            internal int Row; internal byte Request; internal ushort Slot;
-            internal uint A7; internal uint MarkerOrdinal;
+            internal int Row;
+            internal byte Request;
+            internal ushort Slot;
+            internal uint A7;
+            internal uint SuccessorOrdinal;
         }
 
-        internal S2PreconsumptionRequestObserver(IGpgxHost host)
-            : this(host, null)
-        { }
-
-        internal S2PreconsumptionRequestObserver(IGpgxHost host,
-            Func<uint> watermark)
+        internal S2PreconsumptionRequestObserver(
+            S2PreconsumptionRequestProfile.Candidate candidate,
+            IGpgxHost host, CompleteRunAudioObserver observer)
         {
+            if (candidate == null) throw new ArgumentNullException("candidate");
             if (host == null) throw new ArgumentNullException("host");
+            if (observer == null) throw new ArgumentNullException("observer");
+            if (candidate.Pc != Pc || candidate.Opcode != "13801009"
+                || candidate.MarkerToken != MarkerToken
+                || candidate.ProductionBound)
+                throw new InvalidDataException(
+                    "The S2 request candidate cannot select a different hook or authority state.");
             registers = host as ICpuRegisterReader;
             if (registers == null)
                 throw new InvalidOperationException(
                     "The fixed S2 request observer requires M68K register reads.");
-            callbackWatermark = watermark;
+            nativeObserver = observer;
             registration = host.RegisterExecuteCallback(Pc, OnTransfer);
             if (registration == null)
                 throw new InvalidOperationException(
                     "The fixed S2 request observer was not registered.");
         }
 
-        internal void BeginRow(int row)
+        internal IReadOnlyList<Transfer> PublishedTransfers
+        { get { return published.AsReadOnly(); } }
+
+        /// <summary>
+        /// Owns BeginFrame, the emulator advance, EndFrame, the native drain,
+        /// and request correlation. No caller can attach a separately-built
+        /// event list or a nullable ordering watermark.
+        /// </summary>
+        internal IReadOnlyList<Transfer> AdvanceRow(int row, Action advance)
         {
             if (disposed) throw new ObjectDisposedException(
                 "S2PreconsumptionRequestObserver");
-            if (row < 0) throw new ArgumentOutOfRangeException("row");
+            if (advance == null) throw new ArgumentNullException("advance");
+            if (row != nextRow)
+            {
+                DisposeAfterFailure();
+                throw new InvalidDataException(
+                    "The S2 request candidate cannot carry evidence across rows.");
+            }
+            try
+            {
+                BeginOwnedRow(row);
+                CompleteRunAudioObserver.FrameCapture frame =
+                    nativeObserver.CaptureCanonicalFrame(row, advance);
+                IReadOnlyList<Transfer> transfers = CorrelateOwnedFrame(
+                    row, frame.RawEvents);
+                if (row >= S2AudioObserverProfile.FirstRow)
+                    for (int index = 0; index < transfers.Count; index++)
+                        published.Add(transfers[index]);
+                nextRow++;
+                return transfers;
+            }
+            catch
+            {
+                DisposeAfterFailure();
+                throw;
+            }
+        }
+
+        internal void Complete()
+        {
+            if (disposed) throw new ObjectDisposedException(
+                "S2PreconsumptionRequestObserver");
+            if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
+            {
+                DisposeAfterFailure();
+                throw new InvalidDataException(
+                    "The S2 request candidate ended before its full power-on interval.");
+            }
+            completed = true;
+            Dispose();
+        }
+
+        private void BeginOwnedRow(int row)
+        {
             if (activeRow >= 0 || pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request observer has an unmatched prior row.");
             activeRow = row;
         }
 
-        /// <summary>
-        /// Consumes the native drain owned by the request session immediately
-        /// after the same row's advance.  Callers cannot attach an arbitrary
-        /// frame capture to a callback from another advance.
-        /// </summary>
-        internal IReadOnlyList<Transfer> CompleteOwnedRow(int row,
-            IEnumerable<GpgxAudioTraceEvent> events)
+        private IReadOnlyList<Transfer> CorrelateOwnedFrame(int row,
+            IReadOnlyList<GpgxAudioTraceEvent> events)
         {
-            if (events == null) throw new ArgumentNullException("events");
             if (activeRow != row)
                 throw new InvalidOperationException(
                     "The S2 request marker is outside its callback row.");
             var transfers = new List<Transfer>();
-            foreach (GpgxAudioTraceEvent value in events)
+            for (int index = 0; index < events.Count; index++)
             {
+                GpgxAudioTraceEvent value = events[index];
                 if (!IsFixedMarkerCandidate(value))
                 {
                     if (pending.Count != 0 && value.Kind == 2)
@@ -117,14 +185,14 @@ namespace OpenGGF.BizHawk.Headless
                 if (pending.Count == 0)
                     throw new InvalidOperationException(
                         "The S2 request marker is orphaned or duplicated.");
-                if (callbackWatermark != null
-                    && value.Ordinal != pending.Peek().MarkerOrdinal)
+                PendingTransfer captured = pending.Peek();
+                if (value.Ordinal < captured.SuccessorOrdinal)
                     throw new InvalidOperationException(
-                        "The S2 request marker is not the callback successor.");
+                        "The S2 request marker predates its callback successor boundary.");
                 if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc
                     || value.Subject != MarkerToken || value.PayloadLength != 4)
                     throw new InvalidOperationException(
-                        "The S2 request next record is not its exact marker.");
+                        "The S2 request next marker is not its exact fixed action-7 record.");
                 if (value.SourceCpu != MarkerSourceCpu
                     || value.ServiceToken != MarkerServiceToken
                     || value.ParentToken != MarkerServiceToken
@@ -132,7 +200,7 @@ namespace OpenGGF.BizHawk.Headless
                     || value.Depth != MarkerDepth)
                     throw new InvalidOperationException(
                         "The S2 request marker source/owner differs.");
-                PendingTransfer captured = pending.Dequeue();
+                pending.Dequeue();
                 if (value.Payload != captured.A7)
                     throw new InvalidOperationException(
                         "The S2 request marker A7 differs from the callback.");
@@ -150,9 +218,6 @@ namespace OpenGGF.BizHawk.Headless
 
         private static bool IsFixedMarkerCandidate(GpgxAudioTraceEvent value)
         {
-            // A known marker token identifies malformed kind/value/PC shapes;
-            // the fixed action-7 shape identifies a wrong token.  Everything
-            // else is an ordinary service/native record, not request evidence.
             return value.Subject == MarkerToken
                 || (value.Kind == 10 && value.Value == 3 && value.Pc == Pc);
         }
@@ -175,10 +240,11 @@ namespace OpenGGF.BizHawk.Headless
                     "The S2 request callback observed a slot outside 0..3.");
             pending.Enqueue(new PendingTransfer
             {
-                Row = activeRow, Request = request, Slot = slot,
+                Row = activeRow,
+                Request = request,
+                Slot = slot,
                 A7 = registers.ReadCpuRegister("A7"),
-                MarkerOrdinal = callbackWatermark == null ? 0
-                    : callbackWatermark()
+                SuccessorOrdinal = nativeObserver.CurrentS2RequestSuccessorOrdinal()
             });
         }
 
@@ -190,6 +256,17 @@ namespace OpenGGF.BizHawk.Headless
             if (pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request observer ended with unmatched callbacks.");
+            if (!completed && !failed)
+                throw new InvalidDataException(
+                    "The S2 request candidate was disposed before its full power-on interval.");
+        }
+
+        private void DisposeAfterFailure()
+        {
+            if (disposed) return;
+            failed = true;
+            try { Dispose(); }
+            catch (InvalidOperationException) { }
         }
     }
 }

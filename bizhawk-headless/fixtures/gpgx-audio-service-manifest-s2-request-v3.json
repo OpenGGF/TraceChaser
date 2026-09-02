@@ -2,6 +2,8 @@
   "schema": "openggf.s2-preconsumption-request-manifest.v1",
   "production_bound": false,
   "base_service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
+  "candidate_native_patch_file": "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch",
+  "candidate_native_patch_sha256": "d6648cf77204f26041356a788a81cecc6a7006ee5d6694f266211b172d4babec",
   "request_transfer": {
     "cpu": "M68K",
     "pc": 4310,

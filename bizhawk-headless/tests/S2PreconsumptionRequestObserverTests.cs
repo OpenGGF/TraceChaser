@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace OpenGGF.BizHawk.Headless.Tests
 {
@@ -20,6 +21,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests make the session own the callback advance drain and correlation",
                 SessionOwnsCallbackAdvanceDrainAndCorrelation));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests keep ABI4 EventCount unavailable during an active callback frame",
+                KeepsAbi4EventCountUnavailableDuringCallbackFrame));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests correlate multiple requests in one row across ordinary events",
+                CorrelatesMultipleRequestsAcrossOrdinaryEvents));
             tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests reject a non-marker record before the exact marker",
                 RejectsNonMarkerBeforeExactMarker));
@@ -110,21 +117,23 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             var host = new FakeHost();
             host.Set("D0", 0x000000B5); host.Set("D1", 3); host.Set("A7", 0x00FF1020);
-            using (var observer = new S2PreconsumptionRequestObserver(host))
-            {
-                observer.BeginRow(769);
-                host.Execute(S2PreconsumptionRequestObserver.Pc);
-                IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
-                    observer.CompleteOwnedRow(769, new[] { Marker(0x00FF1020, 17) });
-
-                AssertEx.Equal(1, transfers.Count);
-                AssertEx.Equal(769, transfers[0].Row);
-                AssertEx.Equal((byte)0xB5, transfers[0].Request);
-                AssertEx.Equal((ushort)3, transfers[0].Slot);
-                AssertEx.Equal(0x0010D6u, transfers[0].Pc);
-                AssertEx.Equal(0x00FF1020u, transfers[0].A7);
-                AssertEx.Equal(17u, transfers[0].NativeOrdinal);
-            }
+            var api = new QueuedTraceApi();
+            var observer = OpenSession(host, api);
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                observer.AdvanceRow(0, () =>
+                {
+                    api.Events = new GpgxAudioTraceEvent[0];
+                    host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[] { Marker(0x00FF1020, 0) };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(0, transfers[0].Row);
+            AssertEx.Equal((byte)0xB5, transfers[0].Request);
+            AssertEx.Equal((ushort)3, transfers[0].Slot);
+            AssertEx.Equal(0x0010D6u, transfers[0].Pc);
+            AssertEx.Equal(0x00FF1020u, transfers[0].A7);
+            AssertEx.Equal(0u, transfers[0].NativeOrdinal);
+            DisposeIncompleteSession(observer);
             AssertEx.Equal(1, host.Registrations);
             AssertEx.Equal(1, host.Disposals);
             AssertEx.Equal(S2PreconsumptionRequestObserver.Pc, host.Address);
@@ -134,13 +143,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             var host = new FakeHost();
             host.Set("D0", 1); host.Set("D1", 0); host.Set("A7", 0x12345678);
-            using (var observer = new S2PreconsumptionRequestObserver(host))
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
             {
-                observer.BeginRow(769);
-                host.Execute(S2PreconsumptionRequestObserver.Pc);
                 AssertEx.Throws<InvalidOperationException>(() =>
-                    observer.CompleteOwnedRow(769, new[] { Marker(0x12345679, 1) }),
-                    "A7");
+                    observer.AdvanceRow(0, () =>
+                    {
+                        api.Events = new GpgxAudioTraceEvent[0];
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        api.Events = new[] { Marker(0x12345679, 0) };
+                    }), "A7");
             }
         }
 
@@ -158,6 +170,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(
                 "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
                 S2AudioObserverProfile.ServiceManifestSha256);
+            AssertEx.Equal(
+                S2PreconsumptionRequestProfile.CandidateNativePatchSha256,
+                Sha256File(Path.Combine(EndToEndTests.ToolDirectory,
+                    "native", "gpgx-audio-observer-candidates",
+                    "0001-s2-request-successor-ordinal.patch")));
         }
 
         private static void SessionOwnsCallbackAdvanceDrainAndCorrelation()
@@ -192,35 +209,90 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(1, host.Disposals);
         }
 
+        private static void KeepsAbi4EventCountUnavailableDuringCallbackFrame()
+        {
+            var host = RequestHost(0xCE, 2, 0x00FF1000);
+            var api = new QueuedTraceApi();
+            var session = OpenSession(host, api);
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                session.AdvanceRow(0, () =>
+                {
+                    api.Events = new GpgxAudioTraceEvent[0];
+                    host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[] { Marker(0x00FF1000, 0) };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(0, api.ActiveFrameEventCountAttempts);
+            DisposeIncompleteSession(session);
+        }
+
+        private static void CorrelatesMultipleRequestsAcrossOrdinaryEvents()
+        {
+            var host = RequestHost(0xB5, 0, 0x10);
+            var api = new QueuedTraceApi();
+            var session = OpenSession(host, api);
+            try
+            {
+                IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                    session.AdvanceRow(0, () =>
+                    {
+                        api.Events = new GpgxAudioTraceEvent[0];
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        api.Events = new[] { Marker(0x10, 0) };
+                        host.Set("D0", 0xCE); host.Set("D1", 2);
+                        host.Set("A7", 0x20);
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        api.Events = new[]
+                        {
+                            Marker(0x10, 0), Ordinary(1), Marker(0x20, 2)
+                        };
+                    });
+                AssertEx.Equal(2, transfers.Count);
+                AssertEx.Equal((byte)0xB5, transfers[0].Request);
+                AssertEx.Equal(0u, transfers[0].NativeOrdinal);
+                AssertEx.Equal((byte)0xCE, transfers[1].Request);
+                AssertEx.Equal(2u, transfers[1].NativeOrdinal);
+            }
+            finally { DisposeIncompleteSession(session); }
+        }
+
         private static void RejectsNonMarkerBeforeExactMarker()
         {
             var host = new FakeHost();
             host.Set("D0", 1); host.Set("D1", 0); host.Set("A7", 0x12);
-            var observer = new S2PreconsumptionRequestObserver(host);
-            observer.BeginRow(769);
-            host.Execute(S2PreconsumptionRequestObserver.Pc);
-            GpgxAudioTraceEvent wrong = Marker(0x12, 1);
-            wrong.Kind = 2;
-            AssertEx.Throws<InvalidOperationException>(() => observer.CompleteOwnedRow(
-                769, new[] { wrong, Marker(0x12, 2) }), "next record");
-            AssertEx.Throws<InvalidOperationException>(() => observer.Dispose(),
-                "unmatched");
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
+            {
+                AssertEx.Throws<InvalidOperationException>(() =>
+                    observer.AdvanceRow(0, () =>
+                    {
+                        api.Events = new GpgxAudioTraceEvent[0];
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        GpgxAudioTraceEvent wrong = Marker(0x12, 0);
+                        wrong.Kind = 2;
+                        api.Events = new[] { wrong, Marker(0x12, 1) };
+                    }), "unexpected payload");
+            }
         }
 
         private static void RejectsWrongSourceOrOwner()
         {
             var host = new FakeHost();
             host.Set("D0", 1); host.Set("D1", 0); host.Set("A7", 0x12);
-            var observer = new S2PreconsumptionRequestObserver(host);
-            observer.BeginRow(769);
-            host.Execute(S2PreconsumptionRequestObserver.Pc);
-            GpgxAudioTraceEvent wrong = Marker(0x12, 1);
-            wrong.SourceCpu = 1; wrong.ServiceToken = 9;
-            wrong.ServiceKindId = 3; wrong.Depth = 1;
-            AssertEx.Throws<InvalidOperationException>(() => observer.CompleteOwnedRow(
-                769, new[] { wrong }), "source/owner");
-            AssertEx.Throws<InvalidOperationException>(() => observer.Dispose(),
-                "unmatched");
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
+            {
+                AssertEx.Throws<InvalidOperationException>(() =>
+                    observer.AdvanceRow(0, () =>
+                    {
+                        api.Events = new GpgxAudioTraceEvent[0];
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        GpgxAudioTraceEvent wrong = Marker(0x12, 0);
+                        wrong.SourceCpu = 1; wrong.ServiceToken = 9;
+                        wrong.ServiceKindId = 3; wrong.Depth = 1;
+                        api.Events = new[] { wrong };
+                    }), "marker fields");
+            }
         }
 
         private static void ObservesFromRowZeroAndPublishesAtBoundary()
@@ -395,6 +467,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 {
                     api.Events = new[] { Marker(0x10, 0) };
                     host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[] { Marker(0x10, 0), Marker(0x10, 1) };
                 }), "successor");
             }
         }
@@ -453,17 +526,20 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void RejectsTerminalEvidenceWhileCallbackPending()
         {
             var host = RequestHost(1, 0, 0x10);
-            var observer = new S2PreconsumptionRequestObserver(host);
-            observer.BeginRow(0);
-            host.Execute(S2PreconsumptionRequestObserver.Pc);
-            AssertEx.Throws<InvalidOperationException>(() => observer.CompleteOwnedRow(0,
-                new[] { new GpgxAudioTraceEvent { Kind = 2 } }),
-                "terminal boundary");
-            AssertEx.Throws<InvalidOperationException>(() => observer.Dispose(),
-                "unmatched");
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
+            {
+                AssertEx.Throws<InvalidOperationException>(() =>
+                    observer.AdvanceRow(0, () =>
+                    {
+                        api.Events = new GpgxAudioTraceEvent[0];
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        api.Events = new[] { new GpgxAudioTraceEvent { Kind = 2 } };
+                    }), "completion without active service");
+            }
         }
 
-        private static S2CompleteAudioCaptureRunner.RequestCandidateSession
+        private static S2PreconsumptionRequestObserver
             OpenSession(FakeHost host, QueuedTraceApi api)
         {
             return S2CompleteAudioCaptureRunner.OpenRequestCandidateSession(
@@ -472,7 +548,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         private static void DisposeIncompleteSession(
-            S2CompleteAudioCaptureRunner.RequestCandidateSession session)
+            S2PreconsumptionRequestObserver session)
         {
             AssertEx.Throws<InvalidDataException>(() => session.Dispose(),
                 "full power-on interval");
@@ -500,6 +576,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             return Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                 "..", "..", "fixtures", name));
+        }
+
+        private static string Sha256File(string path)
+        {
+            using (SHA256 hash = SHA256.Create())
+            {
+                byte[] bytes = hash.ComputeHash(File.ReadAllBytes(path));
+                return BitConverter.ToString(bytes).Replace("-", "")
+                    .ToLowerInvariant();
+            }
         }
 
         private static GpgxAudioTraceEvent Marker(uint a7, uint ordinal)
@@ -551,32 +637,65 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 new GpgxAudioObserverAdapter.SnapshotRange[0]);
         }
 
-        private sealed class QueuedTraceApi : IGpgxAudioTraceApi
+        private sealed class QueuedTraceApi : IGpgxAudioTraceApi,
+            IS2RequestSuccessorOrdinalApi
         {
             internal GpgxAudioTraceEvent[] Events = new GpgxAudioTraceEvent[0];
+            private int phase;
+            internal int ActiveFrameEventCountAttempts;
             public uint AbiVersion { get { return 4; } }
             public uint EventSize { get { return 32; } }
             public uint Capacity { get { return 65536; } }
             public int Configure(ref GpgxAudioObserverAdapter.Config config,
                 byte[] mask, GpgxAudioObserverAdapter.ServiceKind[] kinds,
                 GpgxAudioObserverAdapter.ServiceHook[] hooks,
-                GpgxAudioObserverAdapter.SnapshotRange[] ranges) { return 0; }
-            public int BeginFrame() { return 0; }
-            public int EndFrame() { return 0; }
+                GpgxAudioObserverAdapter.SnapshotRange[] ranges)
+            { phase = 1; return 0; }
+            public int BeginFrame()
+            {
+                if (phase != 1) return -2;
+                phase = 2; return 0;
+            }
+            public int EndFrame()
+            {
+                if (phase != 2) return -2;
+                phase = 3; return 0;
+            }
             public int EventCount(out uint count, out uint overflow)
-            { count = (uint)Events.Length; overflow = 0; return 0; }
+            {
+                count = 0; overflow = 0;
+                if (phase != 3)
+                {
+                    if (phase == 2) ActiveFrameEventCountAttempts++;
+                    return -2;
+                }
+                count = (uint)Events.Length; return 0;
+            }
             public int Drain(GpgxAudioTraceEvent[] events, uint capacity,
                 out uint count)
             {
+                if (phase != 3) { count = 0; return -2; }
                 count = (uint)Events.Length;
                 if (events != null) Array.Copy(Events, events, Events.Length);
+                phase = 1;
                 return 0;
             }
             public int GetFirstFault(out GpgxAudioObserverAdapter.FirstFault fault)
             { fault = new GpgxAudioObserverAdapter.FirstFault(); return 0; }
             public int BeginPublicationEpoch() { return 0; }
-            public int AbortFrame() { return 0; }
-            public int Disable() { return 0; }
+            public int AbortFrame()
+            {
+                if (phase != 2 && phase != 3) return -2;
+                phase = 1; return 0;
+            }
+            public int Disable() { phase = 0; return 0; }
+            public int S2RequestSuccessorOrdinal(out uint ordinal)
+            {
+                ordinal = 0;
+                if (phase != 2) return -2;
+                ordinal = (uint)Events.Length;
+                return 0;
+            }
         }
 
         private sealed class FakeHost : IGpgxHost, ICpuRegisterReader

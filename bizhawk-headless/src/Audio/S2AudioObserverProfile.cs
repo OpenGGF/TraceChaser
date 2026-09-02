@@ -381,7 +381,8 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidDataException(label + " changed.");
         }
 
-        private sealed class PrepublicationApi : IGpgxAudioTraceApi
+        private sealed class PrepublicationApi : IGpgxAudioTraceApi,
+            IS2RequestSuccessorOrdinalApi
         {
             private readonly IGpgxAudioTraceApi inner;
 
@@ -453,6 +454,13 @@ namespace OpenGGF.BizHawk.Headless
             { return inner.BeginPublicationEpoch(); }
             public int AbortFrame() { return inner.AbortFrame(); }
             public int Disable() { return inner.Disable(); }
+            public int S2RequestSuccessorOrdinal(out uint ordinal)
+            {
+                IS2RequestSuccessorOrdinalApi boundary =
+                    inner as IS2RequestSuccessorOrdinalApi;
+                if (boundary == null) { ordinal = 0; return -3; }
+                return boundary.S2RequestSuccessorOrdinal(out ordinal);
+            }
         }
     }
 }

@@ -82,7 +82,7 @@ namespace OpenGGF.BizHawk.Headless
         /// BeginFrame/advance/EndFrame/drain/correlation sequence. It is not
         /// reachable from the authenticated capture CLI while unbound.
         /// </summary>
-        internal static RequestCandidateSession OpenRequestCandidateSession(
+        internal static S2PreconsumptionRequestObserver OpenRequestCandidateSession(
             string candidateManifestPath, IGpgxHost host,
             CompleteRunAudioObserver nativeObserver)
         {
@@ -91,103 +91,8 @@ namespace OpenGGF.BizHawk.Headless
                 "nativeObserver");
             S2PreconsumptionRequestProfile.Candidate candidate =
                 S2PreconsumptionRequestProfile.LoadCandidate(candidateManifestPath);
-            return new RequestCandidateSession(
-                S2PreconsumptionRequestProfile.CreateObserver(candidate, host,
-                    nativeObserver.CurrentFrameEventCount),
-                nativeObserver);
-        }
-
-        /// <summary>
-        /// Candidate-only power-on session. It deliberately has no frame or
-        /// event-list input: only CompleteRunAudioObserver may drain the native
-        /// record sequence that is correlated to the callback.
-        /// </summary>
-        internal sealed class RequestCandidateSession : IDisposable
-        {
-            private readonly S2PreconsumptionRequestObserver requests;
-            private readonly CompleteRunAudioObserver nativeObserver;
-            private readonly List<S2PreconsumptionRequestObserver.Transfer>
-                published = new List<S2PreconsumptionRequestObserver.Transfer>();
-            private int nextRow;
-            private bool disposed;
-            private bool completed;
-            private bool failed;
-
-            internal RequestCandidateSession(
-                S2PreconsumptionRequestObserver value,
-                CompleteRunAudioObserver observer)
-            {
-                requests = value ?? throw new ArgumentNullException("value");
-                nativeObserver = observer ?? throw new ArgumentNullException(
-                    "observer");
-            }
-
-            internal IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
-                PublishedTransfers { get { return published.AsReadOnly(); } }
-
-            internal IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
-                AdvanceRow(int row, Action advance)
-            {
-                if (disposed) throw new ObjectDisposedException(
-                    "RequestCandidateSession");
-                if (advance == null) throw new ArgumentNullException("advance");
-                if (row != nextRow)
-                {
-                    DisposeAfterFailure();
-                    throw new InvalidDataException(
-                        "The S2 request candidate cannot carry evidence across rows.");
-                }
-                try
-                {
-                    requests.BeginRow(row);
-                    CompleteRunAudioObserver.FrameCapture frame =
-                        nativeObserver.CaptureCanonicalFrame(row, advance);
-                    IReadOnlyList<S2PreconsumptionRequestObserver.Transfer>
-                        transfers = requests.CompleteOwnedRow(row, frame.RawEvents);
-                    if (row >= S2AudioObserverProfile.FirstRow)
-                        for (int index = 0; index < transfers.Count; index++)
-                            published.Add(transfers[index]);
-                    nextRow++;
-                    return transfers;
-                }
-                catch
-                {
-                    DisposeAfterFailure();
-                    throw;
-                }
-            }
-
-            internal void Complete()
-            {
-                if (disposed) throw new ObjectDisposedException(
-                    "RequestCandidateSession");
-                if (nextRow != S2AudioObserverProfile.ExclusiveEnd)
-                {
-                    DisposeAfterFailure();
-                    throw new InvalidDataException(
-                        "The S2 request candidate ended before its full power-on interval.");
-                }
-                completed = true;
-                Dispose();
-            }
-
-            public void Dispose()
-            {
-                if (disposed) return;
-                disposed = true;
-                requests.Dispose();
-                if (!completed && !failed)
-                    throw new InvalidDataException(
-                        "The S2 request candidate was disposed before its full power-on interval.");
-            }
-
-            private void DisposeAfterFailure()
-            {
-                if (disposed) return;
-                failed = true;
-                try { Dispose(); }
-                catch (InvalidOperationException) { }
-            }
+            return new S2PreconsumptionRequestObserver(
+                candidate, host, nativeObserver);
         }
 
         private static void PublishRawWithAttestation(

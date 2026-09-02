@@ -1,9 +1,11 @@
 namespace OpenGGF.BizHawk.Headless
 {
-    public sealed class GpgxAudioTraceNative : IGpgxAudioTraceApi
+    public sealed class GpgxAudioTraceNative : IGpgxAudioTraceApi,
+        IS2RequestSuccessorOrdinalApi
     {
         private readonly GpgxAudioObserverAdapter adapter;
         private readonly GpgxAudioTraceDrainDepartures drainDepartures;
+        private GpgxAudioTraceS2RequestDepartures s2RequestDepartures;
         private GpgxAudioTraceEvent[] reusableNativeEvents;
 
         internal GpgxAudioTraceNative(GpgxAudioObserverAdapter adapter)
@@ -57,6 +59,15 @@ namespace OpenGGF.BizHawk.Headless
         public int BeginPublicationEpoch() { return adapter.BeginPublicationEpoch(); }
         public int Disable() { return adapter.Disable(); }
 
+        public int S2RequestSuccessorOrdinal(out uint ordinal)
+        {
+            if (s2RequestDepartures == null)
+                s2RequestDepartures =
+                    adapter.BindDeparture<GpgxAudioTraceS2RequestDepartures>();
+            return s2RequestDepartures
+                .gpgx_audio_trace_s2_request_successor_ordinal(out ordinal);
+        }
+
     }
 
     public abstract class GpgxAudioTraceDrainDepartures
@@ -65,5 +76,13 @@ namespace OpenGGF.BizHawk.Headless
         public abstract int gpgx_audio_trace_drain(
             [System.Runtime.InteropServices.Out] GpgxAudioTraceEvent[] events,
             uint capacity, out uint count);
+    }
+
+    public abstract class GpgxAudioTraceS2RequestDepartures
+    {
+        [global::BizHawk.BizInvoke.BizImport(
+            System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public abstract int gpgx_audio_trace_s2_request_successor_ordinal(
+            out uint ordinal);
     }
 }

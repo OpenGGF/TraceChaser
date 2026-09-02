@@ -11,6 +11,11 @@ namespace OpenGGF.BizHawk.Headless
     /// </summary>
     internal static class S2PreconsumptionRequestProfile
     {
+        internal const string CandidateNativePatchFile =
+            "bizhawk-headless/native/gpgx-audio-observer-candidates/0001-s2-request-successor-ordinal.patch";
+        internal const string CandidateNativePatchSha256 =
+            "d6648cf77204f26041356a788a81cecc6a7006ee5d6694f266211b172d4babec";
+
         internal sealed class Candidate
         {
             internal Candidate(uint pc, string opcode, ushort markerToken,
@@ -46,6 +51,12 @@ namespace OpenGGF.BizHawk.Headless
             RequireEqual(S2AudioObserverProfile.ServiceManifestSha256,
                 RequiredString(root, "base_service_manifest_sha256"),
                 "base manifest identity");
+            RequireEqual(CandidateNativePatchFile,
+                RequiredString(root, "candidate_native_patch_file"),
+                "candidate native patch file");
+            RequireEqual(CandidateNativePatchSha256,
+                RequiredString(root, "candidate_native_patch_sha256"),
+                "candidate native patch identity");
             JObject transfer = root["request_transfer"] as JObject;
             if (transfer == null) throw new InvalidDataException(
                 "The S2 request candidate has no transfer definition.");
@@ -70,25 +81,6 @@ namespace OpenGGF.BizHawk.Headless
             return new Candidate(S2PreconsumptionRequestObserver.Pc,
                 "13801009", S2PreconsumptionRequestObserver.MarkerToken,
                 false);
-        }
-
-        internal static S2PreconsumptionRequestObserver CreateObserver(
-            Candidate candidate, IGpgxHost host)
-        {
-            return CreateObserver(candidate, host, null);
-        }
-
-        internal static S2PreconsumptionRequestObserver CreateObserver(
-            Candidate candidate, IGpgxHost host, Func<uint> callbackWatermark)
-        {
-            if (candidate == null) throw new ArgumentNullException("candidate");
-            if (candidate.Pc != S2PreconsumptionRequestObserver.Pc
-                || candidate.Opcode != "13801009"
-                || candidate.MarkerToken
-                    != S2PreconsumptionRequestObserver.MarkerToken)
-                throw new InvalidDataException(
-                    "The S2 request candidate cannot select a different hook.");
-            return new S2PreconsumptionRequestObserver(host, callbackWatermark);
         }
 
         private static string RequiredString(JObject value, string name)
