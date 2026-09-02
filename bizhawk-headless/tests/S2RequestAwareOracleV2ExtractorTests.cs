@@ -58,6 +58,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RequestAwareOracleV2ExtractorTests accept closed raw-v3 zero override and PCM inventory",
                 AcceptsClosedRawV3ZeroOverrideAndPcmInventory));
             tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests project a producer-shaped coincident source window",
+                ProjectsProducerShapedCoincidentSourceWindow));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject a missing coincident source baseline before publication",
+                RejectsMissingCoincidentSourceBaselineBeforePublication));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests reject a mislabeled coincident source baseline before publication",
+                RejectsMislabeledCoincidentSourceBaselineBeforePublication));
+            tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests accept the reviewed kind-3 request topology",
                 AcceptsReviewedKind3RequestTopology));
             tests.Add(new TestMain.TestCase(
@@ -546,6 +555,122 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal(true, File.Exists(output));
             }
             finally { try { Directory.Delete(root, true); } catch { } }
+        }
+
+        private static void ProjectsProducerShapedCoincidentSourceWindow()
+        {
+            string root = TestScratch.CreateRootPath(
+                "s2-request-aware-coincident-window");
+            try
+            {
+                Directory.CreateDirectory(root);
+                byte[] raw = S2CompleteAudioRawSinkTests
+                    .ZeroInventoryRequestAwareRawForTesting();
+                var input = CoincidentInput(root, raw);
+                string output = Path.Combine(root, "window.jsonl");
+
+                input.Extractor.ExtractForTesting(input.Raw, input.Capability,
+                    input.Attestation, output);
+
+                string[] source = Encoding.UTF8.GetString(raw).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                string[] lines = File.ReadAllText(output).Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                AssertEx.Equal(6, lines.Length);
+                JObject metadata = JObject.Parse(lines[0]);
+                AssertEx.Equal("openggf.s2-oracle-audio-raw.v2",
+                    (string)metadata["schema"]);
+                AssertEx.Equal(1, (int)metadata["first_row"]);
+                AssertEx.Equal(4, (int)metadata["exclusive_end"]);
+                AssertEx.Equal(1, (int)metadata["source_first_row"]);
+                AssertEx.Equal(false, (bool)metadata["production_bound"]);
+                JObject rawBaseline = JObject.Parse(source[1]);
+                JObject baseline = JObject.Parse(lines[1]);
+                AssertEx.Equal(1, (int)baseline["row"]);
+                AssertEx.Equal(0, (int)baseline["source_preceding_row"]);
+                AssertEx.Equal((string)rawBaseline["state_hex"],
+                    (string)baseline["state_hex"]);
+                AssertEx.Equal((int)rawBaseline["ym_port0_latch"],
+                    (int)baseline["ym_port0_latch"]);
+                AssertEx.Equal((int)rawBaseline["ym_port1_latch"],
+                    (int)baseline["ym_port1_latch"]);
+                JObject cutoff = JObject.Parse(lines[5]);
+                string emptySha256 = Digest(new byte[0]);
+                AssertEx.Equal(3L, (long)cutoff["frame_count"]);
+                AssertEx.Equal(1L,
+                    (long)cutoff["request_transfer_count"]);
+                AssertEx.Equal(0L, (long)cutoff["override_resume_count"]);
+                AssertEx.Equal(0L, (long)cutoff["pcm_count"]);
+                AssertEx.Equal(emptySha256,
+                    (string)cutoff["override_resume_sha256"]);
+                AssertEx.Equal(emptySha256,
+                    (string)cutoff["pcm_sha256"]);
+            }
+            finally { try { Directory.Delete(root, true); } catch { } }
+        }
+
+        private static void RejectsMissingCoincidentSourceBaselineBeforePublication()
+        {
+            AssertCoincidentBaselineRejection(lines => lines.RemoveAt(1));
+        }
+
+        private static void RejectsMislabeledCoincidentSourceBaselineBeforePublication()
+        {
+            AssertCoincidentBaselineRejection(lines =>
+            {
+                JObject baseline = JObject.Parse(lines[1]);
+                baseline["type"] = "frame";
+                lines[1] = Json(baseline);
+            });
+        }
+
+        private static void AssertCoincidentBaselineRejection(
+            Action<List<string>> mutate)
+        {
+            string root = TestScratch.CreateRootPath(
+                "s2-request-aware-coincident-baseline-rejection");
+            try
+            {
+                Directory.CreateDirectory(root);
+                byte[] original = S2CompleteAudioRawSinkTests
+                    .ZeroInventoryRequestAwareRawForTesting();
+                var lines = new List<string>(Encoding.UTF8.GetString(original)
+                    .Split(new[] { '\n' },
+                        StringSplitOptions.RemoveEmptyEntries));
+                mutate(lines);
+                byte[] malformed = Encoding.UTF8.GetBytes(
+                    string.Join("\n", lines) + "\n");
+                Inputs input = CoincidentInput(root, original, malformed);
+                string output = Path.Combine(root, "window.jsonl");
+
+                AssertEx.Throws<InvalidDataException>(() => input.Extractor
+                    .ExtractForTesting(input.Raw, input.Capability,
+                        input.Attestation, output), "baseline");
+                AssertEx.Equal(false, File.Exists(output));
+            }
+            finally { try { Directory.Delete(root, true); } catch { } }
+        }
+
+        private static Inputs CoincidentInput(string root, byte[] raw)
+        {
+            return CoincidentInput(root, raw, raw);
+        }
+
+        private static Inputs CoincidentInput(
+            string root, byte[] inventoryRaw, byte[] inputRaw)
+        {
+            var input = new Inputs
+            {
+                Extractor = S2RequestAwareOracleV2Extractor.ForTesting(
+                    1, 4, 1, 4,
+                    Fixture("gpgx-audio-service-manifests-v1.json")),
+                Raw = Path.Combine(root, "input.raw.jsonl"),
+                Capability = Path.Combine(root, "input.capability.json"),
+                Attestation = Path.Combine(root, "input.attestation.json")
+            };
+            File.WriteAllBytes(input.Raw, inputRaw);
+            WriteAuthority(input, Capability(inventoryRaw, 1, 4), inputRaw);
+            return input;
         }
 
         private static void AcceptsReviewedKind3RequestTopology()

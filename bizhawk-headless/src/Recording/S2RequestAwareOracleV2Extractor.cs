@@ -47,7 +47,7 @@ namespace OpenGGF.BizHawk.Headless
             string manifestPath)
         {
             if (sourceStart < 0 || sourceStop <= sourceStart
-                || windowStart <= sourceStart || windowStop > sourceStop
+                || windowStart < sourceStart || windowStop > sourceStop
                 || windowStop <= windowStart)
                 throw new ArgumentException("The S2 request-aware bounds are invalid.");
             sourceFirst = sourceStart; sourceEnd = sourceStop;
@@ -153,8 +153,11 @@ namespace OpenGGF.BizHawk.Headless
             { throw Invalid("baseline lifecycle differs",error); }
             int latch0 = replay.YmPort0Address;
             int latch1 = replay.YmPort1Address;
-            int precedingLatch0 = 0, precedingLatch1 = 0;
-            JObject preceding = null;
+            bool coincidentWindow = windowFirst == sourceFirst;
+            int precedingLatch0 = coincidentWindow ? latch0 : 0;
+            int precedingLatch1 = coincidentWindow ? latch1 : 0;
+            JObject preceding = coincidentWindow
+                ? (JObject)firstBaseline.DeepClone() : null;
             long baseCount = 0, allCount = 0, markerCount = 0, requestCount = 0;
             int occupancy = 0, nextGlobal = 0, expectedRow = sourceFirst;
             var resumePcm = new ResumePcmValidator();
