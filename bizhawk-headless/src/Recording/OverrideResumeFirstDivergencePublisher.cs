@@ -27,6 +27,52 @@ namespace OpenGGF.BizHawk.Headless
         public void AtBarrier(string name, string privateName) { }
     }
 
+    internal struct OverrideResumeNativeResult
+    {
+        internal OverrideResumeNativeResult(int returnValue, int error)
+        { ReturnValue = returnValue; Error = error; }
+        internal int ReturnValue { get; private set; }
+        internal int Error { get; private set; }
+    }
+
+    internal interface IOverrideResumeBundleNativeAdapter
+    {
+        OverrideResumeNativeResult RenameAt2(int oldDirectoryFd,
+            string oldPath, int newDirectoryFd, string newPath, uint flags);
+        OverrideResumeNativeResult Fsync(int fd, string operationName);
+    }
+
+    internal sealed class OverrideResumeBundleNativeAdapter
+        : IOverrideResumeBundleNativeAdapter
+    {
+        internal static readonly OverrideResumeBundleNativeAdapter Instance =
+            new OverrideResumeBundleNativeAdapter();
+        private OverrideResumeBundleNativeAdapter() { }
+
+        public OverrideResumeNativeResult RenameAt2(int oldDirectoryFd,
+            string oldPath, int newDirectoryFd, string newPath, uint flags)
+        {
+            int result = NativeRenameAt2(oldDirectoryFd, oldPath,
+                newDirectoryFd, newPath, flags);
+            return new OverrideResumeNativeResult(result,
+                result == 0 ? 0 : Marshal.GetLastWin32Error());
+        }
+
+        public OverrideResumeNativeResult Fsync(int fd, string operationName)
+        {
+            int result = NativeFsync(fd);
+            return new OverrideResumeNativeResult(result,
+                result == 0 ? 0 : Marshal.GetLastWin32Error());
+        }
+
+        [DllImport("libc", EntryPoint = "renameat2", CharSet = CharSet.Ansi,
+            SetLastError = true)]
+        private static extern int NativeRenameAt2(int olddirfd, string oldpath,
+            int newdirfd, string newpath, uint flags);
+        [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
+        private static extern int NativeFsync(int fd);
+    }
+
     internal sealed class OverrideResumeInjectedNativeException : IOException
     {
         internal OverrideResumeInjectedNativeException(string operation,
@@ -63,18 +109,29 @@ namespace OpenGGF.BizHawk.Headless
 
         private readonly OverrideResumeFirstDivergenceExtractor extractor;
         private readonly IOverrideResumeBundlePublicationHooks hooks;
+        private readonly IOverrideResumeBundleNativeAdapter native;
 
         internal OverrideResumeFirstDivergencePublisher(
             OverrideResumeFirstDivergenceExtractor value)
-            : this(value, OverrideResumeBundlePublicationHooks.None) { }
+            : this(value, OverrideResumeBundlePublicationHooks.None,
+                OverrideResumeBundleNativeAdapter.Instance) { }
 
         internal OverrideResumeFirstDivergencePublisher(
             OverrideResumeFirstDivergenceExtractor value,
             IOverrideResumeBundlePublicationHooks publicationHooks)
+            : this(value, publicationHooks,
+                OverrideResumeBundleNativeAdapter.Instance) { }
+
+        internal OverrideResumeFirstDivergencePublisher(
+            OverrideResumeFirstDivergenceExtractor value,
+            IOverrideResumeBundlePublicationHooks publicationHooks,
+            IOverrideResumeBundleNativeAdapter nativeAdapter)
         {
             extractor = value ?? throw new ArgumentNullException("value");
             hooks = publicationHooks
                 ?? throw new ArgumentNullException("publicationHooks");
+            native = nativeAdapter
+                ?? throw new ArgumentNullException("nativeAdapter");
         }
 
         internal OverrideResumeBundlePublicationResult Publish(
@@ -84,7 +141,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             ValidatePaths(tracechaserRoot, inputRepositoryRoot, fixtureRoot);
             using (var transaction = LinuxBundleTransaction.Open(
-                inputRepositoryRoot, fixtureRoot, hooks))
+                inputRepositoryRoot, fixtureRoot, hooks, native))
             {
                 OverrideResumeFirstDivergenceExtractor.Output output =
                     extractor.Extract(inputs);
@@ -151,6 +208,7 @@ namespace OpenGGF.BizHawk.Headless
             private readonly string repositoryPath;
             private readonly string fixturePath;
             private readonly IOverrideResumeBundlePublicationHooks hooks;
+            private readonly IOverrideResumeBundleNativeAdapter native;
             private readonly Identity rootIdentity;
             private int slashFd;
             private int repositoryFd;
@@ -158,11 +216,13 @@ namespace OpenGGF.BizHawk.Headless
 
             private LinuxBundleTransaction(string repository,
                 string fixture, IOverrideResumeBundlePublicationHooks value,
-                int slash, int repo, int root, Identity identity)
+                IOverrideResumeBundleNativeAdapter nativeAdapter, int slash,
+                int repo, int root, Identity identity)
             {
                 repositoryPath = repository;
                 fixturePath = fixture;
                 hooks = value;
+                native = nativeAdapter;
                 slashFd = slash;
                 repositoryFd = repo;
                 rootFd = root;
@@ -170,7 +230,8 @@ namespace OpenGGF.BizHawk.Headless
             }
 
             internal static LinuxBundleTransaction Open(string repository,
-                string fixture, IOverrideResumeBundlePublicationHooks hooks)
+                string fixture, IOverrideResumeBundlePublicationHooks hooks,
+                IOverrideResumeBundleNativeAdapter native)
             {
                 if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
                         || RuntimeInformation.ProcessArchitecture
@@ -195,7 +256,7 @@ namespace OpenGGF.BizHawk.Headless
                         "fixture root");
                     RequireDirectory(identity, "fixture root");
                     return new LinuxBundleTransaction(repository, fixture,
-                        hooks, slash, repo, root, identity);
+                        hooks, native, slash, repo, root, identity);
                 }
                 catch
                 {
@@ -262,24 +323,18 @@ namespace OpenGGF.BizHawk.Headless
                     ValidateBundle(privateFd, s1Fd, s2Fd, values);
 
                     hooks.AtBarrier("before-rename", privateName);
-                    try
+                    NativeCall(hooks, "renameat2");
+                    OverrideResumeNativeResult rename = native.RenameAt2(
+                        rootFd, privateName, rootFd, BundleName,
+                        RenameNoReplace);
+                    if (rename.ReturnValue != 0)
                     {
-                        NativeCall(hooks, "renameat2");
-                    }
-                    catch (OverrideResumeInjectedNativeException exception)
-                    {
-                        throw new IOException(exception.Message, exception);
-                    }
-                    if (RenameAt2(rootFd, privateName, rootFd, BundleName,
-                            RenameNoReplace) != 0)
-                    {
-                        int error = Marshal.GetLastWin32Error();
-                        if (error == EExist)
+                        if (rename.Error == EExist)
                             throw new IOException(
                                 "Final bundle already exists and will not be replaced: "
                                 + Path.Combine(fixturePath, BundleName));
                         throw Failure("commit bundle with renameat2",
-                            BundleName, error);
+                            BundleName, rename.Error);
                     }
                     hooks.AtBarrier("after-rename", privateName);
                     try
@@ -399,8 +454,11 @@ namespace OpenGGF.BizHawk.Headless
                     SetMode(fd, FileMode, name);
                     WriteAll(fd, value, name);
                     NativeCall(hooks, "fsync-file");
-                    if (Fsync(fd) != 0)
-                        throw Failure("fsync staged member", name);
+                    OverrideResumeNativeResult result = native.Fsync(fd,
+                        "fsync-file");
+                    if (result.ReturnValue != 0)
+                        throw Failure("fsync staged member", name,
+                            result.Error);
                 }
                 finally
                 {
@@ -527,7 +585,10 @@ namespace OpenGGF.BizHawk.Headless
                 try { NativeCall(hooks, operation); }
                 catch (OverrideResumeInjectedNativeException exception)
                 { throw new IOException(exception.Message, exception); }
-                if (Fsync(fd) != 0) throw Failure(operation, ".");
+                OverrideResumeNativeResult result = native.Fsync(fd,
+                    operation);
+                if (result.ReturnValue != 0)
+                    throw Failure(operation, ".", result.Error);
             }
 
             private static int OpenTrusted(
@@ -727,10 +788,6 @@ namespace OpenGGF.BizHawk.Headless
             [DllImport("libc", EntryPoint = "mkdirat", CharSet = CharSet.Ansi,
                 SetLastError = true)]
             private static extern int MkdirAt(int dirfd, string path, uint mode);
-            [DllImport("libc", EntryPoint = "renameat2", CharSet = CharSet.Ansi,
-                SetLastError = true)]
-            private static extern int RenameAt2(int olddirfd, string oldpath,
-                int newdirfd, string newpath, uint flags);
             [DllImport("libc", EntryPoint = "statx", CharSet = CharSet.Ansi,
                 SetLastError = true)]
             private static extern int Statx(int dirfd, string path, int flags,
@@ -739,8 +796,6 @@ namespace OpenGGF.BizHawk.Headless
             private static extern int Flock(int fd, int operation);
             [DllImport("libc", EntryPoint = "fchmod", SetLastError = true)]
             private static extern int Fchmod(int fd, uint mode);
-            [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
-            private static extern int Fsync(int fd);
             [DllImport("libc", EntryPoint = "write", SetLastError = true)]
             private static extern IntPtr Write(int fd, IntPtr buffer,
                 UIntPtr count);

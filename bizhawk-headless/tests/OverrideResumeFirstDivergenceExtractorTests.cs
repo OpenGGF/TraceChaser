@@ -58,6 +58,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergenceExtractorTests reject malformed and multi-record attestations",
                 RejectsMalformedAndMultiRecordAttestations));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests reject cross-game published reference shapes",
+                RejectsCrossGamePublishedReferenceShapes));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergenceExtractorTests pin the game-discriminated reference schema",
+                PinsGameDiscriminatedReferenceSchema));
         }
 
         private static void NormalizesDuplicateAuthenticatedRawsDeterministically()
@@ -139,6 +145,89 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "row", "sample_rate", "selection", "sha256",
                     "stereo_frames");
             });
+        }
+
+        private static void RejectsCrossGamePublishedReferenceShapes()
+        {
+            WithInputs((root, inputs) =>
+            {
+                OverrideResumeFirstDivergenceExtractor.Output output =
+                    OverrideResumeFirstDivergenceExtractor.ForTesting().Extract(inputs);
+                JObject s1 = JObject.Parse(Gunzip(output.S1.ReferenceGzip));
+                JObject s2 = JObject.Parse(Gunzip(output.S2.ReferenceGzip));
+
+                JObject crossBoundary = (JObject)s1.DeepClone();
+                crossBoundary["boundary"] = s2["boundary"].DeepClone();
+                AssertPublishedReferenceRejected("s1", crossBoundary,
+                    output.S1.MetadataUtf8);
+
+                JObject crossPcm = (JObject)s1.DeepClone();
+                crossPcm["pcm"] = s2["pcm"].DeepClone();
+                AssertPublishedReferenceRejected("s1", crossPcm,
+                    output.S1.MetadataUtf8);
+
+                JObject missingS1Type = (JObject)s1.DeepClone();
+                ((JObject)missingS1Type["pcm"]).Remove("type");
+                AssertPublishedReferenceRejected("s1", missingS1Type,
+                    output.S1.MetadataUtf8);
+
+                JObject extraS2Type = (JObject)s2.DeepClone();
+                ((JObject)extraS2Type["pcm"])["type"] = "native_pcm_packet";
+                AssertPublishedReferenceRejected("s2", extraS2Type,
+                    output.S2.MetadataUtf8);
+            });
+        }
+
+        private static void PinsGameDiscriminatedReferenceSchema()
+        {
+            string path = Path.Combine(EndToEndTests.RepositoryRoot, "tools",
+                "tracechaser", "contracts", "audio",
+                "override-resume-first-divergence-reference-v1.schema.json");
+            JObject schema = JObject.Parse(File.ReadAllText(path));
+            JArray alternatives = (JArray)schema["oneOf"];
+            AssertEx.Equal(2, alternatives.Count);
+            AssertEx.Equal("#/$defs/s1_reference",
+                (string)alternatives[0]["$ref"]);
+            AssertEx.Equal("#/$defs/s2_reference",
+                (string)alternatives[1]["$ref"]);
+            JObject definitions = (JObject)schema["$defs"];
+            AssertReferenceSchemaBranch(definitions, "s1");
+            AssertReferenceSchemaBranch(definitions, "s2");
+            JObject s1Pcm = (JObject)definitions["s1_pcm"];
+            JObject s2Pcm = (JObject)definitions["s2_pcm"];
+            AssertEx.Equal(true, ((JArray)s1Pcm["required"])
+                .Any(value => (string)value == "type"));
+            AssertEx.Equal("native_pcm_packet",
+                (string)s1Pcm["properties"]["type"]["const"]);
+            AssertEx.Equal(false, ((JArray)s2Pcm["required"])
+                .Any(value => (string)value == "type"));
+            AssertEx.Equal(null, s2Pcm["properties"]["type"]);
+            AssertEx.Equal(false, (bool)s2Pcm["additionalProperties"]);
+        }
+
+        private static void AssertReferenceSchemaBranch(JObject definitions,
+            string game)
+        {
+            JObject branch = (JObject)definitions[game + "_reference"];
+            AssertEx.Equal(false, (bool)branch["additionalProperties"]);
+            AssertEx.Equal(game,
+                (string)branch["properties"]["game"]["const"]);
+            AssertEx.Equal("#/$defs/" + game + "_boundary",
+                (string)branch["properties"]["boundary"]["$ref"]);
+            AssertEx.Equal("#/$defs/" + game + "_pcm",
+                (string)branch["properties"]["pcm"]["$ref"]);
+        }
+
+        private static void AssertPublishedReferenceRejected(string game,
+            JObject reference, byte[] metadata)
+        {
+            byte[] logical = Encoding.UTF8.GetBytes(reference.ToString(
+                Newtonsoft.Json.Formatting.None) + "\n");
+            byte[] stored = OverrideResumeFirstDivergenceExtractor
+                .DeterministicGzip(logical);
+            AssertEx.Throws<InvalidDataException>(() =>
+                OverrideResumeFirstDivergenceExtractor
+                    .ValidatePublishedGameBytes(game, stored, metadata), "");
         }
 
         private static void RejectsDuplicateRawMismatch()

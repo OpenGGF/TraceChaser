@@ -27,6 +27,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "OverrideResumeFirstDivergencePublisherTests preserve a competing rename target",
                 PreservesCompetingRenameTarget));
             tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergencePublisherTests execute the non-EEXIST rename failure branch",
+                ExecutesNonEexistRenameFailureBranch));
+            tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergencePublisherTests report committed durability uncertainty without rollback",
                 ReportsCommittedDurabilityUncertaintyWithoutRollback));
             tests.Add(new TestMain.TestCase(
@@ -50,6 +53,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergencePublisherTests detect fixture root replacement before commit",
                 DetectsFixtureRootReplacementBeforeCommit));
+            tests.Add(new TestMain.TestCase(
+                "OverrideResumeFirstDivergencePublisherTests demonstrate unsupported root move after final revalidation",
+                DemonstratesUnsupportedRootMoveAfterFinalRevalidation));
             tests.Add(new TestMain.TestCase(
                 "OverrideResumeFirstDivergencePublisherTests declare the namespace stability precondition",
                 DeclaresNamespaceStabilityPrecondition));
@@ -109,7 +115,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             });
             int renameOrdinal = baseline.Operations.Single(value =>
                 value.Name == "renameat2").Ordinal;
-            for (int ordinal = 1; ordinal <= renameOrdinal; ordinal++)
+            for (int ordinal = 1; ordinal < renameOrdinal; ordinal++)
             {
                 int selected = ordinal;
                 WithPublication((root, trace, fixture, inputs) =>
@@ -153,17 +159,35 @@ namespace OpenGGF.BizHawk.Headless.Tests
             });
         }
 
+        private static void ExecutesNonEexistRenameFailureBranch()
+        {
+            WithPublication((root, trace, fixture, inputs) =>
+            {
+                var native = new FaultingNativeAdapter("renameat2", 5);
+                AssertEx.Throws<IOException>(() => Publish(root, trace,
+                    fixture, inputs, new RecordingHooks(), native),
+                    "commit bundle with renameat2");
+                AssertEx.Equal(1, native.RenameCalls);
+                AssertEx.Equal(false,
+                    LinuxPathEntry.Exists(Path.Combine(fixture, Bundle)));
+                string[] residue = Directory.GetFileSystemEntries(fixture);
+                AssertEx.Equal(1, residue.Length);
+                AssertEx.Equal(448, Mode(residue[0]));
+            });
+        }
+
         private static void ReportsCommittedDurabilityUncertaintyWithoutRollback()
         {
             WithPublication((root, trace, fixture, inputs) =>
             {
-                var hooks = new RecordingHooks("fsync-root", 5);
+                var native = new FaultingNativeAdapter("fsync-root", 5);
                 OverrideResumeBundlePublicationResult result = Publish(root,
-                    trace, fixture, inputs, hooks);
+                    trace, fixture, inputs, new RecordingHooks(), native);
                 AssertEx.Equal(
                     OverrideResumeBundlePublicationResult
                         .CommittedButDurabilityUnconfirmed,
                     result);
+                AssertEx.Equal(1, native.RootFsyncCalls);
                 AssertEx.Equal(4, Directory.GetFiles(Path.Combine(fixture,
                     Bundle), "*", SearchOption.AllDirectories).Length);
             });
@@ -351,6 +375,40 @@ namespace OpenGGF.BizHawk.Headless.Tests
             });
         }
 
+        private static void DemonstratesUnsupportedRootMoveAfterFinalRevalidation()
+        {
+            WithPublication((root, trace, fixture, inputs) =>
+            {
+                string moved = fixture + ".moved-after-revalidation";
+                var hooks = new RecordingHooks();
+                hooks.Barrier = (name, privateName) =>
+                {
+                    if (name != "before-rename") return;
+                    Directory.Move(fixture, moved);
+                    Directory.CreateDirectory(fixture);
+                };
+                try
+                {
+                    OverrideResumeBundlePublicationResult result = Publish(
+                        root, trace, fixture, inputs, hooks);
+                    AssertEx.Equal(OverrideResumeBundlePublicationResult.Durable,
+                        result);
+                    AssertEx.Equal(false, LinuxPathEntry.Exists(Path.Combine(
+                        fixture, Bundle)));
+                    AssertEx.Equal(4, Directory.GetFiles(Path.Combine(moved,
+                        Bundle), "*", SearchOption.AllDirectories).Length);
+                    AssertEx.Equal(true, OverrideResumeFirstDivergencePublisher
+                        .NamespaceStabilityPrecondition.Contains("unsupported"));
+                }
+                finally
+                {
+                    if (Directory.Exists(fixture))
+                        Directory.Delete(fixture, true);
+                    if (Directory.Exists(moved)) Directory.Move(moved, fixture);
+                }
+            });
+        }
+
         private static void RejectsStagedDirectoryReplacementBeforeCommit()
         {
             WithPublication((root, trace, fixture, inputs) =>
@@ -410,6 +468,17 @@ namespace OpenGGF.BizHawk.Headless.Tests
             return new OverrideResumeFirstDivergencePublisher(
                 OverrideResumeFirstDivergenceExtractor.ForTesting(), hooks)
                 .Publish(inputs, trace, root, fixture);
+        }
+
+        private static OverrideResumeBundlePublicationResult Publish(
+            string root, string trace, string fixture,
+            OverrideResumeFirstDivergenceExtractor.Inputs inputs,
+            IOverrideResumeBundlePublicationHooks hooks,
+            IOverrideResumeBundleNativeAdapter native)
+        {
+            return new OverrideResumeFirstDivergencePublisher(
+                OverrideResumeFirstDivergenceExtractor.ForTesting(), hooks,
+                native).Publish(inputs, trace, root, fixture);
         }
 
         private static void WithPublication(Action<string, string, string,
@@ -473,6 +542,42 @@ namespace OpenGGF.BizHawk.Headless.Tests
             public void AtBarrier(string name, string privateName)
             {
                 if (Barrier != null) Barrier(name, privateName);
+            }
+        }
+
+        private sealed class FaultingNativeAdapter
+            : IOverrideResumeBundleNativeAdapter
+        {
+            private readonly string operation;
+            private readonly int error;
+
+            internal FaultingNativeAdapter(string selectedOperation, int errno)
+            {
+                operation = selectedOperation;
+                error = errno;
+            }
+
+            internal int RenameCalls { get; private set; }
+            internal int RootFsyncCalls { get; private set; }
+
+            public OverrideResumeNativeResult RenameAt2(int oldDirectoryFd,
+                string oldPath, int newDirectoryFd, string newPath, uint flags)
+            {
+                RenameCalls++;
+                if (operation == "renameat2")
+                    return new OverrideResumeNativeResult(-1, error);
+                return OverrideResumeBundleNativeAdapter.Instance.RenameAt2(
+                    oldDirectoryFd, oldPath, newDirectoryFd, newPath, flags);
+            }
+
+            public OverrideResumeNativeResult Fsync(int fd,
+                string operationName)
+            {
+                if (operationName == "fsync-root") RootFsyncCalls++;
+                if (operation == operationName)
+                    return new OverrideResumeNativeResult(-1, error);
+                return OverrideResumeBundleNativeAdapter.Instance.Fsync(fd,
+                    operationName);
             }
         }
 
