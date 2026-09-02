@@ -36,6 +36,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2RequestAwareOracleV2ExtractorTests reject raw attestation disagreement",
                 RejectsRawAttestationDisagreement));
+            tests.Add(new TestMain.TestCase(
+                "S2RequestAwareOracleV2ExtractorTests keep the raw path line-streamed",
+                KeepsRawPathLineStreamed));
         }
 
         private static void DefinesClosedContract()
@@ -66,8 +69,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 JObject baseline = JObject.Parse(lines[1]);
                 AssertEx.Equal(10150, (int)baseline["row"]);
                 AssertEx.Equal(10149, (int)baseline["source_preceding_row"]);
-                AssertEx.Equal(0x22, (int)baseline["ym_port0_latch"]);
-                AssertEx.Equal(0x33, (int)baseline["ym_port1_latch"]);
+                AssertEx.Equal(0, (int)baseline["ym_port0_latch"]);
+                AssertEx.Equal(0, (int)baseline["ym_port1_latch"]);
                 JObject firstFrame = JObject.Parse(lines[2]);
                 JArray transfers = (JArray)firstFrame["request_transfers"];
                 AssertEx.Equal(1, transfers.Count);
@@ -126,6 +129,17 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Throws<InvalidDataException>(() => input.Extractor
                     .ExtractForTesting(input.Raw, input.Capability, input.Attestation,
                         Path.Combine(root, "marker.jsonl")), "marker");
+
+                RefreshAuthority(input, Encoding.UTF8.GetString(SyntheticRaw()));
+                lines = File.ReadAllText(input.Raw).Split(new[] { '\n' },
+                    StringSplitOptions.RemoveEmptyEntries);
+                JObject markerFrame = JObject.Parse(lines[4]);
+                ((JArray)markerFrame["events"])[2]["source_cpu"] = 1;
+                lines[4] = markerFrame.ToString(Formatting.None);
+                RefreshAuthority(input, string.Join("\n", lines) + "\n");
+                AssertEx.Throws<InvalidDataException>(() => input.Extractor
+                    .ExtractForTesting(input.Raw, input.Capability, input.Attestation,
+                        Path.Combine(root, "near-marker.jsonl")), "candidate");
             });
         }
 
@@ -187,6 +201,16 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     .ExtractForTesting(input.Raw, input.Capability, input.Attestation,
                         Path.Combine(root, "attestation.jsonl")), "attestation");
             });
+        }
+
+        private static void KeepsRawPathLineStreamed()
+        {
+            string source = File.ReadAllText(Path.Combine(EndToEndTests.ToolDirectory,
+                "src", "Recording", "S2RequestAwareOracleV2Extractor.cs"));
+            AssertEx.Equal(false, source.Contains("File.ReadAllBytes(rawPath)"));
+            AssertEx.Equal(false, source.Contains("ReadToEnd()"));
+            AssertEx.Equal(true, source.Contains("new StreamReader(File.OpenRead(rawPath)"));
+            AssertEx.Equal(true, source.Contains(".s2-request-window-"));
         }
 
         private static void AssertRawRejection(Inputs input, string root,
@@ -268,7 +292,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 var events = new JArray();
                 if (row == 10148) events.Add(Event(1, 3, 0, 0x22));
-                else if (row == 10149) events.Add(Event(2, 3, 2, 0x33));
+                else if (row == 10149)
+                { events.Add(Event(2, 3, 2, 0x33)); events.Add(Event(3, 8, 0, 0)); }
                 else events.Add(Event((uint)(100 + row), 3, 1, 0x44));
                 var transfers = new JArray();
                 if (row == 10150)

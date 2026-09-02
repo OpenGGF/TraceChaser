@@ -1,0 +1,33 @@
+{
+  "schema": "openggf.s2-request-aware-raw-v3-capability.v1",
+  "production_bound": false,
+  "producer": "s2-complete-audio-request-candidate",
+  "rom_sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
+  "bk2_sha256": "e850798f882b8c580aad148bc97cb50f260cae1d336dd649fe2f4dfae6796aa5",
+  "service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
+  "candidate_manifest_sha256": "7fa043d51da88ac25a885ed371c55f33362a9af909c05b7807558643e1edc62e",
+  "candidate_patch_sha256": "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b",
+  "candidate_recipe_sha256": "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312",
+  "harness_executable_sha256": null,
+  "first_row": 769,
+  "exclusive_end": 259590,
+  "window_first_row": 10150,
+  "window_exclusive_end": 10900,
+  "base_event_count": null,
+  "all_event_count": null,
+  "marker_event_count": null,
+  "request_count": null,
+  "base_event_sha256": null,
+  "all_event_sha256": null,
+  "marker_event_sha256": null,
+  "request_sha256": null,
+  "max_request_occupancy": null,
+  "cutoff_frontier_sha256": null,
+  "terminal_state_sha256": null,
+  "digest_domains": {
+    "raw_sha256": "exact raw JSONL file bytes",
+    "event_and_request_sha256": "canonical-json-v1 compact record bytes followed by one LF per record",
+    "cutoff_frontier_sha256": "canonical-json-v1 compact cutoff record bytes followed by one LF",
+    "terminal_state_sha256": "decoded terminal Z80 state bytes (8192 bytes)"
+  }
+}

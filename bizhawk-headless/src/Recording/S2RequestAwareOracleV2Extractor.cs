@@ -63,23 +63,32 @@ namespace OpenGGF.BizHawk.Headless
         private void Extract(string rawPath, string capabilityPath,
             string attestationPath, string outputPath, bool production)
         {
-            byte[] raw = ReadFile(rawPath, "raw");
+            FileEvidence raw = DigestFile(rawPath, "raw");
             JObject capability = ReadObject(capabilityPath, "capability");
             ValidateCapability(capability, production);
             ValidateAttestation(ReadObject(attestationPath, "attestation"), raw,
                 capability);
-            string normalized = ValidateAndProject(raw, capability);
-            Publish(outputPath, normalized);
+            string stagedWindow = StagePath(outputPath);
+            try
+            {
+                Projection projection = ValidateAndProject(rawPath, raw, capability,
+                    stagedWindow);
+                Publish(outputPath, stagedWindow, projection);
+            }
+            finally { TryDelete(stagedWindow); }
         }
 
-        private string ValidateAndProject(byte[] raw, JObject capability)
+        private Projection ValidateAndProject(string rawPath, FileEvidence raw,
+            JObject capability, string stagedWindow)
         {
-            string[] lines = StrictUtf8(raw, "raw").Split(new[] { '\n' },
-                StringSplitOptions.None);
-            if (lines.Length < 4 || lines[lines.Length - 1].Length != 0)
-                throw Invalid("raw must have one terminal newline");
-            int index = 0;
-            JObject metadata = ParseLine(lines[index++], "metadata");
+            using (var reader = new StreamReader(File.OpenRead(rawPath),
+                new UTF8Encoding(false, true), false, 65536))
+            using (var window = new StreamWriter(new FileStream(stagedWindow,
+                FileMode.CreateNew, FileAccess.Write, FileShare.None),
+                new UTF8Encoding(false)))
+            {
+            string line = ReadLine(reader, "metadata");
+            JObject metadata = ParseLine(line, "metadata");
             Exact(metadata, "metadata", "type", "schema", "rom_sha1",
                 "bk2_sha256", "service_manifest_sha256", "first_row",
                 "exclusive_end", "state_start", "state_exclusive_end",
@@ -103,13 +112,12 @@ namespace OpenGGF.BizHawk.Headless
                     == String(capability, "service_manifest_sha256"),
                 "raw identity differs from capability");
 
-            JObject firstBaseline = ParseLine(lines[index++], "baseline");
+            JObject firstBaseline = ParseLine(ReadLine(reader, "baseline"), "baseline");
             ValidateBaseline(firstBaseline, sourceFirst, false);
             int latch0 = Integer(firstBaseline, "ym_port0_latch");
             int latch1 = Integer(firstBaseline, "ym_port1_latch");
             int precedingLatch0 = 0, precedingLatch1 = 0;
             JObject preceding = null;
-            var selected = new List<JObject>();
             long baseCount = 0, allCount = 0, markerCount = 0, requestCount = 0;
             int occupancy = 0, nextGlobal = 0, expectedRow = sourceFirst;
             using (SHA256 baseDigest = SHA256.Create())
@@ -117,12 +125,13 @@ namespace OpenGGF.BizHawk.Headless
             using (SHA256 markerDigest = SHA256.Create())
             using (SHA256 requestDigest = SHA256.Create())
             {
-                while (index < lines.Length - 1)
+                while (true)
                 {
-                    JObject value = ParseLine(lines[index++], "frame or cutoff");
+                    line = ReadLine(reader, "frame or cutoff");
+                    JObject value = ParseLine(line, "frame or cutoff");
                     if (String(value, "type") == "cutoff")
                     {
-                        if (index != lines.Length - 1)
+                        if (reader.ReadLine() != null)
                             throw Invalid("raw records follow cutoff");
                         ValidateCutoff(value, sourceEnd);
                         Require(expectedRow == sourceEnd, "raw is truncated");
@@ -148,8 +157,10 @@ namespace OpenGGF.BizHawk.Headless
                             String(value, "state_hex"))))
                             == String(capability, "terminal_state_sha256"),
                             "raw terminal state differs from capability");
-                        return Output(metadata, firstBaseline, preceding, selected,
-                            precedingLatch0, precedingLatch1, capability, raw, value);
+                        if (preceding == null || expectedRow != sourceEnd)
+                            throw Invalid("raw has no complete bounded window");
+                        return new Projection(metadata, preceding, precedingLatch0,
+                            precedingLatch1, capability, raw, value);
                     }
                     ValidateFrame(value, expectedRow);
                     JArray events = Array(value, "events");
@@ -159,6 +170,8 @@ namespace OpenGGF.BizHawk.Headless
                         JObject evt = Object(token, "event"); ValidateEvent(evt);
                         byte[] eventBytes = Canonical(evt); allDigest.TransformBlock(
                             eventBytes, 0, eventBytes.Length, null, 0); allCount++;
+                        if (MarkerCandidate(evt) && !Marker(evt))
+                            throw Invalid("action-7 candidate source or topology differs");
                         if (Marker(evt))
                         {
                             uint ordinal = Unsigned(evt, "ordinal");
@@ -199,21 +212,33 @@ namespace OpenGGF.BizHawk.Headless
                         precedingLatch0 = latch0; precedingLatch1 = latch1;
                     }
                     if (expectedRow >= windowFirst && expectedRow < windowEnd)
-                        selected.Add((JObject)value.DeepClone());
+                        window.WriteLine(line);
                     expectedRow++;
                 }
             }
-            throw Invalid("raw has no terminal cutoff");
+            }
         }
 
-        private string Output(JObject metadata, JObject sourceBaseline,
-            JObject preceding, List<JObject> frames, int latch0, int latch1,
-            JObject capability, byte[] raw, JObject cutoff)
+        private sealed class Projection
         {
-            if (preceding == null || frames.Count != windowEnd - windowFirst)
-                throw Invalid("raw has no complete bounded window");
-            var output = new StringBuilder();
-            Write(output, new JObject {
+            internal JObject Metadata, Preceding, Capability, Cutoff;
+            internal int Latch0, Latch1;
+            internal FileEvidence Raw;
+            internal Projection(JObject metadata,JObject preceding,int latch0,int latch1,
+                JObject capability,FileEvidence raw,JObject cutoff)
+            { Metadata=metadata;Preceding=preceding;Latch0=latch0;Latch1=latch1;
+              Capability=capability;Raw=raw;Cutoff=cutoff; }
+        }
+
+        private void Publish(string outputPath, string stagedWindow,
+            Projection projection)
+        {
+            JObject metadata=projection.Metadata, preceding=projection.Preceding;
+            JObject capability=projection.Capability, cutoff=projection.Cutoff;
+            int latch0=projection.Latch0,latch1=projection.Latch1;
+            FileEvidence raw=projection.Raw;
+            Publish(outputPath, writer => {
+            Write(writer, new JObject {
                 ["type"]="metadata", ["schema"]=OracleSchema,
                 ["rom_sha1"]=String(metadata,"rom_sha1"),
                 ["bk2_sha256"]=String(metadata,"bk2_sha256"),
@@ -222,21 +247,23 @@ namespace OpenGGF.BizHawk.Headless
                 ["state_start"]=0, ["state_exclusive_end"]=0x2000,
                 ["source_schema"]=RawSchema, ["source_first_row"]=sourceFirst,
                 ["source_exclusive_end"]=sourceEnd,
-                ["source_raw_sha256"]=Hex(Sha256(raw)),
-                ["source_raw_byte_count"]=raw.Length,
+                ["source_raw_sha256"]=raw.Sha256,
+                ["source_raw_byte_count"]=raw.ByteCount,
                 ["source_capability_sha256"]=Hex(Sha256(Canonical(capability))),
                 ["request_transfer_schema"]="openggf.s2-preconsumption-request-transfer.v1",
                 ["production_bound"]=false });
-            Write(output, new JObject { ["type"]="baseline", ["row"]=windowFirst,
+            Write(writer, new JObject { ["type"]="baseline", ["row"]=windowFirst,
                 ["source_preceding_row"]=windowFirst-1,
                 ["state_hex"]=String(preceding,"state_hex"),
                 ["ym_port0_latch"]=latch0, ["ym_port1_latch"]=latch1 });
-            foreach (JObject frame in frames) Write(output, frame);
-            Write(output, new JObject { ["type"]="cutoff", ["exclusive_end"]=windowEnd,
+            using(var input=new StreamReader(File.OpenRead(stagedWindow),
+                new UTF8Encoding(false,true),false,65536))
+            { string frame;while((frame=input.ReadLine())!=null)writer.WriteLine(frame); }
+            Write(writer, new JObject { ["type"]="cutoff", ["exclusive_end"]=windowEnd,
                 ["source_cutoff_exclusive_end"]=sourceEnd,
                 ["source_cutoff_frontier_sha256"]=Hex(Sha256(Canonical(cutoff))),
                 ["terminal_state_sha256"]=String(capability,"terminal_state_sha256") });
-            return output.ToString();
+            });
         }
 
         private static void ValidateBaseline(JObject value, int row,
@@ -324,9 +351,14 @@ namespace OpenGGF.BizHawk.Headless
             && Byte(value,"service_kind")==S2PreconsumptionRequestObserver.MarkerServiceKind
             && Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth
             && Byte(value,"payload_length")==4; }
+        private static bool MarkerCandidate(JObject value)
+        { return Unsigned(value,"subject")==S2PreconsumptionRequestObserver.MarkerToken
+            || (Byte(value,"kind")==10 && Unsigned(value,"value")==3
+                && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc); }
 
         private static void FoldLatch(JObject value, ref int latch0, ref int latch1)
         {
+            if (Byte(value,"kind")==8) { latch0=0;latch1=0;return; }
             if (Byte(value,"kind")!=3) return;
             int subject=Integer(value,"subject"), data=Integer(value,"value");
             if(subject==0)latch0=data; else if(subject==2)latch1=data;
@@ -371,15 +403,15 @@ namespace OpenGGF.BizHawk.Headless
                 throw Invalid("capability inventory range differs");
         }
 
-        private static void ValidateAttestation(JObject value, byte[] raw,
+        private static void ValidateAttestation(JObject value, FileEvidence raw,
             JObject capability)
         {
             Exact(value,"attestation","schema","raw_sha256","raw_byte_count",
                 "status_count","fault_count","overflow_count","authority_id",
                 "capability_sha256");
             Require(String(value,"schema")==AttestationSchema
-                && String(value,"raw_sha256")==Hex(Sha256(raw))
-                && Integer64(value,"raw_byte_count")==raw.Length
+                && String(value,"raw_sha256")==raw.Sha256
+                && Integer64(value,"raw_byte_count")==raw.ByteCount
                 && Integer64(value,"status_count")==1 && Integer64(value,"fault_count")==0
                 && Integer64(value,"overflow_count")==0
                 && String(value,"authority_id")=="s2-request-candidate-unbound"
@@ -387,7 +419,7 @@ namespace OpenGGF.BizHawk.Headless
                 "raw attestation differs");
         }
 
-        private static void Publish(string outputPath, string content)
+        private static void Publish(string outputPath, Action<TextWriter> write)
         {
             if(string.IsNullOrEmpty(outputPath)||!Path.IsPathRooted(outputPath))
                 throw new ArgumentException("The bounded output path must be absolute.","outputPath");
@@ -395,17 +427,47 @@ namespace OpenGGF.BizHawk.Headless
             if(string.IsNullOrEmpty(name))throw new ArgumentException("The bounded output needs a filename.","outputPath");
             var publisher=new NoReplacePublisher();
             using(NoReplacePublisher.StagedPublicationSet staged=publisher.StageAll(directory,
-                new[]{name},writers=>writers[0].Write(content))) { staged.Publish(); }
+                new[]{name},writers=>write(writers[0]))) { staged.Publish(); }
         }
 
-        private static byte[] ReadFile(string path,string label)
+        private sealed class FileEvidence
         {
-            if(string.IsNullOrEmpty(path)||!Path.IsPathRooted(path)||!File.Exists(path))
-                throw Invalid(label+" path must be an existing absolute file");
-            return File.ReadAllBytes(path);
+            internal long ByteCount; internal string Sha256;
         }
+        private static FileEvidence DigestFile(string path,string label)
+        {
+            RequireExisting(path,label);
+            using(var digest=SHA256.Create()) using(var input=File.OpenRead(path))
+            {
+                long count=0;var buffer=new byte[65536];int read;
+                while((read=input.Read(buffer,0,buffer.Length))>0)
+                { digest.TransformBlock(buffer,0,read,buffer,0);count+=read; }
+                digest.TransformFinalBlock(new byte[0],0,0);
+                return new FileEvidence { ByteCount=count,Sha256=Hex(digest.Hash) };
+            }
+        }
+        private static string StagePath(string outputPath)
+        {
+            if(string.IsNullOrEmpty(outputPath)||!Path.IsPathRooted(outputPath))
+                throw new ArgumentException("The bounded output path must be absolute.","outputPath");
+            string directory=Path.GetDirectoryName(Path.GetFullPath(outputPath));
+            if(string.IsNullOrEmpty(directory)||!Directory.Exists(directory))
+                throw Invalid("bounded output directory is absent");
+            return Path.Combine(directory,".s2-request-window-"+Guid.NewGuid().ToString("N")+".stage");
+        }
+        private static void TryDelete(string path)
+        { if(!string.IsNullOrEmpty(path)&&File.Exists(path))File.Delete(path); }
+        private static void RequireExisting(string path,string label)
+        { if(string.IsNullOrEmpty(path)||!Path.IsPathRooted(path)||!File.Exists(path))
+            throw Invalid(label+" path must be an existing absolute file"); }
         private static JObject ReadObject(string path,string label)
-        { return ParseLine(StrictUtf8(ReadFile(path,label),label).TrimEnd('\n'),label); }
+        {
+            RequireExisting(path,label);
+            using(var input=new StreamReader(File.OpenRead(path),new UTF8Encoding(false,true),false,65536))
+            { string line=ReadLine(input,label);if(input.ReadLine()!=null)throw Invalid(label+" has trailing record");return ParseLine(line,label); }
+        }
+        private static string ReadLine(StreamReader input,string label)
+        { string line=input.ReadLine();if(line==null)throw Invalid(label+" ended early");return line; }
         private static JObject ParseLine(string line,string label)
         { try{return Object(JObject.Parse(line),label);}catch(Exception error)
           {throw Invalid(label+" is not strict JSON",error);} }
@@ -437,8 +499,8 @@ namespace OpenGGF.BizHawk.Headless
         { if(value.Length!=64)throw Invalid("digest length differs");for(int i=0;i<value.Length;i++)if(!Uri.IsHexDigit(value[i])||char.IsUpper(value[i]))throw Invalid("digest differs"); }
         private static string StrictUtf8(byte[] value,string label)
         { try{return new UTF8Encoding(false,true).GetString(value);}catch(DecoderFallbackException error){throw Invalid(label+" is not strict UTF-8",error);} }
-        private static void Write(StringBuilder output,JObject value)
-        { output.Append(value.ToString(Formatting.None));output.Append('\n'); }
+        private static void Write(TextWriter output,JObject value)
+        { output.Write(value.ToString(Formatting.None));output.Write('\n'); }
         private static void Require(bool condition,string message)
         { if(!condition)throw Invalid(message); }
         private static InvalidDataException Invalid(string message)
