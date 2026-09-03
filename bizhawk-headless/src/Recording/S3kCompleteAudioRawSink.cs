@@ -59,7 +59,9 @@ namespace OpenGGF.BizHawk.Headless
             authority = rawAuthority ?? throw new ArgumentNullException("rawAuthority");
             if (!object.ReferenceEquals(authority, S3kRawAudioAuthority.ProductionV1)
                 && !object.ReferenceEquals(authority,
-                    S3kSubmissionAudioObserverProfile.UnboundAuthorityForTesting))
+                    S3kSubmissionAudioObserverProfile.UnboundAuthorityForTesting)
+                && !object.ReferenceEquals(authority,
+                    S3kPreconsumptionRequestRawAuthority.Instance))
                 throw new ArgumentException(
                     "The S3K raw authority is not a closed production or test-only profile.",
                     "rawAuthority");
@@ -69,7 +71,33 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (begun) throw new InvalidOperationException("The S3K raw epoch already began.");
             if (boundary == null) throw new ArgumentNullException("boundary");
-            JObject metadata = authority.IsProductionBound
+            JObject metadata = object.ReferenceEquals(authority,
+                S3kPreconsumptionRequestRawAuthority.Instance)
+                ? new JObject
+                {
+                    ["type"]="metadata", ["schema"]=authority.Schema,
+                    ["authority"]="S3K_SONIC_TAILS_REQUEST_DIAGNOSTIC",
+                    ["rom_sha1"]=authority.RomSha1,
+                    ["bk2_basename"]=S3kPreconsumptionRequestProfile.MovieBaseName,
+                    ["bk2_sha256"]=authority.Bk2Sha256,
+                    ["bk2_row_count"]=S3kPreconsumptionRequestProfile.MovieRowCount,
+                    ["service_manifest_sha256"]=authority.ManifestSha256,
+                    ["first_row"]=authority.FirstRow,
+                    ["exclusive_end"]=authority.ExclusiveEnd,
+                    ["state_start"]=authority.StateStart,
+                    ["state_exclusive_end"]=authority.StateExclusiveEnd,
+                    ["request_begin_pc"]=S3kPreconsumptionRequestProfile.BeginPc,
+                    ["request_end_pc"]=S3kPreconsumptionRequestProfile.EndPc,
+                    ["request_begin_opcode"]=S3kPreconsumptionRequestProfile.BeginOpcode,
+                    ["request_end_opcode"]=S3kPreconsumptionRequestProfile.EndOpcode,
+                    ["request_begin_token"]=S3kPreconsumptionRequestProfile.BeginToken,
+                    ["request_end_token"]=S3kPreconsumptionRequestProfile.EndToken,
+                    ["request_parent_kind"]=S3kPreconsumptionRequestProfile.ParentKind,
+                    ["request_kind"]=S3kPreconsumptionRequestProfile.SubmissionKind,
+                    ["request_mailbox_address"]=S3kPreconsumptionRequestProfile.MailboxAddress,
+                    ["request_mailbox_range_id"]=S3kPreconsumptionRequestProfile.MailboxRangeId
+                }
+                : authority.IsProductionBound
                 ? new JObject
                 {
                     ["type"]="metadata", ["schema"]=Schema,
@@ -227,7 +255,7 @@ namespace OpenGGF.BizHawk.Headless
             return Hex(bytes);
         }
 
-        private static JArray Submissions(CompleteRunAudioObserver.FrameCapture frame)
+        private JArray Submissions(CompleteRunAudioObserver.FrameCapture frame)
         {
             var result = new JArray();
             foreach (CompleteRunAudioObserver.DriverService service in frame.Services)
@@ -240,7 +268,8 @@ namespace OpenGGF.BizHawk.Headless
                     throw new InvalidDataException(
                         "The unbound S3K submission service is not the exact Play_Music boundary.");
                 CompleteRunAudioObserver.SnapshotGroup snapshot = service.Snapshots[0];
-                if (snapshot.RangeId != 2 || snapshot.SourceCpu != 2
+                if (snapshot.RangeId != authority.MailboxRangeId
+                    || snapshot.SourceCpu != 2
                     || snapshot.Pc != 0x1374 || snapshot.Bytes.Length != 1)
                     throw new InvalidDataException(
                         "The unbound S3K submission mailbox snapshot is not exact.");
@@ -319,6 +348,7 @@ namespace OpenGGF.BizHawk.Headless
             ExclusiveEnd=exclusiveEnd;StateStart=stateStart;
             StateExclusiveEnd=stateExclusiveEnd;
             IsProductionBound=productionBound;IncludeSubmissions=includeSubmissions;
+            MailboxRangeId=2;
         }
 
         internal string Schema{get;private set;}
@@ -331,6 +361,7 @@ namespace OpenGGF.BizHawk.Headless
         internal int StateExclusiveEnd{get;private set;}
         internal bool IsProductionBound{get;private set;}
         internal bool IncludeSubmissions{get;private set;}
+        internal ushort MailboxRangeId{get;set;}
     }
 
     internal sealed class S3kSubmissionAudioRawV2Sink : IS3kCompleteAudioCaptureSink

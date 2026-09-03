@@ -37,6 +37,17 @@ namespace OpenGGF.BizHawk.Headless
             return LoadCore(JObject.Parse(json),"s2",api,true);
         }
 
+        /// <summary>
+        /// Closed construction of the approved Sonic 3&amp;K Sonic/Tails
+        /// pre-consumption music-mailbox manifest. Callers cannot select the
+        /// game, tokens, PCs, opcodes, or active-kind topology.
+        /// </summary>
+        internal static CompleteRunAudioObserver LoadS3kRequest(
+            string path, IGpgxAudioTraceApi api)
+        {
+            return LoadCore(path, "s3k", api, false);
+        }
+
         private static CompleteRunAudioObserver LoadCore(string path,
             string game, IGpgxAudioTraceApi api, bool addS2RequestCandidate)
         {
@@ -95,7 +106,7 @@ namespace OpenGGF.BizHawk.Headless
         private static void Slice(JArray ids,Dictionary<ushort,ushort> map,out ushort first,out ushort count){if(ids.Count==0){first=count=0;return;}if(!map.TryGetValue((ushort)(int)ids[0],out first))throw new InvalidDataException("Unknown range.");count=(ushort)ids.Count;for(int i=1;i<ids.Count;i++){ushort n;if(!map.TryGetValue((ushort)(int)ids[i],out n)||n!=first+i)throw new InvalidDataException("Noncontiguous range slice.");}}
         private static uint Length(GpgxAudioObserverAdapter.SnapshotRange[] r,ushort f,ushort c){uint n=0;for(int i=0;i<c;i++)n+=r[f+i].Length;return n;}
         private static byte Cpu(string v){if(v=="Z80")return 1;if(v=="M68K")return 2;throw new InvalidDataException("Unknown CPU.");}
-        private static byte Action(string v){if(v=="PUSH_BEGIN")return 1;if(v=="POP_END_AT_PC")return 2;if(v=="POP_END_FALLTHROUGH")return 3;if(v=="TAIL_POP_PUSH")return 4;throw new InvalidDataException("Unknown action.");}
+        private static byte Action(string v){if(v=="PUSH_BEGIN")return 1;if(v=="POP_END_AT_PC")return 2;if(v=="POP_END_FALLTHROUGH")return 3;if(v=="TAIL_POP_PUSH")return 4;if(v=="OBSERVATION_MARKER")return 7;throw new InvalidDataException("Unknown action.");}
         private static byte KindFlags(JArray a){byte f=0;foreach(JToken x in a){string v=(string)x;if(v=="TYPED_ASYNC")f|=1;else if(v=="ALLOW_CONTINUATION")f|=2;else if(v=="ALLOW_CHILDREN")f|=4;else throw new InvalidDataException("Unknown kind flag.");}return f;}
         private static byte HookFlags(JArray a){byte f=0;foreach(JToken x in a){if((string)x!="ARM_Z80_PROOFS_ON_COMPLETION")throw new InvalidDataException("Unknown hook flag.");f|=1;}return f;}
         private static byte[] Hex(string s){if(string.IsNullOrEmpty(s)||(s.Length&1)!=0||s.Length>16)throw new InvalidDataException("Invalid opcode.");var b=new byte[s.Length/2];for(int i=0;i<b.Length;i++)b[i]=Convert.ToByte(s.Substring(i*2,2),16);return b;}

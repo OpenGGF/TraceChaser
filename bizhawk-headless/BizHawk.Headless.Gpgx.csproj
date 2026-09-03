@@ -73,6 +73,7 @@
     <Compile Include="src/Audio/S1CompleteRunAudioReferenceCapture.cs" />
     <Compile Include="src/Audio/S2AudioObserverProfile.cs" />
     <Compile Include="src/Audio/S3kAudioObserverProfile.cs" />
+    <Compile Include="src/Audio/S3kPreconsumptionRequestProfile.cs" />
     <Compile Include="src/Audio/S3kSubmissionAudioObserverProfile.cs" />
     <Compile Include="src/Core/GpgxHost.cs" />
     <Compile Include="src/Core/GpgxS3kAudioParityDepartures.cs" />
@@ -92,6 +93,7 @@
     <Compile Include="src/Recording/TraceContract.cs" />
     <Compile Include="src/Recording/S3kCompleteAudioCaptureRunner.cs" />
     <Compile Include="src/Recording/S3kCompleteAudioRawSink.cs" />
+    <Compile Include="src/Recording/S3kPreconsumptionRequestRawAuthority.cs" />
     <Compile Include="src/Recording/RunManifestWriter.cs" />
     <Compile Include="src/Recording/RunSegmentSink.cs" />
     <Compile Include="src/Recording/StagedRunSegmentSink.cs" />
