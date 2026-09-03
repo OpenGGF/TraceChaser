@@ -95,6 +95,7 @@
     <Compile Include="src/Recording/S3kCompleteAudioRawSink.cs" />
     <Compile Include="src/Recording/S3kPreconsumptionRequestCaptureRunner.cs" />
     <Compile Include="src/Recording/S3kPreconsumptionRequestRawAuthority.cs" />
+    <Compile Include="src/Recording/S3kRequestObservationExtractor.cs" />
     <Compile Include="src/Recording/RunManifestWriter.cs" />
     <Compile Include="src/Recording/RunSegmentSink.cs" />
     <Compile Include="src/Recording/StagedRunSegmentSink.cs" />
