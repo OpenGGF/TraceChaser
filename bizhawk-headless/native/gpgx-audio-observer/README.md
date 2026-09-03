@@ -8,11 +8,11 @@ or savestated state. The observer is disabled until explicitly configured.
 The supported managed integration is `REFLECTION` against the exact stock
 BizHawk assemblies from the separately locked official Linux runtime described
 in [`../../../docs/install-bizhawk-2.11.md`](../../../docs/install-bizhawk-2.11.md).
-This directory's `source-lock.json` is consumed only by the reproducible native
-observer source/build workflow; it is not the runtime archive-install lock and
-the two locks must not be combined. No patched managed DLL is built or shipped.
-The native API reports ABI v4 while continuing to accept exact legacy v1,
-v2, and v3 configurations. Events remain little-endian, 32 bytes each, with a fixed
+This directory's `source-lock.json` is consumed only by the native observer
+source/build workflow; it is not the runtime archive-install lock and the two
+locks must not be combined. No patched managed DLL is built or shipped.
+The native API reports ABI v5 while continuing to accept exact legacy v1,
+v2, v3, and v4 configurations. Events remain little-endian, 32 bytes each, with a fixed
 capacity of 65,536. ABI v2 added profile-gated pre-arm filtering and a one-shot
 publication-epoch transition: prepublication frames are fully validated and
 drained without aging continuation budgets, then a drained, proof-armed READY
@@ -51,6 +51,31 @@ every non-action-7 marker retain zero payload length and bytes. The sample is
 taken at the reviewed instruction boundary after the managed execute callback
 and before opcode execution, without mutating emulated state.
 
+ABI v5 adds action 13, `SNAPSHOT_AT_PC`, the one parent-independent
+observation. Every other action attaches to the service stack, which is shared
+across processors: the active service at an M68K instruction is whichever Z80
+service happens to be on top. A boundary the M68K can reach from anywhere
+therefore has no stable parent, and claiming one would record a lifecycle that
+did not happen.
+
+Action 13 is selected regardless of the active service. It pushes and pops
+nothing, declares no service kind and no expected active kind, and emits one
+marker with value 5 carrying the active service token, or zero at root, plus
+its declared snapshot ranges. Declaring no ranges is the marker-only form.
+Configuration requires an M68K hook with no service kind, no expected active
+kind, no flags, a valid range slice or none at all, and no other hook at its
+instruction, so exactly one hook is always selected without needing an
+alternative per reachable active kind. The manifest owns the PC, opcode and
+ranges; no caller may select an address or a value, and the action never writes
+emulated state.
+
+`selftest/snapshot_at_pc_harness.c` proves this on the real M68K core: the
+action fires under an active service and at root, carries that service's token,
+emits its snapshot bytes, leaves the stack untouched so the surrounding pop
+still happens exactly once, and raises no fault. Six configuration negatives
+cover the ABI gate, a claimed service kind, a claimed parent, a Z80 hook, a
+flag, and a second hook at the same PC.
+
 `gpgx_audio_trace_first_fault` returns a read-only, packed 16-byte snapshot of
 the first runtime fault in the configured session: stable reason, source CPU,
 instruction-start PC, active kind/depth, and continuation count/limit. It does
@@ -70,7 +95,24 @@ the diagnostic; disable ends the session and clears it. Reason values are:
 | 8 | event capacity |
 | 9 | continuation limit |
 
-`artifact-lock.json` is the authority for all artifact hashes.
+## What is pinned, and what is not
+
+Pinned are the inputs this project controls: the source commits in
+`source-lock.json`, the clang packages `prepare-toolchain.sh` unpacks, and
+`0001-buffer-z80-audio-events.patch`.
+
+Not pinned is the host. The build does not lock the identity of system
+utilities, does not reject an ambient environment, and does not verify a chained
+recipe digest. An earlier revision did all three, and the result was that a
+routine package upgrade, which moved six of those utilities at once, failed the
+build closed while detecting nothing about the artefact.
+
+Provenance is therefore an output rather than a gate. `build-observer.sh`
+records the patch, core and observer hashes plus the ABI into `identity.json`
+beside the build and into `artifact-lock.json` here;
+`install-observer.sh` checks that the core it is installing still matches those
+recorded values, and the managed harness checks the installed `identity.json`
+rather than literals frozen into its own source.
 
 The capability fixture avoids a self-referential executable hash without
 weakening it. Its S2 profile authenticates a raw-byte template SHA-256 after
@@ -81,61 +123,62 @@ then independently required to equal the SHA-256 of the production
 `BizHawk.Headless.Gpgx` executable. Java metadata continues to pin the complete,
 unnormalized capability-file SHA-256.
 
-From a fresh checkout, create durable inputs and build outputs beneath an
-explicit external root. The package
-directory is caller-supplied and must contain the filenames and bytes
-listed by `prepare-toolchain.sh`; the script checks every SHA-256 against
-`toolchain-lock.json` before publishing the toolchain.
+## Building and installing
+
+Create the toolchain once. The package directory is caller-supplied and must
+contain the filenames and bytes listed by `prepare-toolchain.sh`, which checks
+each package SHA-256 before publishing the toolchain.
 
 ```bash
-TRACECHASER_ROOT=/absolute/TraceChaser
-observer=$TRACECHASER_ROOT/bizhawk-headless/native/gpgx-audio-observer
-native=/absolute/external/audio-parity/native/task7-reproduction
+observer=/absolute/TraceChaser/bizhawk-headless/native/gpgx-audio-observer
+native=/absolute/external/audio-parity/native
 packages=/absolute/path/to/locked-package-input
 stock=/absolute/path/to/BizHawk-2.11-linux-x64
-mkdir -p "$native"
 
-"$observer/fetch-source.sh" --output "$native/source"
 "$observer/prepare-toolchain.sh" \
   --source "$native/source" \
   --packages "$packages" \
   --output "$native/toolchain"
-"$observer/build-core.sh" \
+```
+
+Then build. The script applies the patch to a staged copy, runs the native
+selftests, builds emulibc and gpgx with the pinned clang under a clean
+`env -i PATH=/usr/bin:/bin`, checks the resulting ELF, and writes
+`identity.json`.
+
+```bash
+"$observer/build-observer.sh" \
   --source "$native/source" \
   --toolchain "$native/toolchain" \
-  --stock "$stock" \
   --output "$native/build"
 ```
+
+Add `--reproduce` to build twice and compare. Note that reproducibility is
+same-path: the prepared musl sysroot wrappers carry the absolute path they were
+configured at, so `--reproduce` builds both copies at one fixed staging path
+rather than claiming a path-independence the toolchain does not provide.
 
 Install beside, never over, the stock distribution:
 
 ```bash
-"$observer/install-core.sh" \
+"$observer/install-observer.sh" \
   --build "$native/build" \
   --stock "$stock" \
   --output "$native/install"
 ```
 
-All four output destinations must be absent and remain under the explicit
-external root; neither source checkout nor harness `.scratch/` is an output
-tree. The installation includes the complete
-corresponding normalized source archive, literal patch, build evidence, and
-verbatim notices. Genesis Plus GX's license prohibits commercial use and
-requires complete corresponding source for modified distributions; read the
-installed `GPGX-LICENSE.txt` in full before redistributing.
+Every output destination must be absent and should live under an explicit
+external root; neither the source checkout nor the harness `.scratch/` is an
+output tree. The installation carries the literal patch, `identity.json`,
+`artifact-lock.json`, this README, and verbatim notices alongside the core.
+Genesis Plus GX's license prohibits commercial use and requires complete
+corresponding source for modified distributions; read the installed
+`GPGX-LICENSE.txt` in full before redistributing.
 
-The reviewed action-11/action-12 tail-transfer freeze has raw core SHA-256
-`f57b7a94237653879fb99af197937500a8b591f801f56284b4d2f53ca7ea6b0c`,
-compressed core SHA-256
-`e65315743a6a122843907a85314e380eee03fdc06bf0885b44c3dbc3bab88c6d`,
-Build ID `cba4d8c88cf968a9`, compressed source-bundle SHA-256
-`de73c512b2120f63f064f5e8fd59dee230f0ff50d0debbd648a9112efe18b83b`,
-build-recipe SHA-256
-`f419cc73426f1356c30577c04231a0cc3356bdd99bc4760dfba55abecefdf748`,
-and observer identity SHA-256
-`815bfde02d78fd6caa1b127ddefe7be28cc84d6fdeef5a75cecc31f186f84d86`.
-These values are one identity family: consumers must not mix them with an
-earlier patch, recipe, core, source archive, or capability fixture.
+To run the native selftests alone against an already-patched tree:
 
-Task 7 validates only the generic native observer artifact and its deterministic
-build. Game-specific S2/S3K hooks and real capture capability belong to Task 8.
+```bash
+"$observer/selftest/run.sh" /absolute/patched-source /absolute/toolchain /absolute/absent-scratch
+```
+
+Seven harnesses run, ending with `snapshot-at-pc-harness`. Any failure aborts.

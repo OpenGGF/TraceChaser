@@ -44,16 +44,6 @@ namespace OpenGGF.BizHawk.Headless
         internal const string FrontierDigestSha256 =
             "2afa645a9471a7e084fa4273a9cfa0978868fe7be4f9a33f72f73de2ca907804";
 
-        private const string CompressedCoreSha256 =
-            "e65315743a6a122843907a85314e380eee03fdc06bf0885b44c3dbc3bab88c6d";
-        private const string DecompressedCoreSha256 =
-            "f57b7a94237653879fb99af197937500a8b591f801f56284b4d2f53ca7ea6b0c";
-        private const string ManagedCoreSha256 =
-            "0144e6e236be68ce126eb771dcb5a9ae7c153a083fa0333f345ac37b4a60acf7";
-        private const string ManagedCommonSha256 =
-            "f20cd009f6f5b0a95bd47b66c48dc8de85afcd7ae0cc6aab3486baf55f501fb4";
-        private const string WaterboxHostSha256 =
-            "d2367818aafb4e520ad5ab005b5762c61506b0c819c4d79687235acfb0fc0c78";
         private const ushort UploadBeginToken = 9;
         private const ushort UploadCompletionToken = 10;
         private const byte ArmProofCompletion = 1;
@@ -167,46 +157,56 @@ namespace OpenGGF.BizHawk.Headless
                 digest);
         }
 
+        /// <summary>
+        /// Verifies an observer installation against the identity its build
+        /// recorded, rather than against literals frozen into this assembly.
+        ///
+        /// build-observer.sh writes identity.json beside the installed core and
+        /// records the same values in artifact-lock.json. Provenance is an
+        /// output of the build, so the check here is that the core actually
+        /// present in this home is the one that build produced, and that its
+        /// ABI is the one this harness speaks. It is deliberately not a
+        /// host-image or reproduction gate.
+        /// </summary>
         internal static InstallationIdentity VerifyInstallation(string home)
         {
             if (string.IsNullOrEmpty(home) || !Path.IsPathRooted(home)
                 || !Directory.Exists(home)
                 || LinuxPathEntry.IsSymbolicLink(home))
+            {
                 throw new InvalidDataException(
                     "Observer installation must be an existing absolute directory.");
+            }
+
             string identityPath = PlainFile(home,
                 "gpgx-audio-observer-source/identity.json");
-            RequireEqual(ObserverIdentitySha256, Sha256File(identityPath),
-                "observer build identity");
-            RequireFileHash(home, "dll/gpgx.wbx.zst", CompressedCoreSha256);
-            RequireFileHash(home, "gpgx-audio-observer-source/gpgx.wbx",
-                DecompressedCoreSha256);
-            RequireFileHash(home, "dll/BizHawk.Emulation.Cores.dll",
-                ManagedCoreSha256);
-            RequireFileHash(home, "dll/BizHawk.Emulation.Common.dll",
-                ManagedCommonSha256);
-            RequireFileHash(home, "dll/libwaterboxhost.so",
-                WaterboxHostSha256);
-
             JObject identity = JObject.Parse(File.ReadAllText(identityPath));
-            RequireEqual("openggf.gpgx-audio-observer-build.v1",
+            RequireEqual("openggf.gpgx-audio-observer-build.v2",
                 RequiredString(identity, "schema"), "observer identity schema");
-            RequireEqual(CompressedCoreSha256,
-                RequiredString(identity, "compressed_sha256"),
-                "installed compressed core identity");
-            RequireEqual(DecompressedCoreSha256,
-                RequiredString(identity, "decompressed_sha256"),
-                "installed decompressed core identity");
+
+            RequireFileHash(home, "dll/gpgx.wbx.zst",
+                RequiredString(identity, "compressed_sha256"));
+
             int abi = RequiredInt(identity, "abi_version");
-            if (abi != 4 || RequiredInt(identity, "event_size") != 32
+            if (abi != ObserverAbiVersion
+                || RequiredInt(identity, "event_size") != 32
                 || RequiredInt(identity, "capacity") != 65536)
+            {
                 throw new InvalidDataException(
-                    "Installed observer ABI identity changed.");
+                    "Installed observer ABI identity is not v" + ObserverAbiVersion
+                    + "/32/65536; it is v" + abi + "/"
+                    + RequiredInt(identity, "event_size") + "/"
+                    + RequiredInt(identity, "capacity") + ".");
+            }
+
             return new InstallationIdentity(
                 RequiredString(identity, "installation_id"),
-                RequiredString(identity, "core_id"), abi,
+                RequiredString(identity, "patch_sha256"), abi,
                 RequiredString(identity, "build_id"));
         }
+
+        /// <summary>The observer ABI this harness speaks.</summary>
+        internal const int ObserverAbiVersion = 5;
 
         internal static Bk2Movie OpenMovie(string moviePath)
         {

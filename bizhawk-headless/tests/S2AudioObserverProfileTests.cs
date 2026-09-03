@@ -197,11 +197,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "BIZHAWK_HOME must name the final observer installation.");
             S2AudioObserverProfile.InstallationIdentity identity =
                 S2AudioObserverProfile.VerifyInstallation(home);
-            AssertEx.Equal("bizhawk-2.11-gpgx-audio-observer-v3",
+            AssertEx.Equal("bizhawk-2.11-gpgx-audio-observer-abi5",
                 identity.InstallationId);
-            AssertEx.Equal("gpgx-audio-observer-v3", identity.CoreId);
-            AssertEx.Equal(4, identity.AbiVersion);
-            AssertEx.Equal("cba4d8c88cf968a9", identity.BuildId);
+            // CoreId now carries the patch digest the build recorded.
+            AssertEx.Equal(
+                "77ba1eabeaa4b550437117925062e5d4e3e3ada5f5f197112cde8c89a57980bb",
+                identity.CoreId);
+            AssertEx.Equal(5, identity.AbiVersion);
+            AssertEx.Equal("6feee0d1b2ca882b", identity.BuildId);
 
             string root = TestScratch.CreateRootPath("s2-audio-install");
             Directory.CreateDirectory(Path.Combine(root,

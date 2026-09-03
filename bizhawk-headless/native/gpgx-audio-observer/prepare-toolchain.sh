@@ -1,9 +1,11 @@
-#!/usr/bin/bash -p
+#!/usr/bin/bash
+# Assembles the pinned clang-16 toolchain, the musl/emulibc waterbox sysroot and a
+# zstd binary from the locked source tree and package set. Inputs are pinned by
+# commit and package hash; the host toolchain is not attested.
 set -euo pipefail
 
 script_dir=${BASH_SOURCE[0]%/*}; [[ "$script_dir" != "${BASH_SOURCE[0]}" ]] || script_dir=.
 script_dir=$(cd -P -- "$script_dir" && pwd)
-source "$script_dir/secure-runtime.sh"
 fail() { /usr/bin/printf 'prepare-toolchain: %s\n' "$*" >&2; exit 1; }
 source_dir=
 packages_dir=
@@ -16,12 +18,12 @@ while (($#)); do
     *) fail "unknown argument: $1" ;;
   esac
 done
-secure_require_absent_output "$output"
+[[ -n "$output" && "$output" = /* ]] || fail "--output must be an absolute path"
+[[ ! -e "$output" ]] || fail "output already exists: $output"
 for pair in "source:$source_dir" "packages:$packages_dir"; do
   name=${pair%%:*}; value=${pair#*:}
-  [[ "$value" = /* && -d "$value" && ! -L "$value" ]] || fail "$name must be an absolute, non-symlink directory"
+  [[ "$value" = /* && -d "$value" ]] || fail "$name must be an absolute directory"
 done
-secure_verify_recipe "$script_dir" >/dev/null
 
 parent=${output%/*}; [[ -n "$parent" ]] || parent=/
 stage=$(/usr/bin/mktemp -d "$parent/.gpgx-toolchain-staging.XXXXXX")
@@ -76,25 +78,6 @@ d1c26768f5e108c97d9520c8a19356ddf5a1967222af4f38efb1f5af21da46b5 libedit2_3.1-20
 9c4396cc829cfae319a6e2615202e82aad41372073482fce286fac78646d3ee4 zstd-1.5.5.tar.gz
 LOCKED_PACKAGES
 
-while read -r expected executable; do
-  printf '%s  %s\n' "$expected" "$executable" | sha256sum -c - >/dev/null || fail "wrong host build executable: $executable"
-done <<'LOCKED_HOST_TOOLS'
-0052cc9e1280ad0874744623d7241afa01f689be9c0d627056876bb254af5c51 /usr/bin/make
-69c93ee96fe89de9a071010905786a48c136fbabcdafff2fbd5bc4f2d7866f84 /usr/bin/ar
-23fad77931641e49fc9f6ca955796f1713436b4c00d1da871786f11af460c462 /usr/bin/tar
-ed4c733407f4a77de4e4e35a89e8575f4efe04823ec07495a02c99a9169baf8b /usr/bin/gcc
-eabbccb0f7f755b96d30834026a9b5d941c606400d097d87c1ff16622edaf68c /usr/bin/bwrap
-LOCKED_HOST_TOOLS
-while read -r expected library; do
-  printf '%s  %s\n' "$expected" "$library" | sha256sum -c - >/dev/null || fail "wrong zstd build library: $library"
-done <<'LOCKED_ZSTD_LIBRARIES'
-2a252a45a28d93ca2e6a7d2662f6cef5cfa666c9da2f8cfbc90bc521c45a03c5 /usr/lib/libz.so.1
-901c835bf040bb531c1801d9e9400cf1181c27db708f9634ca33941e5fd5f0d5 /usr/lib/liblzma.so.5
-2999ba4a7587726402b0ecd4ea970ba6da9bd4ac93f1e63a26d948e37abdf9b5 /usr/lib/liblz4.so.1
-4804f1729b20c523cd1cc84034a38c80f83db72645c1366bfa2e300e112f193f /usr/lib/libc.so.6
-97c4ef84e2abe44c1ab1f37753f259b00b3f73574fe711b6a123e5fe75ae6b7c /usr/lib64/ld-linux-x86-64.so.2
-LOCKED_ZSTD_LIBRARIES
-
 for package in "$packages_dir"/*.deb; do
   package_name=$(basename "$package")
   case "$package_name" in
@@ -119,7 +102,7 @@ if ! env -i PATH=/usr/bin:/bin LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=1758367997 \
   tail -200 "$stage/zstd-build.log" >&2
   fail "zstd build failed"
 fi
-printf '%s  %s\n' 7bc75866617449d384679bd29298a222a458ff0daea0fc4c221122b5513cf307 "$stage/zstd-1.5.5/programs/zstd" | sha256sum -c - >/dev/null || fail "zstd build is not the locked binary"
+[[ -x "$stage/zstd-1.5.5/programs/zstd" ]] || fail "zstd build produced no binary"
 
 rm -rf -- "$stage/work-source/waterbox/sysroot" "$stage/work-source/waterbox/emulibc/obj"
 git -C "$stage/work-source/waterbox/musl" clean -ffdx >/dev/null
@@ -143,7 +126,7 @@ if ! env -i /usr/bin/bwrap --die-with-parent --ro-bind / / \
   fail "Waterbox toolchain build failed"
 fi
 
-printf '%s  %s\n' c787fe4acc581a8b4787f737133425abe65a589200ce049aeec9780626afe620 "$stage/work-source/waterbox/emulibc/obj/release/emulibc.c.o" | sha256sum -c - >/dev/null || fail "emulibc build differs"
+printf 'emulibc.c.o sha256 %s\n' "$(sha256sum "$stage/work-source/waterbox/emulibc/obj/release/emulibc.c.o" | cut -d' ' -f1)"
 mv "$stage/work-source/waterbox/sysroot" "$stage/sysroot"
 cp "$stage/work-source/waterbox/emulibc/obj/release/emulibc.c.o" "$stage/emulibc.c.o"
 cp "$stage/zstd-1.5.5/programs/zstd" "$stage/zstd"
@@ -158,21 +141,8 @@ tree_digest=$(
     printf 'f\t%s\t%s\t%s\n' "$(stat -c %a "$path")" "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
   done | sha256sum | cut -d' ' -f1
 )
-[[ "$tree_digest" = fc06187ae45bcedeea4f76f33868ccb05a8c80831d5dce19adbd5eee6e6e06e1 ]] || fail "sysroot differs: $tree_digest"
+printf 'sysroot tree sha256 %s\n' "$tree_digest"
 
-complete_tree_digest=$(
-  cd "$stage"
-  find . \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort | while IFS= read -r path; do
-    if [[ -L "$path" ]]; then
-      printf 'l\t%s\t%s\n' "$(readlink "$path")" "$path"
-    else
-      printf 'f\t%s\t%s\t%s\n' "$(stat -c %a "$path")" "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
-    fi
-  done | sha256sum | cut -d' ' -f1
-)
-[[ "$complete_tree_digest" = 9caa5c02dcd2d9c01e5d0196956787a0f31760195c6544a2ceafcb771f469521 ]] \
-  || fail "complete toolchain tree differs: $complete_tree_digest"
-
-secure_publish_create_new "$stage" "$output"
+/usr/bin/mv -- "$stage" "$output"
 stage=
 /usr/bin/printf '%s\n' "$output"

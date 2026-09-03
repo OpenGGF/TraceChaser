@@ -386,12 +386,15 @@ fixture.
 
 ## S2/S3K native audio observer gates
 
-Task 8 uses a separately installed, exact-hash Task 7 GPGX core. Supply the
-reviewed ROMs and complete BK2s by absolute path; the capability fixture rejects
-the wrong movie name, SHA-256, or row count before opening the core.
+These gates run against a separately built and installed GPGX core carrying the
+audio observer; see
+[`native/gpgx-audio-observer/README.md`](native/gpgx-audio-observer/README.md)
+for how to build and install one. Supply the reviewed ROMs and complete BK2s by
+absolute path; the capability fixture rejects the wrong movie name, SHA-256, or
+row count before opening the core.
 
 ```bash
-export BIZHAWK_HOME=/absolute/task7-observer-install
+export BIZHAWK_HOME=/absolute/observer-install
 export OPENGGF_GPGX_Z80_CAPABILITY=1
 export S2_ROM_PATH=/absolute/sonic2-rev01.gen
 export S2_BK2_PATH=/absolute/sonic-2-sonic-tails-complete-emeralds.bk2
