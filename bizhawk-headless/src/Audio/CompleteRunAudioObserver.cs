@@ -717,6 +717,35 @@ namespace OpenGGF.BizHawk.Headless
             public long BeginCoordinate{get;private set;} public long EndCoordinate{get;private set;}
             public DriverService Service{get;private set;}
         }
+        /// <summary>
+        /// A parent-independent observation taken by a SNAPSHOT_AT_PC hook. It
+        /// joins no service, so it is reported separately from the service
+        /// projection and carries the service that happened to be active only
+        /// as correlation data.
+        /// </summary>
+        public sealed class RequestObservation
+        {
+            internal RequestObservation(ushort hookToken,uint pc,byte sourceCpu,
+                uint nativeOrdinal,ushort serviceToken,byte serviceKind,byte depth,
+                ushort rangeId,byte[] bytes)
+            {
+                HookToken=hookToken;Pc=pc;SourceCpu=sourceCpu;NativeOrdinal=nativeOrdinal;
+                ServiceToken=serviceToken;ServiceKind=serviceKind;Depth=depth;
+                RangeId=rangeId;Bytes=Array.AsReadOnly(bytes);
+            }
+            public ushort HookToken{get;private set;}
+            public uint Pc{get;private set;}
+            public byte SourceCpu{get;private set;}
+            public uint NativeOrdinal{get;private set;}
+            /// <summary>Zero at root: the observation owns no service.</summary>
+            public ushort ServiceToken{get;private set;}
+            public byte ServiceKind{get;private set;}
+            public byte Depth{get;private set;}
+            /// <summary>Zero when the hook declared no snapshot range.</summary>
+            public ushort RangeId{get;private set;}
+            public ReadOnlyCollection<byte> Bytes{get;private set;}
+        }
+
         public sealed class FrameCapture
         {
             internal readonly ServiceBuilder[] completed;
@@ -730,6 +759,19 @@ namespace OpenGGF.BizHawk.Headless
             private ReadOnlyCollection<long> flattenedView;
             private readonly DeferredBeginEvidence[] deferredBegins;
             private readonly ReadOnlyCollection<DeferredBeginEvidence> deferredBeginsView;
+            private RequestObservation[] requestObservations=new RequestObservation[0];
+            private ReadOnlyCollection<RequestObservation> requestObservationsView;
+            public ReadOnlyCollection<RequestObservation> RequestObservations
+            {
+                get
+                {
+                    if(requestObservationsView==null)
+                        requestObservationsView=Array.AsReadOnly(requestObservations);
+                    return requestObservationsView;
+                }
+            }
+            internal void SetRequestObservations(RequestObservation[] value)
+            { requestObservations=value; requestObservationsView=null; }
             internal FrameCapture(GpgxAudioTraceEvent[] raw,List<ServiceBuilder> completed,
                 List<ResetRecord> resets,long frameBase)
                 :this(raw,completed,resets,frameBase,(DeferredBeginReservation)null,-1){}
@@ -1111,6 +1153,13 @@ namespace OpenGGF.BizHawk.Headless
             bool promotionHooks=hasPromotionHooks;
             DeferredBeginReservation deferred=Clone(pendingDeferredBegin);
             DeferredOwnerTransfer deferredTransfer=default(DeferredOwnerTransfer);
+            // Parent-independent observations. The pending record is opened by a
+            // value-5 marker and closed by its own snapshot group, so these
+            // bytes never reach a service builder's cancellation ranges.
+            var requestObservations=new List<RequestObservation>();
+            bool requestOpen=false;ushort requestHookToken=0,requestServiceToken=0,requestRangeId=0;
+            uint requestPc=0,requestOrdinal=0;byte requestSourceCpu=0,requestServiceKind=0,requestDepth=0;
+            byte[] requestBytes=null;int requestFilled=0;
             for(int i=0;i<count;i++)
             {
                 ref GpgxAudioTraceEvent e=ref events[i]; long coordinate=globalEventCoordinate+i;
@@ -1326,6 +1375,40 @@ namespace OpenGGF.BizHawk.Headless
                 case 6:
                 case 7:
                 {
+                    if(requestOpen&&e.Pc==requestPc&&e.SourceCpu==requestSourceCpu)
+                    {
+                        if(!hasRange[e.Subject])throw Invalid("unknown snapshot range");
+                        GpgxAudioObserverAdapter.SnapshotRange range=rangeById[e.Subject];
+                        if(e.Flags!=0||e.Value!=0)throw Invalid("parent-independent snapshot flags");
+                        if(e.Kind==5)
+                        {
+                            if(requestBytes!=null||e.Offset!=0||e.PayloadLength!=0||e.Payload!=0)
+                                throw Invalid("parent-independent snapshot begin");
+                            requestRangeId=e.Subject;requestBytes=new byte[range.Length];requestFilled=0;
+                        }
+                        else if(e.Kind==6)
+                        {
+                            if(requestBytes==null||e.Subject!=requestRangeId
+                                ||e.Offset!=requestFilled||e.PayloadLength==0
+                                ||requestFilled+e.PayloadLength>requestBytes.Length)
+                                throw Invalid("parent-independent snapshot chunk");
+                            for(int b2=0;b2<e.PayloadLength;b2++)
+                                requestBytes[requestFilled+b2]=(byte)(e.Payload>>(8*b2));
+                            requestFilled+=e.PayloadLength;
+                        }
+                        else
+                        {
+                            if(requestBytes==null||e.Subject!=requestRangeId
+                                ||e.Offset!=requestBytes.Length||requestFilled!=requestBytes.Length
+                                ||e.PayloadLength!=0||e.Payload!=0)
+                                throw Invalid("parent-independent snapshot end");
+                            requestObservations.Add(new RequestObservation(requestHookToken,
+                                requestPc,requestSourceCpu,requestOrdinal,requestServiceToken,
+                                requestServiceKind,requestDepth,requestRangeId,requestBytes));
+                            requestOpen=false;requestBytes=null;requestFilled=0;
+                        }
+                        break;
+                    }
                     ServiceBuilder b=promotionHooks
                         ?OwnedSnapshotBuilder(events,i,count,ref e,active,reset)
                         :OwnedBuilder(ref e,active,reset);
@@ -1445,6 +1528,33 @@ namespace OpenGGF.BizHawk.Headless
                             parent.EventCount++;
                         }
                     }
+                    else if(e.Value==5)
+                    {
+                        // Parent-independent observation. It joins no service,
+                        // so it is owned by whatever is active and by nothing
+                        // at root; the native selector proved it is the only
+                        // hook at its instruction.
+                        if(hook.Action!=13)throw Invalid("parent-independent marker action");
+                        if(active.Count==0)
+                        {
+                            if(e.ServiceToken!=0||e.ParentToken!=0
+                                ||e.ServiceKindId!=0||e.Depth!=0)
+                                throw Invalid("root parent-independent marker ownership");
+                        }
+                        else OwnedBuilder(ref e,active,reset);
+                        if(requestOpen)throw Invalid("overlapping parent-independent observation");
+                        requestHookToken=e.Subject;requestPc=e.Pc;requestSourceCpu=e.SourceCpu;
+                        requestOrdinal=e.Ordinal;requestServiceToken=e.ServiceToken;
+                        requestServiceKind=e.ServiceKindId;requestDepth=e.Depth;
+                        requestRangeId=0;requestBytes=null;requestFilled=0;
+                        if(hook.RangeCount==0)
+                        {
+                            requestObservations.Add(new RequestObservation(requestHookToken,
+                                requestPc,requestSourceCpu,requestOrdinal,requestServiceToken,
+                                requestServiceKind,requestDepth,0,new byte[0]));
+                        }
+                        else requestOpen=true;
+                    }
                     else if(e.Value==3)
                     {
                         if(hook.Action!=7)throw Invalid("observation marker action");
@@ -1531,8 +1641,12 @@ namespace OpenGGF.BizHawk.Headless
             GpgxAudioTraceEvent[] raw=EmptyEvents;
             if(retainRaw){raw=new GpgxAudioTraceEvent[count];Array.Copy(events,raw,count);}
             if(deferred!=null)deferredBegins.Add(Clone(deferred));
-            return new ProjectionResult{Capture=retainRaw?new FrameCapture(raw,complete,resets,
-                    globalEventCoordinate,deferredBegins,bk2Row):null,
+            if(requestOpen)throw Invalid("unterminated parent-independent observation");
+            FrameCapture capture=retainRaw?new FrameCapture(raw,complete,resets,
+                globalEventCoordinate,deferredBegins,bk2Row):null;
+            if(capture!=null&&requestObservations.Count!=0)
+                capture.SetRequestObservations(requestObservations.ToArray());
+            return new ProjectionResult{Capture=capture,
                 Active=active,Completed=complete,Pending=pending,
                 Port0=port0,Port1=port1,Epoch=epoch,Armed=nowArmed,
                 Deferred=deferred,EventCount=count};

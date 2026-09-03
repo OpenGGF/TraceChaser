@@ -1,4 +1,4 @@
-#!/usr/bin/bash -p
+#!/usr/bin/bash
 set -euo pipefail
 root=${BASH_SOURCE[0]%/*}; root=$(cd -P -- "$root" && pwd)
 source_dir=${1-}; toolchain=${2-}; scratch=${3-}
@@ -10,6 +10,7 @@ source_dir=${1-}; toolchain=${2-}; scratch=${3-}
   "$root/matrix_harness.c" \
   "$root/arming_harness.c" \
   "$root/cpu_boundary_harness.c" "$root/m68k_boundary_harness.c" \
+  "$root/snapshot_at_pc_harness.c" \
   "$scratch/native-selftest/"
 /usr/bin/env -i PATH=/usr/bin:/bin \
   LD_LIBRARY_PATH="$toolchain/clang/usr/lib/x86_64-linux-gnu:$toolchain/clang/usr/lib/llvm-16/lib" \
@@ -70,3 +71,26 @@ source_dir=${1-}; toolchain=${2-}; scratch=${3-}
   "$scratch/native-selftest/m68k_boundary_harness.c" \
   -o "$scratch/native-selftest/m68k-boundary-harness"
 "$scratch/native-selftest/m68k-boundary-harness"
+/usr/bin/env -i PATH=/usr/bin:/bin \
+  LD_LIBRARY_PATH="$toolchain/clang/usr/lib/x86_64-linux-gnu:$toolchain/clang/usr/lib/llvm-16/lib" \
+  "$toolchain/clang/usr/bin/clang-16" -std=c99 -DLSB_FIRST -DcdStream=cdStream \
+  -DINLINE='static __inline__' -include string.h \
+  -O2 -Wall -Wextra -Werror -Wno-unused-function -Wno-sign-compare \
+  -I"$source_dir/waterbox/emulibc" \
+  -I"$source_dir/waterbox/gpgx/util" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/cart_hw" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/cart_hw/svp" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/cd_hw" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/debug" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/input_hw" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/m68k" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/ntsc" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/sound" \
+  -I"$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/z80" \
+  -I"$source_dir/waterbox/gpgx/cinterface" \
+  "$source_dir/waterbox/gpgx/cinterface/audio_trace.c" \
+  "$source_dir/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c" \
+  "$scratch/native-selftest/snapshot_at_pc_harness.c" \
+  -o "$scratch/native-selftest/snapshot-at-pc-harness"
+"$scratch/native-selftest/snapshot-at-pc-harness"

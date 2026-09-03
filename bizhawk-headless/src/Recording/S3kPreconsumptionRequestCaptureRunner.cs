@@ -145,10 +145,13 @@ namespace OpenGGF.BizHawk.Headless
             public void Frame(int row,
                 CompleteRunAudioObserver.FrameCapture frame)
             {
-                foreach (CompleteRunAudioObserver.DriverService service
-                    in frame.Services)
-                    if (service.Kind
-                        == S3kPreconsumptionRequestProfile.SubmissionKind)
+                // The boundary observation is parent-independent, so it is
+                // reported outside the service projection. Only the
+                // release-side hook carries the mailbox byte.
+                foreach (CompleteRunAudioObserver.RequestObservation value
+                    in frame.RequestObservations)
+                    if (value.HookToken
+                        == S3kPreconsumptionRequestProfile.EndToken)
                         RequestCount++;
                 inner.Frame(row, frame);
             }

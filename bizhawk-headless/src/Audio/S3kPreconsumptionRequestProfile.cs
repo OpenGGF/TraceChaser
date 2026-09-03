@@ -32,7 +32,7 @@ namespace OpenGGF.BizHawk.Headless
             "C5B1C655C19F462ADE0AC4E17A844D10";
         internal const int MovieRowCount = 466334;
         internal const string ManifestSha256 =
-            "75aeed7b3e0d0c4f1accee3f9beda426ad67c2ea60cb3ed100093e244c598dcc";
+            "a2986032425af20fce19abd9e4bb0a1deabb142707510fe1d1830995adaaaf49";
 
         internal const int FirstRow = 0;
         internal const int ExclusiveEnd = 5400;
@@ -45,8 +45,6 @@ namespace OpenGGF.BizHawk.Headless
         internal const string EndOpcode = "33fc000000a11100";
         internal const ushort BeginToken = 27;
         internal const ushort EndToken = 28;
-        internal const byte SubmissionKind = 13;
-        internal const byte ParentKind = 8;
         internal const ushort MailboxRangeId = 3;
         internal const int MailboxAddress = 0x1C0A;
 
@@ -54,28 +52,6 @@ namespace OpenGGF.BizHawk.Headless
         private const ushort UploadCompletionToken = 8;
         private const byte ArmProofCompletion = 1;
         private const byte PrearmPermitted = 2;
-
-        /// <summary>
-        /// The non-target active kinds that Play_Music can be reached under.
-        /// Kind 2 (SoundDriverLoad) is excluded because $1358 lies outside
-        /// SndDrvInit ($12CE..$1346) and because the native arm rule forbids a
-        /// non-PUSH_BEGIN hook expecting the arm kind. Kind 13 is excluded at
-        /// $1358 because the submission never nests inside itself.
-        /// </summary>
-        private static readonly byte[] BeginAlternativeKinds =
-            new byte[] { 0, 1, 3, 5, 6, 7, 9, 10, 11, 12 };
-        private static readonly ushort[] BeginAlternativeTokens =
-            new ushort[] { 29, 30, 31, 32, 33, 34, 35, 36, 37, 38 };
-
-        /// <summary>
-        /// The $1374 alternatives additionally retain kind 8 defensively: if a
-        /// $1358 visit did not open a submission child, kind 8 is still the
-        /// active service when the release instruction is reached.
-        /// </summary>
-        private static readonly byte[] EndAlternativeKinds =
-            new byte[] { 0, 1, 3, 5, 6, 7, 9, 10, 11, 12, 8 };
-        private static readonly ushort[] EndAlternativeTokens =
-            new ushort[] { 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49 };
 
         internal static CompleteRunAudioObserver CreateObserver(
             string manifestPath, IGpgxAudioTraceApi api)
@@ -221,9 +197,8 @@ namespace OpenGGF.BizHawk.Headless
                     throw new InvalidDataException(
                         "The reviewed S3K request manifest did not produce its legacy exact configuration.");
                 ValidateMailboxRange(ranges);
-                ValidateKinds(kinds);
                 ValidateHooks(hooks);
-                config.AbiVersion = 2;
+                config.AbiVersion = 5;
                 config.Flags = 1;
                 return inner.Configure(ref config, mask, kinds, hooks, ranges);
             }
@@ -242,31 +217,12 @@ namespace OpenGGF.BizHawk.Headless
                 if (seen != 1) throw InvalidBoundary();
             }
 
-            private static void ValidateKinds(
-                GpgxAudioObserverAdapter.ServiceKind[] kinds)
-            {
-                bool submissionSeen = false;
-                bool parentSeen = false;
-                foreach (GpgxAudioObserverAdapter.ServiceKind kind in kinds)
-                {
-                    if (kind.KindId == SubmissionKind)
-                    {
-                        if (submissionSeen || kind.Flags != 0
-                            || kind.CancellationRangeCount != 1
-                            || kind.ContinuationFrameLimit != 0)
-                            throw InvalidBoundary();
-                        submissionSeen = true;
-                    }
-                    else if (kind.KindId == ParentKind)
-                    {
-                        if (parentSeen || (kind.Flags & 4) == 0)
-                            throw InvalidBoundary();
-                        parentSeen = true;
-                    }
-                }
-                if (!submissionSeen || !parentSeen) throw InvalidBoundary();
-            }
-
+            /// <summary>
+            /// The boundary is exactly two parent-independent observations and
+            /// nothing else. Neither declares a service kind or an expected
+            /// active kind, so neither can claim a parent or open a lifecycle,
+            /// and each must be the only hook at its instruction.
+            /// </summary>
             private static void ValidateHooks(
                 GpgxAudioObserverAdapter.ServiceHook[] hooks)
             {
@@ -274,8 +230,6 @@ namespace OpenGGF.BizHawk.Headless
                 ulong endOpcode = PackOpcode(EndOpcode);
                 bool beginSeen = false, endSeen = false;
                 bool uploadBeginSeen = false, uploadCompletionSeen = false;
-                var beginAlternatives = new bool[BeginAlternativeTokens.Length];
-                var endAlternatives = new bool[EndAlternativeTokens.Length];
                 for (int index = 0; index < hooks.Length; index++)
                 {
                     GpgxAudioObserverAdapter.ServiceHook hook = hooks[index];
@@ -301,66 +255,38 @@ namespace OpenGGF.BizHawk.Headless
                     }
                     else if (hook.HookToken == BeginToken)
                     {
-                        if (beginSeen || hook.Action != 1 || hook.Cpu != 2
-                            || hook.Pc != BeginPc
-                            || hook.ServiceKindId != SubmissionKind
-                            || hook.ExpectedActiveKind != ParentKind
-                            || hook.Flags != 0 || hook.RangeCount != 0
-                            || hook.OpcodeLength != 8
-                            || hook.Opcode != beginOpcode)
-                            throw InvalidBoundary();
+                        RequireObservation(hook, BeginPc, beginOpcode, 0);
+                        if (beginSeen) throw InvalidBoundary();
                         beginSeen = true;
                     }
                     else if (hook.HookToken == EndToken)
                     {
-                        if (endSeen || hook.Action != 2 || hook.Cpu != 2
-                            || hook.Pc != EndPc || hook.ServiceKindId != 0
-                            || hook.ExpectedActiveKind != SubmissionKind
-                            || hook.Flags != 0 || hook.RangeCount != 1
-                            || hook.OpcodeLength != 8
-                            || hook.Opcode != endOpcode)
-                            throw InvalidBoundary();
+                        RequireObservation(hook, EndPc, endOpcode, 1);
+                        if (endSeen) throw InvalidBoundary();
                         endSeen = true;
                     }
-                    else
+                    else if (hook.Action == 13 || hook.Pc == BeginPc
+                        || hook.Pc == EndPc)
                     {
-                        MatchAlternative(hook, BeginAlternativeTokens,
-                            BeginAlternativeKinds, beginAlternatives, BeginPc,
-                            beginOpcode);
-                        MatchAlternative(hook, EndAlternativeTokens,
-                            EndAlternativeKinds, endAlternatives, EndPc,
-                            endOpcode);
-                        if (hook.Action == 7
-                            && (hook.Pc != BeginPc && hook.Pc != EndPc))
-                            throw InvalidBoundary();
+                        // nothing else may observe or share these instructions
+                        throw InvalidBoundary();
                     }
                     hooks[index] = hook;
                 }
                 if (!uploadBeginSeen || !uploadCompletionSeen)
                     throw InvalidUploadChain();
                 if (!beginSeen || !endSeen) throw InvalidBoundary();
-                foreach (bool seen in beginAlternatives)
-                    if (!seen) throw InvalidBoundary();
-                foreach (bool seen in endAlternatives)
-                    if (!seen) throw InvalidBoundary();
             }
 
-            private static void MatchAlternative(
-                GpgxAudioObserverAdapter.ServiceHook hook, ushort[] tokens,
-                byte[] kinds, bool[] seen, uint pc, ulong opcode)
+            private static void RequireObservation(
+                GpgxAudioObserverAdapter.ServiceHook hook, uint pc,
+                ulong opcode, int rangeCount)
             {
-                for (int index = 0; index < tokens.Length; index++)
-                {
-                    if (hook.HookToken != tokens[index]) continue;
-                    if (seen[index] || hook.Action != 7 || hook.Cpu != 2
-                        || hook.Pc != pc || hook.ServiceKindId != 0
-                        || hook.ExpectedActiveKind != kinds[index]
-                        || hook.Flags != 0 || hook.RangeCount != 0
-                        || hook.OpcodeLength != 8 || hook.Opcode != opcode)
-                        throw InvalidBoundary();
-                    seen[index] = true;
-                    return;
-                }
+                if (hook.Action != 13 || hook.Cpu != 2 || hook.Pc != pc
+                    || hook.ServiceKindId != 0 || hook.ExpectedActiveKind != 0
+                    || hook.Flags != 0 || hook.RangeCount != rangeCount
+                    || hook.OpcodeLength != 8 || hook.Opcode != opcode)
+                    throw InvalidBoundary();
             }
 
             public int BeginFrame() { return inner.BeginFrame(); }

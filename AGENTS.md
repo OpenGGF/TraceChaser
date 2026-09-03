@@ -235,19 +235,34 @@ that snapshot with the next exact ABI-4 action-7 A7 marker. Its fixed manifest o
 opcode, and token inventory; it may not expose a caller-selectable observation address,
 infer a request from later state or output, or dispatch the observed value into playback.
 
-The fourth is the approved future Sonic 3&K Sonic/Tails pre-consumption music-mailbox
-observer. It is limited to the stopped-Z80 interval from `M68K BUS` PC `0x001358` (opcode
-`33fc010000a11100`) through PC `0x001374` (opcode `33fc000000a11100`), and may snapshot only
-Z80 RAM `$1C0A..$1C0B` before the bus-release instruction. Its fixed manifest owns the two PCs,
-opcodes, active-service topology, and token inventory; it may not select a profile, address,
-or request value from callers, or infer a request from later state or output. This policy
-approval does not authorize its implementation, capture, fixture publication, or consumer use.
+The fourth is the Sonic 3&K Sonic/Tails pre-consumption music-mailbox observer. It is
+limited to the stopped-Z80 interval of `Play_Music`: a marker at `M68K BUS` PC `0x001358`
+(opcode `33fc010000a11100`), and a one-byte snapshot of Z80 RAM `$1C0A` taken at the
+bus-release instruction `0x001370` (opcode `33fc000000a11100`) before it executes. The
+release instruction is at `0x001370`, not the `0x001374` this entry once named: the mailbox
+store assembles as the six-byte `13c000a01c0a` at `0x00136A`, so `0x001374` falls inside the
+release instruction's long operand and is never an instruction PC.
+
+Both observations use the ABI v5 `SNAPSHOT_AT_PC` action, because the service stack is shared
+across processors and `Play_Music` is reachable from any active service, so no fixed parent
+claim is true. Under that action the hook pushes and pops nothing, declares no service kind
+and no expected active kind, must be the only hook at its instruction, and carries only the
+active service token plus its declared snapshot bytes. Its fixed manifest owns the two PCs,
+opcodes, and ranges; it may not select a profile, address, or request value from callers, or
+infer a request from later state or output.
 
 All four are observers. None may select a trace sync point, mutate emulation state, carry
 a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate must
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and
 corrected-candidate differentials gate these exceptions.
+
+Native observer builds are **not host-attested**. `build-observer.sh` pins the source
+commits, the clang packages, and the patch; it makes no claim about the identity of the
+host's own utilities, and it records the built core's provenance as an output in
+`identity.json` rather than gating on a frozen expected hash. Do not reintroduce host-image
+locks: an earlier revision had them, and an ordinary package upgrade failed the build closed
+while detecting nothing about the artefact.
 
 No other fixture contains hook output, so broader callback support would be the only
 significant surface here with no differential coverage, in a harness whose value depends

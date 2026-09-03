@@ -66,7 +66,7 @@ static void config_negatives(void)
   fixture(0); assert(gpgx_audio_trace_configure(&config,mask,&kind,NULL,&range)==TRACE_INVALID_ARGUMENT);
   fixture(0); assert(gpgx_audio_trace_configure(&config,mask,&kind,hooks,NULL)==TRACE_INVALID_ARGUMENT);
 #define BAD(field,value) do { fixture(0); config.field=(value); assert(configure()==TRACE_ABI_OR_CONFIG_LIMIT); } while(0)
-  BAD(magic,0); BAD(abi_version,5); BAD(struct_size,63); BAD(kind_size,15); BAD(hook_size,31);
+  BAD(magic,0); BAD(abi_version,6); BAD(struct_size,63); BAD(kind_size,15); BAD(hook_size,31);
   BAD(range_size,15); BAD(event_size,31); BAD(max_depth,9); BAD(max_opcode_bytes,7);
   BAD(watch_mask_bytes,8191); BAD(watch_mask_bytes,8193); BAD(event_capacity,65535);
   BAD(max_service_tokens_per_frame,65534); BAD(kind_count,0); BAD(hook_count,0); BAD(range_count,0);

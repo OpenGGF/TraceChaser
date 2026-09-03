@@ -27,6 +27,11 @@ namespace OpenGGF.BizHawk.Headless
                 S3kPreconsumptionRequestProfile.MailboxRangeId;
             authority.SubmissionEndPc =
                 S3kPreconsumptionRequestProfile.EndPc;
+            // The boundary no longer opens a service, so the legacy kind-13
+            // submission projection finds nothing. The request observation now
+            // arrives as a parent-independent marker plus its snapshot group,
+            // and its consumer is not implemented yet.
+            authority.IncludeSubmissions = false;
             return authority;
         }
     }

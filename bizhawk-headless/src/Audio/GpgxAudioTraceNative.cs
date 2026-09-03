@@ -16,8 +16,8 @@ namespace OpenGGF.BizHawk.Headless
             AbiVersion = adapter.AbiVersion();
             EventSize = adapter.EventSize();
             Capacity = adapter.Capacity();
-            if (AbiVersion != 4 || EventSize != 32 || Capacity != 65536)
-                throw new System.InvalidOperationException("GPGX audio observer API identity differs from v4/32/65536.");
+            if (AbiVersion != 5 || EventSize != 32 || Capacity != 65536)
+                throw new System.InvalidOperationException("GPGX audio observer API identity differs from v5/32/65536.");
         }
 
         public uint AbiVersion { get; private set; }

@@ -92,8 +92,8 @@ namespace OpenGGF.BizHawk.Headless
                     ["request_end_opcode"]=S3kPreconsumptionRequestProfile.EndOpcode,
                     ["request_begin_token"]=S3kPreconsumptionRequestProfile.BeginToken,
                     ["request_end_token"]=S3kPreconsumptionRequestProfile.EndToken,
-                    ["request_parent_kind"]=S3kPreconsumptionRequestProfile.ParentKind,
-                    ["request_kind"]=S3kPreconsumptionRequestProfile.SubmissionKind,
+                    ["request_action"]="SNAPSHOT_AT_PC",
+                    ["request_parent_independent"]=true,
                     ["request_mailbox_address"]=S3kPreconsumptionRequestProfile.MailboxAddress,
                     ["request_mailbox_range_id"]=S3kPreconsumptionRequestProfile.MailboxRangeId
                 }
@@ -134,6 +134,24 @@ namespace OpenGGF.BizHawk.Headless
             int expected = lastRow < 0 ? authority.FirstRow : lastRow + 1;
             if (row != expected || row >= authority.ExclusiveEnd)
                 throw new InvalidDataException("The S3K raw rows are not contiguous and in range.");
+            var requests = new JArray();
+            foreach (CompleteRunAudioObserver.RequestObservation value
+                in frame.RequestObservations)
+            {
+                var bytes = new byte[value.Bytes.Count];
+                value.Bytes.CopyTo(bytes, 0);
+                requests.Add(new JObject
+                {
+                    ["hook_token"]=value.HookToken, ["pc"]=value.Pc,
+                    ["source_cpu"]=value.SourceCpu,
+                    ["native_ordinal"]=value.NativeOrdinal,
+                    ["active_service_token"]=value.ServiceToken,
+                    ["active_service_kind"]=value.ServiceKind,
+                    ["active_depth"]=value.Depth,
+                    ["range_id"]=value.RangeId,
+                    ["bytes_hex"]=Hex(bytes)
+                });
+            }
             var events = new JArray();
             foreach (GpgxAudioTraceEvent value in frame.RawEvents)
             {
@@ -156,6 +174,7 @@ namespace OpenGGF.BizHawk.Headless
             };
             if (authority.IncludeSubmissions)
                 frameValue["submissions"] = Submissions(frame);
+            if (requests.Count != 0) frameValue["requests"] = requests;
             Write(frameValue);
             lastRow = row;
         }
@@ -361,7 +380,7 @@ namespace OpenGGF.BizHawk.Headless
         internal int StateStart{get;private set;}
         internal int StateExclusiveEnd{get;private set;}
         internal bool IsProductionBound{get;private set;}
-        internal bool IncludeSubmissions{get;private set;}
+        internal bool IncludeSubmissions{get;set;}
         internal ushort MailboxRangeId{get;set;}
         internal uint SubmissionEndPc{get;set;}
     }

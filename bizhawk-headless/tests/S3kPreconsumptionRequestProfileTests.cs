@@ -31,11 +31,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S3kPreconsumptionRequestProfile rejects a changed target opcode",
                 RejectsChangedTargetOpcode));
             tests.Add(new TestMain.TestCase(
-                "S3kPreconsumptionRequestProfile rejects a missing active-kind alternative",
-                RejectsMissingAlternative));
+                "S3kPreconsumptionRequestProfile rejects a parent claim on the boundary",
+                RejectsParentClaim));
             tests.Add(new TestMain.TestCase(
-                "S3kPreconsumptionRequestProfile rejects a wrong submission parent kind",
-                RejectsWrongParentKind));
+                "S3kPreconsumptionRequestProfile rejects a second hook at a watched PC",
+                RejectsSecondHookAtWatchedPc));
             tests.Add(new TestMain.TestCase(
                 "S3kPreconsumptionRequestProfile rejects a widened mailbox range",
                 RejectsWidenedMailboxRange));
@@ -60,18 +60,29 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 S3kPreconsumptionRequestProfile.CreateObserver(
                     RequestManifestPath(), api);
             AssertEx.Equal(true, observer != null);
-            AssertEx.Equal(2, (int)api.Config.AbiVersion);
+            AssertEx.Equal(5, (int)api.Config.AbiVersion);
             AssertEx.Equal(1, (int)api.Config.Flags);
-            int begin = 0, end = 0, markers = 0;
+            int begin = 0, end = 0, observations = 0;
             foreach (GpgxAudioObserverAdapter.ServiceHook hook in api.Hooks)
             {
-                if (hook.HookToken == 27) { begin++; }
-                else if (hook.HookToken == 28) { end++; }
-                else if (hook.Action == 7) { markers++; }
+                if (hook.Action != 13) continue;
+                observations++;
+                if (hook.HookToken == 27)
+                {
+                    begin++;
+                    AssertEx.Equal(0, (int)hook.RangeCount);
+                }
+                else if (hook.HookToken == 28)
+                {
+                    end++;
+                    AssertEx.Equal(1, (int)hook.RangeCount);
+                }
+                AssertEx.Equal(0, (int)hook.ServiceKindId);
+                AssertEx.Equal(0, (int)hook.ExpectedActiveKind);
             }
             AssertEx.Equal(1, begin);
             AssertEx.Equal(1, end);
-            AssertEx.Equal(21, markers);
+            AssertEx.Equal(2, observations);
         }
 
         private static void RejectsChangedManifestIdentity()
@@ -115,21 +126,29 @@ namespace OpenGGF.BizHawk.Headless.Tests
             });
         }
 
-        private static void RejectsMissingAlternative()
-        {
-            ExpectTamperedRejection(hooks =>
-            {
-                for (int index = hooks.Count - 1; index >= 0; index--)
-                    if ((int)hooks[index]["token"] == 44) hooks.RemoveAt(index);
-            });
-        }
-
-        private static void RejectsWrongParentKind()
+        private static void RejectsParentClaim()
         {
             ExpectTamperedRejection(hooks =>
             {
                 foreach (JToken hook in hooks)
-                    if ((int)hook["token"] == 27) hook["expected_kind"] = 7;
+                    if ((int)hook["token"] == 27) hook["expected_kind"] = 8;
+            });
+        }
+
+        private static void RejectsSecondHookAtWatchedPc()
+        {
+            ExpectTamperedRejection(hooks =>
+            {
+                var extra = new JObject
+                {
+                    ["token"] = 29, ["cpu"] = "M68K", ["pc"] = 0x1358,
+                    ["action"] = "OBSERVATION_MARKER", ["kind"] = 0,
+                    ["expected_kind"] = 0, ["opcode"] = "33fc010000a11100",
+                    ["ranges"] = new JArray(), ["flags"] = new JArray(),
+                    ["source_file"] = "docs/skdisasm/sonic3k.asm",
+                    ["source_label"] = "unreviewed competitor"
+                };
+                hooks.Add(extra);
             });
         }
 
@@ -151,35 +170,34 @@ namespace OpenGGF.BizHawk.Headless.Tests
         /// Play_Music at $1358 lies outside SndDrvInit ($12CE..$1346) and the
         /// native arm rule forbids a non-PUSH_BEGIN hook expecting the arm kind.
         /// </summary>
+        /// <summary>
+        /// A SNAPSHOT_AT_PC hook is selected regardless of the active service,
+        /// so the manifest is correct exactly when it is the only hook at each
+        /// watched instruction. That is what the native validator enforces and
+        /// what removes the whole non-target alternative problem.
+        /// </summary>
         private static void SelectsExactlyOneHookPerActiveKind()
         {
-            JObject root = LoadRequestManifest();
-            JArray hooks = (JArray)root["games"]["s3k"]["hooks"];
-            var declared = new List<int> { 0 };
-            foreach (JToken kind in (JArray)root["games"]["s3k"]["kinds"])
-                declared.Add((int)kind["id"]);
-            foreach (int active in declared)
-            {
-                if (active == 2 || active == 13) continue;
-                AssertEx.Equal(1, Matches(hooks, BeginPc, active));
-                AssertEx.Equal(1, Matches(hooks, EndPc, active));
-            }
-            AssertEx.Equal(1, Matches(hooks, EndPc, 13));
-            AssertEx.Equal(0, Matches(hooks, BeginPc, 13));
-            AssertEx.Equal(0, Matches(hooks, BeginPc, 2));
-            AssertEx.Equal(0, Matches(hooks, EndPc, 2));
-        }
-
-        private static int Matches(JArray hooks, uint pc, int activeKind)
-        {
-            int matches = 0;
+            JArray hooks = (JArray)LoadRequestManifest()["games"]["s3k"]["hooks"];
+            AssertEx.Equal(1, HooksAt(hooks, BeginPc));
+            AssertEx.Equal(1, HooksAt(hooks, EndPc));
             foreach (JToken hook in hooks)
             {
-                if ((uint)(int)hook["pc"] != pc) continue;
-                if ((string)hook["cpu"] != "M68K") continue;
-                if ((int)hook["expected_kind"] == activeKind) matches++;
+                uint pc = (uint)(int)hook["pc"];
+                if (pc != BeginPc && pc != EndPc) continue;
+                AssertEx.Equal("SNAPSHOT_AT_PC", (string)hook["action"]);
+                AssertEx.Equal(0, (int)hook["kind"]);
+                AssertEx.Equal(0, (int)hook["expected_kind"]);
             }
-            return matches;
+        }
+
+        private static int HooksAt(JArray hooks, uint pc)
+        {
+            int count = 0;
+            foreach (JToken hook in hooks)
+                if ((uint)(int)hook["pc"] == pc
+                    && (string)hook["cpu"] == "M68K") count++;
+            return count;
         }
 
         private static void KeepsKnucklesProductionManifestUnchanged()
@@ -192,7 +210,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal(true, pc != BeginPc && pc != EndPc);
             }
             foreach (JToken kind in (JArray)production["games"]["s3k"]["kinds"])
+            {
                 AssertEx.Equal(true, (int)kind["id"] != 13);
+                if ((int)kind["id"] == 8)
+                    foreach (JToken flag in (JArray)kind["flags"])
+                        AssertEx.Equal(true,
+                            (string)flag != "ALLOW_CHILDREN");
+            }
         }
 
         private static void RawAuthorityIsUnboundAndDistinct()
@@ -200,7 +224,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             S3kRawAudioAuthority authority =
                 S3kPreconsumptionRequestRawAuthority.Instance;
             AssertEx.Equal(false, authority.IsProductionBound);
-            AssertEx.Equal(true, authority.IncludeSubmissions);
+            AssertEx.Equal(false, authority.IncludeSubmissions);
             AssertEx.Equal("openggf.s3k-preconsumption-request-raw.v1",
                 authority.Schema);
             AssertEx.Equal(0, authority.FirstRow);
