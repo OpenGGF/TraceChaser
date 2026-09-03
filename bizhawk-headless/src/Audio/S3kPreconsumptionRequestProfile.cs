@@ -32,7 +32,7 @@ namespace OpenGGF.BizHawk.Headless
             "C5B1C655C19F462ADE0AC4E17A844D10";
         internal const int MovieRowCount = 466334;
         internal const string ManifestSha256 =
-            "f815e978dd1abb42161f6d20769317cae694fecddfe66638279075de0fa64c1b";
+            "75aeed7b3e0d0c4f1accee3f9beda426ad67c2ea60cb3ed100093e244c598dcc";
 
         internal const int FirstRow = 0;
         internal const int ExclusiveEnd = 5400;
@@ -40,7 +40,7 @@ namespace OpenGGF.BizHawk.Headless
         internal const int DriverStateExclusiveEnd = 0x2000;
 
         internal const uint BeginPc = 0x1358;
-        internal const uint EndPc = 0x1374;
+        internal const uint EndPc = 0x1370;
         internal const string BeginOpcode = "33fc010000a11100";
         internal const string EndOpcode = "33fc000000a11100";
         internal const ushort BeginToken = 27;

@@ -25,6 +25,8 @@ namespace OpenGGF.BizHawk.Headless
                 false, true);
             authority.MailboxRangeId =
                 S3kPreconsumptionRequestProfile.MailboxRangeId;
+            authority.SubmissionEndPc =
+                S3kPreconsumptionRequestProfile.EndPc;
             return authority;
         }
     }

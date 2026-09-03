@@ -51,7 +51,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         private const uint BeginPc = 0x1358;
-        private const uint EndPc = 0x1374;
+        private const uint EndPc = 0x1370;
 
         private static void LoadsFixedManifestTopology()
         {

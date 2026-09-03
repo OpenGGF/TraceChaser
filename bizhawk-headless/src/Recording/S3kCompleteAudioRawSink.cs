@@ -262,7 +262,7 @@ namespace OpenGGF.BizHawk.Headless
             {
                 if (service.Kind != 13) continue;
                 if (!service.IsComplete || service.Cancelled
-                    || service.BeginPc != 0x1358 || service.EndPc != 0x1374
+                    || service.BeginPc != 0x1358 || service.EndPc != authority.SubmissionEndPc
                     || service.BeginHookToken != 27 || service.EndHookToken != 28
                     || service.BeginSourceCpu != 2 || service.Snapshots.Count != 1)
                     throw new InvalidDataException(
@@ -270,7 +270,8 @@ namespace OpenGGF.BizHawk.Headless
                 CompleteRunAudioObserver.SnapshotGroup snapshot = service.Snapshots[0];
                 if (snapshot.RangeId != authority.MailboxRangeId
                     || snapshot.SourceCpu != 2
-                    || snapshot.Pc != 0x1374 || snapshot.Bytes.Length != 1)
+                    || snapshot.Pc != authority.SubmissionEndPc
+                    || snapshot.Bytes.Length != 1)
                     throw new InvalidDataException(
                         "The unbound S3K submission mailbox snapshot is not exact.");
                 GpgxAudioTraceEvent completion = default(GpgxAudioTraceEvent);
@@ -348,7 +349,7 @@ namespace OpenGGF.BizHawk.Headless
             ExclusiveEnd=exclusiveEnd;StateStart=stateStart;
             StateExclusiveEnd=stateExclusiveEnd;
             IsProductionBound=productionBound;IncludeSubmissions=includeSubmissions;
-            MailboxRangeId=2;
+            MailboxRangeId=2;SubmissionEndPc=0x1374;
         }
 
         internal string Schema{get;private set;}
@@ -362,6 +363,7 @@ namespace OpenGGF.BizHawk.Headless
         internal bool IsProductionBound{get;private set;}
         internal bool IncludeSubmissions{get;private set;}
         internal ushort MailboxRangeId{get;set;}
+        internal uint SubmissionEndPc{get;set;}
     }
 
     internal sealed class S3kSubmissionAudioRawV2Sink : IS3kCompleteAudioCaptureSink

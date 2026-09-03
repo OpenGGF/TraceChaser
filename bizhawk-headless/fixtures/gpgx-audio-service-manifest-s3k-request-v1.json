@@ -1220,7 +1220,7 @@
         {
           "token": 28,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "POP_END_AT_PC",
           "kind": 0,
           "expected_kind": 13,
@@ -1236,7 +1236,7 @@
         {
           "token": 39,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 0,
@@ -1250,7 +1250,7 @@
         {
           "token": 40,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 1,
@@ -1264,7 +1264,7 @@
         {
           "token": 41,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 3,
@@ -1278,7 +1278,7 @@
         {
           "token": 42,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 5,
@@ -1292,7 +1292,7 @@
         {
           "token": 43,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 6,
@@ -1306,7 +1306,7 @@
         {
           "token": 44,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 7,
@@ -1320,7 +1320,7 @@
         {
           "token": 45,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 9,
@@ -1334,7 +1334,7 @@
         {
           "token": 46,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 10,
@@ -1348,7 +1348,7 @@
         {
           "token": 47,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 11,
@@ -1362,7 +1362,7 @@
         {
           "token": 48,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 12,
@@ -1376,7 +1376,7 @@
         {
           "token": 49,
           "cpu": "M68K",
-          "pc": 4980,
+          "pc": 4976,
           "action": "OBSERVATION_MARKER",
           "kind": 0,
           "expected_kind": 8,
