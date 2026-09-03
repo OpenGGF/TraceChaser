@@ -114,6 +114,7 @@
     <Compile Include="src/Recording/S2PreconsumptionRequestObserver.cs" />
     <Compile Include="src/Recording/S2PreconsumptionRequestProfile.cs" />
     <Compile Include="src/Recording/S2RequestAwareRawV3Sink.cs" />
+    <Compile Include="src/Recording/S2RequestWindowProducer.cs" />
     <Compile Include="src/Recording/S2RequestAwareOracleV2Extractor.cs" />
     <Compile Include="src/Recording/S1RunManifestWriter.cs" />
     <Compile Include="src/Recording/S1SmokeRecorder.cs" />

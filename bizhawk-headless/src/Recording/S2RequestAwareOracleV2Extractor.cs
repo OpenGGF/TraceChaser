@@ -35,24 +35,41 @@ namespace OpenGGF.BizHawk.Headless
         private const string CandidateProfileSha256 =
             "e955877eb60bc1ba7c281cc63bd3b9f7146e086cb14162dfaf09e38fae227719";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
-        private readonly bool syntheticTestSeam;
+        /// <summary>
+        /// True when the capability's inventory was derived from the very raw
+        /// stream this extractor is about to read, rather than authenticated
+        /// independently. It is what keeps such a capability unbound: the
+        /// inventory corroborates nothing the raw does not already claim.
+        /// </summary>
+        private readonly bool derivedInventory;
         private readonly string serviceManifestPath;
+        private readonly string expectedMovieSha256;
 
         internal S2RequestAwareOracleV2Extractor()
             : this(DefaultSourceFirst, DefaultSourceEnd,
-                DefaultWindowFirst, DefaultWindowEnd, false, null) { }
+                DefaultWindowFirst, DefaultWindowEnd, false, null,
+                S2AudioObserverProfile.MovieSha256) { }
 
         private S2RequestAwareOracleV2Extractor(int sourceStart, int sourceStop,
             int windowStart, int windowStop, bool testing,
             string manifestPath)
+            : this(sourceStart, sourceStop, windowStart, windowStop, testing,
+                manifestPath, S2AudioObserverProfile.MovieSha256) { }
+
+        private S2RequestAwareOracleV2Extractor(int sourceStart, int sourceStop,
+            int windowStart, int windowStop, bool testing,
+            string manifestPath, string movieSha256)
         {
+            if (string.IsNullOrEmpty(movieSha256))
+                throw new ArgumentNullException("movieSha256");
+            expectedMovieSha256 = movieSha256;
             if (sourceStart < 0 || sourceStop <= sourceStart
                 || windowStart <= sourceStart || windowStop > sourceStop
                 || windowStop <= windowStart)
                 throw new ArgumentException("The S2 request-aware bounds are invalid.");
             sourceFirst = sourceStart; sourceEnd = sourceStop;
             windowFirst = windowStart; windowEnd = windowStop;
-            syntheticTestSeam=testing;
+            derivedInventory=testing;
             serviceManifestPath=manifestPath;
         }
 
@@ -61,6 +78,22 @@ namespace OpenGGF.BizHawk.Headless
             string manifestPath)
         { return new S2RequestAwareOracleV2Extractor(sourceStart, sourceStop,
             windowStart, windowStop, true, manifestPath); }
+
+        /// <summary>
+        /// The bounded extraction the request-window command drives. Bounds and
+        /// recording identity are supplied; the capability it reads carries an
+        /// inventory derived from the same raw stream, so the result stays an
+        /// unbound comparison candidate.
+        /// </summary>
+        internal static S2RequestAwareOracleV2Extractor ForWindow(
+            int sourceStart, int sourceStop, int windowStart, int windowStop,
+            string manifestPath, string movieSha256)
+        { return new S2RequestAwareOracleV2Extractor(sourceStart, sourceStop,
+            windowStart, windowStop, true, manifestPath, movieSha256); }
+
+        internal void ExtractWindow(string rawPath, string capabilityPath,
+            string attestationPath, string outputPath)
+        { Extract(rawPath, capabilityPath, attestationPath, outputPath); }
 
         /// <summary>Friend-test validation of the committed candidate shape.
         /// It deliberately does not create an extraction or publication route.</summary>
@@ -130,7 +163,7 @@ namespace OpenGGF.BizHawk.Headless
                 == "openggf.s2-preconsumption-request-manifest.v1",
                 "request manifest schema differs");
             Require(String(metadata, "rom_sha1") == S2AudioObserverProfile.RomSha1
-                && String(metadata, "bk2_sha256") == S2AudioObserverProfile.MovieSha256
+                && String(metadata, "bk2_sha256") == expectedMovieSha256
                 && String(metadata, "service_manifest_sha256")
                     == S2AudioObserverProfile.ServiceManifestSha256
                 && String(metadata, "rom_sha1") == String(capability, "rom_sha1")
@@ -874,7 +907,7 @@ namespace OpenGGF.BizHawk.Headless
                 && Integer(value,"window_exclusive_end")==windowEnd,
                 "capability identity differs");
             Require(String(value,"rom_sha1")==S2AudioObserverProfile.RomSha1
-                && String(value,"bk2_sha256")==S2AudioObserverProfile.MovieSha256
+                && String(value,"bk2_sha256")==expectedMovieSha256
                 && String(value,"service_manifest_sha256")==S2AudioObserverProfile.ServiceManifestSha256
                 && String(value,"candidate_manifest_sha256")==CandidateManifestSha256
                 && String(value,"candidate_patch_sha256")==CandidatePatchSha256
@@ -909,7 +942,7 @@ namespace OpenGGF.BizHawk.Headless
                 && Null(value,"cutoff_frontier_sha256")
                 && Null(value,"terminal_state_sha256");
             if(allUnbound)return;
-            Require(syntheticTestSeam,"unbound candidate has no authenticated inventory");
+            Require(derivedInventory,"unbound candidate has no authenticated inventory");
             foreach(string name in new[]{"harness_executable_sha256",
                 "base_event_sha256","all_event_sha256","marker_event_sha256",
                 "request_sha256","override_resume_sha256","pcm_sha256",

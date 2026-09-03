@@ -116,6 +116,22 @@ namespace OpenGGF.BizHawk.Headless
                 baseServiceManifestPath, host, output, firstRow, exclusiveEnd);
         }
 
+        /// <summary>
+        /// The bounded window producer the request-window command drives. The
+        /// interval and the recording identity are both supplied by the caller,
+        /// so no window and no movie is baked into this harness.
+        /// </summary>
+        internal static RequestAwareRawV3Candidate
+            OpenRequestAwareRawV3CandidateForWindow(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost host, TextWriter output,
+                int firstRow, int exclusiveEnd, string recordingSha256)
+        {
+            return RequestAwareRawV3Candidate.Open(candidateManifestPath,
+                baseServiceManifestPath, host, output, firstRow, exclusiveEnd,
+                recordingSha256);
+        }
+
         internal sealed partial class RequestAwareRawV3Candidate : IDisposable
         {
             private readonly IS2RequestAwareRawV3CandidateHost host;
@@ -133,7 +149,8 @@ namespace OpenGGF.BizHawk.Headless
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 CompleteRunAudioObserver observer,
                 S2PreconsumptionRequestObserver requestObserver,
-                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd,
+                string recordingSha256)
             {
                 host = candidateHost
                     ?? throw new ArgumentNullException("candidateHost");
@@ -148,7 +165,7 @@ namespace OpenGGF.BizHawk.Headless
                 exclusiveEnd = sourceExclusiveEnd;
                 sink = new RawV3Sink(host,
                     output ?? throw new ArgumentNullException("output"),
-                    firstRow, exclusiveEnd);
+                    firstRow, exclusiveEnd, recordingSha256);
             }
 
             internal static RequestAwareRawV3Candidate Open(
@@ -166,6 +183,17 @@ namespace OpenGGF.BizHawk.Headless
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
             {
+                return Open(candidateManifestPath, baseServiceManifestPath,
+                    candidateHost, output, sourceFirstRow, sourceExclusiveEnd,
+                    S2AudioObserverProfile.MovieSha256);
+            }
+
+            internal static RequestAwareRawV3Candidate Open(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost candidateHost,
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd,
+                string recordingSha256)
+            {
                 if (candidateHost == null)
                     throw new ArgumentNullException("candidateHost");
                 if (output == null) throw new ArgumentNullException("output");
@@ -182,7 +210,7 @@ namespace OpenGGF.BizHawk.Headless
                         observer, new S2PreconsumptionRequestObserver(
                             candidate, candidateHost, observer,
                             sourceExclusiveEnd), output, sourceFirstRow,
-                            sourceExclusiveEnd);
+                            sourceExclusiveEnd, recordingSha256);
                 }
                 catch
                 {
