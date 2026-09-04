@@ -133,7 +133,8 @@ namespace OpenGGF.BizHawk.Headless
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 CompleteRunAudioObserver observer,
                 S2PreconsumptionRequestObserver requestObserver,
-                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd,
+                string recordingSha256)
             {
                 host = candidateHost
                     ?? throw new ArgumentNullException("candidateHost");
@@ -148,7 +149,7 @@ namespace OpenGGF.BizHawk.Headless
                 exclusiveEnd = sourceExclusiveEnd;
                 sink = new RawV3Sink(host,
                     output ?? throw new ArgumentNullException("output"),
-                    firstRow, exclusiveEnd);
+                    firstRow, exclusiveEnd, recordingSha256);
             }
 
             internal static RequestAwareRawV3Candidate Open(
@@ -166,6 +167,17 @@ namespace OpenGGF.BizHawk.Headless
                 IS2RequestAwareRawV3CandidateHost candidateHost,
                 TextWriter output, int sourceFirstRow, int sourceExclusiveEnd)
             {
+                return Open(candidateManifestPath, baseServiceManifestPath,
+                    candidateHost, output, sourceFirstRow, sourceExclusiveEnd,
+                    S2AudioObserverProfile.MovieSha256);
+            }
+
+            internal static RequestAwareRawV3Candidate Open(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost candidateHost,
+                TextWriter output, int sourceFirstRow, int sourceExclusiveEnd,
+                string recordingSha256)
+            {
                 if (candidateHost == null)
                     throw new ArgumentNullException("candidateHost");
                 if (output == null) throw new ArgumentNullException("output");
@@ -182,7 +194,7 @@ namespace OpenGGF.BizHawk.Headless
                         observer, new S2PreconsumptionRequestObserver(
                             candidate, candidateHost, observer,
                             sourceExclusiveEnd), output, sourceFirstRow,
-                            sourceExclusiveEnd);
+                            sourceExclusiveEnd, recordingSha256);
                 }
                 catch
                 {

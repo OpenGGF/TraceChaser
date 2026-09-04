@@ -14,6 +14,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2CompleteAudioRawSinkTests stream an exact bounded raw envelope",
                 StreamsExactBoundedRawEnvelope));
             tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests name the recording actually captured",
+                NamesTheRecordingActuallyCaptured));
+            tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests expose only a pinned production capture",
                 ExposesOnlyPinnedProductionCapture));
             tests.Add(new TestMain.TestCase(
@@ -149,6 +152,44 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        /// <summary>
+        /// A capture must name the movie it ran. Writing the profile's first
+        /// pinned identity regardless made every capture of any other
+        /// recording claim to come from the complete run.
+        /// </summary>
+        private static void NamesTheRecordingActuallyCaptured()
+        {
+            string other = new string('7', 64);
+            var output = new StringWriter();
+            var sink = new S2CompleteAudioRawSink(
+                new FakeStateSource(new byte[0x2000]), output,
+                S2AudioObserverProfile.FirstRow,
+                S2AudioObserverProfile.ExclusiveEnd, other);
+            sink.Begin(EmptyFrontier());
+            sink.Complete(EmptyFrontier());
+
+            JObject metadata = JObject.Parse(output.ToString().Split(
+                new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)[0]);
+            AssertEx.Equal(other, (string)metadata["bk2_sha256"]);
+
+            var pinned = new StringWriter();
+            var defaulted = new S2CompleteAudioRawSink(
+                new FakeStateSource(new byte[0x2000]), pinned);
+            defaulted.Begin(EmptyFrontier());
+            defaulted.Complete(EmptyFrontier());
+            AssertEx.Equal(S2AudioObserverProfile.MovieSha256,
+                (string)JObject.Parse(pinned.ToString().Split(
+                    new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)[0])
+                    ["bk2_sha256"]);
+
+            AssertEx.Throws<ArgumentNullException>(
+                () => new S2CompleteAudioRawSink(
+                    new FakeStateSource(new byte[0x2000]), new StringWriter(),
+                    S2AudioObserverProfile.FirstRow,
+                    S2AudioObserverProfile.ExclusiveEnd, null),
+                "recordingSha256");
         }
 
         private static void PreservesResetServiceAbsentBeginSource()

@@ -58,7 +58,22 @@ namespace OpenGGF.BizHawk.Headless
 
         internal S2CompleteAudioRawSink(IS2CompleteAudioStateSource stateSource,
             TextWriter writer, int sourceFirstRow, int sourceExclusiveEnd)
+            : this(stateSource, writer, sourceFirstRow, sourceExclusiveEnd,
+                S2AudioObserverProfile.MovieSha256)
+        { }
+
+        /// <summary>
+        /// The recording identity is supplied rather than assumed, so a capture
+        /// names the movie it actually ran. Callers that capture the pinned
+        /// complete run keep the shorter constructor and its default.
+        /// </summary>
+        internal S2CompleteAudioRawSink(IS2CompleteAudioStateSource stateSource,
+            TextWriter writer, int sourceFirstRow, int sourceExclusiveEnd,
+            string recordingSha256)
         {
+            if (string.IsNullOrEmpty(recordingSha256))
+                throw new ArgumentNullException("recordingSha256");
+            movieSha256 = recordingSha256;
             if (sourceFirstRow < 0 || sourceExclusiveEnd <= sourceFirstRow)
                 throw new ArgumentOutOfRangeException("sourceFirstRow");
             state = stateSource ?? throw new ArgumentNullException("stateSource");
@@ -66,6 +81,8 @@ namespace OpenGGF.BizHawk.Headless
             firstRow = sourceFirstRow;
             exclusiveEnd = sourceExclusiveEnd;
         }
+
+        private readonly string movieSha256;
 
         public void Begin(CompleteRunAudioObserver.CutoffFrontier boundary)
         {
@@ -75,7 +92,7 @@ namespace OpenGGF.BizHawk.Headless
             {
                 ["type"]="metadata", ["schema"]=Schema,
                 ["rom_sha1"]=S2AudioObserverProfile.RomSha1,
-                ["bk2_sha256"]=S2AudioObserverProfile.MovieSha256,
+                ["bk2_sha256"]=movieSha256,
                 ["service_manifest_sha256"]=S2AudioObserverProfile.ServiceManifestSha256,
                 ["first_row"]=firstRow,
                 ["exclusive_end"]=exclusiveEnd,

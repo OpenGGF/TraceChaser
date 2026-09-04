@@ -29,6 +29,12 @@ namespace OpenGGF.BizHawk.Headless
 
         internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer,
             int sourceFirstRow, int sourceExclusiveEnd)
+            : this(state, writer, sourceFirstRow, sourceExclusiveEnd,
+                S2AudioObserverProfile.MovieSha256)
+        { }
+
+        internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer,
+            int sourceFirstRow, int sourceExclusiveEnd, string recordingSha256)
         {
             if (state == null) throw new ArgumentNullException("state");
             if (sourceFirstRow < 0 || sourceExclusiveEnd <= sourceFirstRow)
@@ -37,7 +43,7 @@ namespace OpenGGF.BizHawk.Headless
             firstRow = sourceFirstRow;
             exclusiveEnd = sourceExclusiveEnd;
             v2 = new S2CompleteAudioRawSink(state, v2Output, firstRow,
-                exclusiveEnd);
+                exclusiveEnd, recordingSha256);
         }
 
         internal RawV3Sink(IS2CompleteAudioStateSource state, TextWriter writer)
