@@ -31,6 +31,11 @@ namespace OpenGGF.BizHawk.Headless
         internal const string AuthorityId = "s2-request-candidate-unbound";
         private const int MarkerKind = 10;
         private const int MarkerValue = 3;
+        internal const string DriverStateSchema = "openggf.s2-driver-state-reference.v2";
+        private const int DriverRamRangeId = 3;
+        private const int DriverRamStart = 0x12FE;
+        private const int DriverRamExclusiveEnd = 0x2000;
+        private const int VIntServiceKind = 3;
 
         /// <summary>Names the three files an extraction writes.</summary>
         internal sealed class ExtractionOutputs
@@ -156,6 +161,250 @@ namespace OpenGGF.BizHawk.Headless
                 + "Capability SHA-256: " + Sha256File(outputs.Capability) + "\n"
                 + "Attestation SHA-256: " + Sha256File(outputs.Attestation) + "\n");
             return outputs;
+        }
+
+
+        /// <summary>
+        /// The bounded S2 driver-state reference. One row per completed driver
+        /// service, sampled by the observer core as a completion snapshot on
+        /// the driver's own service boundaries: the two zVInt returns, the
+        /// common exit in zUpdateDAC at Z80 PC 00E7h and the DAC-queued exit at
+        /// 010Fh (s2.sounddriver.asm:496-502 and :531-535), plus the
+        /// SoundDriverLoad release. Never mid-invocation, and never on a frame
+        /// boundary: a service that overruns its frame completes in a later one
+        /// and owns its whole span of writes.
+        ///
+        /// Writes are partitioned by the same boundary, so every YM/PSG write
+        /// appears exactly once in stream order, and the request markers
+        /// observed since the previous boundary ride along so a request
+        /// resolves against the service that consumed it. The frame field is
+        /// provenance only: nothing compared is derived from it.
+        /// </summary>
+        internal static void CaptureDriverState(string romPath, string moviePath,
+            string movieSha256, string oracleManifestPath, int firstRow,
+            int exclusiveEnd, string outputPath,
+            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost, TextWriter stdout)
+        {
+            if (openHost == null) throw new ArgumentNullException("openHost");
+            if (stdout == null) throw new ArgumentNullException("stdout");
+            RequireInterval(firstRow, exclusiveEnd);
+            RequireAbsentAbsolute(outputPath, "driver-state output");
+            RequireExistingAbsolute(oracleManifestPath, "oracle manifest");
+            S2AudioObserverProfile.ValidateRom(romPath);
+            string actualMovie = Sha256File(moviePath);
+            if (!string.Equals(actualMovie,
+                RequireHex(movieSha256, "movie SHA-256"), StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "The supplied movie SHA-256 does not match " + moviePath
+                    + ": " + actualMovie + ".");
+            }
+            byte[] manifestBytes = File.ReadAllBytes(oracleManifestPath);
+            string manifestSha256 = Digest(manifestBytes);
+            Bk2Movie movie = Bk2Reader.Read(moviePath);
+            if (movie.FrameCount < exclusiveEnd)
+            {
+                throw new InvalidDataException("The movie has "
+                    + movie.FrameCount.ToString(CultureInfo.InvariantCulture)
+                    + " rows, short of the requested window end "
+                    + exclusiveEnd.ToString(CultureInfo.InvariantCulture) + ".");
+            }
+
+            using (GpgxHost host = (GpgxHost)openHost(romPath, movie.SyncSettings))
+            using (var writer = new StreamWriter(outputPath, false,
+                new UTF8Encoding(false)))
+            {
+                CompleteRunAudioObserver observer =
+                    GpgxAudioServiceManifest.LoadS2RequestCandidate(manifestBytes,
+                        new S2AudioObserverProfile.PrepublicationApi(
+                            host.CreateAudioTraceApi()));
+                writer.Write(new JObject
+                {
+                    ["row"] = "metadata",
+                    ["schema"] = DriverStateSchema,
+                    ["rom_sha1"] = S2AudioObserverProfile.RomSha1,
+                    ["bk2_sha256"] = actualMovie,
+                    ["first_row"] = firstRow,
+                    ["exclusive_end"] = exclusiveEnd,
+                    ["snapshot_start"] = DriverRamStart,
+                    ["snapshot_exclusive_end"] = DriverRamExclusiveEnd,
+                    ["sampling"] = "zvint_return_completion_snapshot",
+                    ["tick_semantics"] = "one_completed_driver_service",
+                    ["writes_partition"] = "service_completion_boundary",
+                    ["frame_field"] = "provenance_only",
+                    ["production_bound"] = false,
+                    ["manifest"] = Path.GetFileName(oracleManifestPath),
+                    ["manifest_sha256"] = manifestSha256
+                }.ToString(Formatting.None) + "\n");
+
+                int port0Latch = 0, port1Latch = 0;
+                int ticks = 0, zeroServiceFrames = 0, multiServiceFrames = 0;
+                long writeCount = 0, residualWrites = 0;
+                var pendingWrites = new JArray();
+                var pendingRequests = new JArray();
+                var ram = new byte[DriverRamExclusiveEnd - DriverRamStart];
+                var seen = new bool[ram.Length];
+                bool collecting = false, complete = false;
+                using (IEnumerator<Bk2Frame> rows =
+                    movie.OpenFrameStream().GetEnumerator())
+                {
+                    for (int frame = 0; frame < exclusiveEnd; frame++)
+                    {
+                        if (!rows.MoveNext())
+                            throw new InvalidDataException(
+                                "The movie ended before the requested window.");
+                        Bk2Frame current = rows.Current;
+                        int frameTicks = 0;
+                        int published = frame;
+                        observer.CaptureFrame(
+                            () => { S1TraceCaptureRunner.ApplyFrame(current, host); host.Advance(); },
+                            (events, count) =>
+                            {
+                                for (int index = 0; index < count; index++)
+                                {
+                                    GpgxAudioTraceEvent value = events[index];
+                                    switch (value.Kind)
+                                    {
+                                        case 3:
+                                            if (value.Subject == 0) { port0Latch = value.Value; break; }
+                                            if (value.Subject == 2) { port1Latch = value.Value; break; }
+                                            {
+                                                int port = value.Subject < 2 ? 0 : 1;
+                                                pendingWrites.Add(new JArray("ym", port,
+                                                    port == 0 ? port0Latch : port1Latch,
+                                                    value.Value, value.SourceCpu));
+                                            }
+                                            break;
+                                        case 4:
+                                            pendingWrites.Add(new JArray("psg", value.Value,
+                                                value.SourceCpu));
+                                            break;
+                                        case 10:
+                                            // The request marker rides along as an
+                                            // observation; it carries no compared value.
+                                            pendingRequests.Add(new JObject
+                                            {
+                                                ["marker"] = value.Subject,
+                                                ["a7"] = value.Payload.ToString(
+                                                    CultureInfo.InvariantCulture)
+                                            });
+                                            break;
+                                        case 5:
+                                            if (value.Subject != DriverRamRangeId) break;
+                                            Array.Clear(ram, 0, ram.Length);
+                                            Array.Clear(seen, 0, seen.Length);
+                                            collecting = true; complete = false;
+                                            break;
+                                        case 6:
+                                            if (value.Subject != DriverRamRangeId || !collecting) break;
+                                            CopySnapshotPayload(value, ram, seen);
+                                            break;
+                                        case 7:
+                                            if (value.Subject != DriverRamRangeId || !collecting) break;
+                                            if (value.Offset != ram.Length)
+                                                throw new InvalidDataException(
+                                                    "The driver-RAM snapshot ended at offset "
+                                                    + value.Offset + ".");
+                                            for (int b = 0; b < ram.Length; b++)
+                                                if (!seen[b])
+                                                    throw new InvalidDataException(
+                                                        "The driver-RAM snapshot missed byte " + b + ".");
+                                            collecting = false; complete = true;
+                                            break;
+                                        case 2:
+                                            // Only the vertical-interrupt service
+                                            // defines a tick here. SoundDriverLoad
+                                            // completes long before any mid-run
+                                            // window and carries the full-RAM range
+                                            // rather than this one.
+                                            if (value.ServiceKindId != VIntServiceKind) break;
+                                            if (!complete)
+                                                throw new InvalidDataException(
+                                                    "Service kind " + value.ServiceKindId
+                                                    + " completed without a driver-RAM snapshot"
+                                                    + " at movie row " + published + ".");
+                                            frameTicks++;
+                                            if (published >= firstRow)
+                                            {
+                                                var tick = new JObject
+                                                {
+                                                    ["row"] = "tick",
+                                                    ["tick"] = ticks,
+                                                    ["frame"] = published,
+                                                    ["lag"] = host.IsLagged,
+                                                    ["service"] = "vint",
+                                                    ["writes"] = pendingWrites,
+                                                    ["requests"] = pendingRequests,
+                                                    ["ram"] = HexBytes(ram)
+                                                };
+                                                writer.Write(tick.ToString(Formatting.None) + "\n");
+                                                ticks++;
+                                                // Counted over the published window
+                                                // only; writes before it belong to
+                                                // services this reference never shows.
+                                                writeCount += pendingWrites.Count;
+                                            }
+                                            pendingWrites = new JArray();
+                                            pendingRequests = new JArray();
+                                            complete = false;
+                                            break;
+                                    }
+                                }
+                            });
+                        if (frame >= firstRow)
+                        {
+                            if (frameTicks == 0) zeroServiceFrames++;
+                            else if (frameTicks > 1) multiServiceFrames++;
+                        }
+                    }
+                }
+                // Writes after the final completed service in the window belong
+                // to no published tick.
+                residualWrites = pendingWrites.Count;
+                writer.Write(new JObject
+                {
+                    ["row"] = "terminal",
+                    ["ticks"] = ticks,
+                    ["frames"] = exclusiveEnd - firstRow,
+                    ["write_count"] = writeCount,
+                    ["residual_write_count"] = residualWrites,
+                    ["zero_service_frames"] = zeroServiceFrames,
+                    ["multi_service_frames"] = multiServiceFrames
+                }.ToString(Formatting.None) + "\n");
+                writer.Flush();
+                stdout.Write("Driver-state output: " + outputPath + "\n"
+                    + "Ticks: " + ticks.ToString(CultureInfo.InvariantCulture) + "\n"
+                    + "Zero-service frames: "
+                    + zeroServiceFrames.ToString(CultureInfo.InvariantCulture) + "\n"
+                    + "Multi-service frames: "
+                    + multiServiceFrames.ToString(CultureInfo.InvariantCulture) + "\n");
+            }
+            stdout.Write("Driver-state SHA-256: " + Sha256File(outputPath) + "\n");
+        }
+
+        private static void CopySnapshotPayload(GpgxAudioTraceEvent value,
+            byte[] ram, bool[] seen)
+        {
+            int offset = (int)value.Offset;
+            int length = value.PayloadLength;
+            if (length < 0 || length > 8 || offset < 0 || offset + length > ram.Length)
+                throw new InvalidDataException(
+                    "The driver-RAM snapshot chunk is out of range at offset " + offset + ".");
+            ulong payload = value.Payload;
+            for (int index = 0; index < length; index++)
+            {
+                ram[offset + index] = (byte)(payload & 0xFF);
+                seen[offset + index] = true;
+                payload >>= 8;
+            }
+        }
+
+        private static string HexBytes(byte[] value)
+        {
+            var builder = new StringBuilder(value.Length * 2);
+            for (int index = 0; index < value.Length; index++)
+                builder.Append(value[index].ToString("x2", CultureInfo.InvariantCulture));
+            return builder.ToString();
         }
 
         /// <summary>

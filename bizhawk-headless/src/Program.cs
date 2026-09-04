@@ -811,6 +811,7 @@ namespace BizHawk.Headless.Gpgx
     {
         internal const string CaptureMode = "capture";
         internal const string ExtractMode = "extract";
+        internal const string DriverStateMode = "driver-state";
 
         private RequestWindowCommandOptions(string mode, string romPath,
             string moviePath, string movieSha256, string rawPath,
@@ -884,11 +885,12 @@ namespace BizHawk.Headless.Gpgx
             }
 
             string mode = Required(values, "--request-window-mode");
-            if (mode != CaptureMode && mode != ExtractMode)
+            if (mode != CaptureMode && mode != ExtractMode
+                && mode != DriverStateMode)
             {
                 throw new ArgumentException(
                     "Argument --request-window-mode must be exactly"
-                    + " \"capture\" or \"extract\".");
+                    + " \"capture\", \"extract\" or \"driver-state\".");
             }
             int firstRow = Row(Required(values, "--first-row"), "--first-row");
             int exclusiveEnd = Row(Required(values, "--exclusive-end"),
@@ -900,6 +902,19 @@ namespace BizHawk.Headless.Gpgx
             }
             string serviceManifest = ExistingAbsoluteFile(
                 Required(values, "--service-manifest"), "service-manifest");
+            if (mode == DriverStateMode)
+            {
+                Reject(values, "--raw", "--capability-template",
+                    "--output-directory", "--candidate-manifest");
+                return new RequestWindowCommandOptions(mode,
+                    ExistingAbsoluteFile(Required(values, "--rom"), "ROM"),
+                    ExistingAbsoluteFile(Required(values, "--movie"), "movie"),
+                    Sha256(Required(values, "--movie-sha256")),
+                    null, serviceManifest, null, null,
+                    ExistingAbsoluteDirectory(Required(values, "--bizhawk-home")),
+                    firstRow, exclusiveEnd,
+                    CreateNewAbsoluteFile(Required(values, "--output")), null);
+            }
             if (mode == CaptureMode)
             {
                 Reject(values, "--raw", "--capability-template",
@@ -1553,7 +1568,21 @@ namespace BizHawk.Headless.Gpgx
                 if (stdout == null) throw new ArgumentNullException("stdout");
                 RequestWindowCommandOptions options =
                     RequestWindowCommandOptions.Parse(args);
-                if (options.Mode == RequestWindowCommandOptions.CaptureMode)
+                if (options.Mode == RequestWindowCommandOptions.DriverStateMode)
+                {
+                    Environment.SetEnvironmentVariable("BIZHAWK_HOME",
+                        options.BizHawkHome);
+                    S2AudioObserverProfile.VerifyInstallation(options.BizHawkHome);
+                    using (new NativeStandardOutputSilencer())
+                    {
+                        S2RequestWindowProducer.CaptureDriverState(options.RomPath,
+                            options.MoviePath, options.MovieSha256,
+                            options.ServiceManifestPath, options.FirstRow,
+                            options.ExclusiveEnd, options.OutputPath, openHost,
+                            stdout);
+                    }
+                }
+                else if (options.Mode == RequestWindowCommandOptions.CaptureMode)
                 {
                     Environment.SetEnvironmentVariable("BIZHAWK_HOME",
                         options.BizHawkHome);
