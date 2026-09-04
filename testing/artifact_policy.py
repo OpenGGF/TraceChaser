@@ -28,6 +28,21 @@ EXACT_CONTRACT_PATHS = frozenset(
     }
 )
 
+# Committed JSON Schema documents for the audio override-resume contract
+# bundle. The glob is deliberately narrow: only a direct child of
+# contracts/audio/ whose full filename ends in ".schema.json" is curated;
+# it does not widen to arbitrary contracts/audio/ content or to nested
+# directories.
+CURATED_AUDIO_SCHEMA_DIRECTORY = "contracts/audio"
+CURATED_AUDIO_SCHEMA_SUFFIX = ".schema.json"
+
+
+def _is_curated_audio_schema_path(normalized: str) -> bool:
+    parent, _, name = normalized.rpartition("/")
+    return parent == CURATED_AUDIO_SCHEMA_DIRECTORY and name.endswith(
+        CURATED_AUDIO_SCHEMA_SUFFIX
+    )
+
 EXACT_LICENSE_PATHS = frozenset(
     {
         "LICENSE",
@@ -155,6 +170,8 @@ def path_violations(path: str, curated_contract_member: bool = False) -> list[st
 
     if normalized.startswith("contracts/"):
         if normalized in EXACT_CONTRACT_PATHS:
+            pass
+        elif _is_curated_audio_schema_path(normalized):
             pass
         elif curated_contract_member:
             pass
