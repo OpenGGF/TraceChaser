@@ -116,6 +116,22 @@ namespace OpenGGF.BizHawk.Headless
                 baseServiceManifestPath, host, output, firstRow, exclusiveEnd);
         }
 
+        /// <summary>
+        /// The bounded window producer the request-window command drives. The
+        /// interval and the recording identity are both supplied by the caller,
+        /// so no window and no movie is baked into this harness.
+        /// </summary>
+        internal static RequestAwareRawV3Candidate
+            OpenRequestAwareRawV3CandidateForWindow(
+                string candidateManifestPath, string baseServiceManifestPath,
+                IS2RequestAwareRawV3CandidateHost host, TextWriter output,
+                int firstRow, int exclusiveEnd, string recordingSha256)
+        {
+            return RequestAwareRawV3Candidate.Open(candidateManifestPath,
+                baseServiceManifestPath, host, output, firstRow, exclusiveEnd,
+                recordingSha256);
+        }
+
         internal sealed partial class RequestAwareRawV3Candidate : IDisposable
         {
             private readonly IS2RequestAwareRawV3CandidateHost host;

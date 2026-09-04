@@ -801,6 +801,247 @@ namespace BizHawk.Headless.Gpgx
     }
 
     /// <summary>
+    /// Command-line contract for the bounded S2 request-window producer. Every
+    /// input is explicit: the recording and its SHA-256, the movie-row
+    /// interval, the manifests, the BizHawk installation, and the output. No
+    /// window, recording or emulator build is pinned in the harness, and the
+    /// payload it produces stays an unbound comparison candidate.
+    /// </summary>
+    internal sealed class RequestWindowCommandOptions
+    {
+        internal const string CaptureMode = "capture";
+        internal const string ExtractMode = "extract";
+
+        private RequestWindowCommandOptions(string mode, string romPath,
+            string moviePath, string movieSha256, string rawPath,
+            string serviceManifestPath, string candidateManifestPath,
+            string capabilityTemplatePath, string bizhawkHome, int firstRow,
+            int exclusiveEnd, string outputPath, string outputDirectory)
+        {
+            Mode = mode;
+            RomPath = romPath;
+            MoviePath = moviePath;
+            MovieSha256 = movieSha256;
+            RawPath = rawPath;
+            ServiceManifestPath = serviceManifestPath;
+            CandidateManifestPath = candidateManifestPath;
+            CapabilityTemplatePath = capabilityTemplatePath;
+            BizHawkHome = bizhawkHome;
+            FirstRow = firstRow;
+            ExclusiveEnd = exclusiveEnd;
+            OutputPath = outputPath;
+            OutputDirectory = outputDirectory;
+        }
+
+        internal string Mode { get; private set; }
+        internal string RomPath { get; private set; }
+        internal string MoviePath { get; private set; }
+        internal string MovieSha256 { get; private set; }
+        internal string RawPath { get; private set; }
+        internal string ServiceManifestPath { get; private set; }
+        internal string CandidateManifestPath { get; private set; }
+        internal string CapabilityTemplatePath { get; private set; }
+        internal string BizHawkHome { get; private set; }
+        internal int FirstRow { get; private set; }
+        internal int ExclusiveEnd { get; private set; }
+        internal string OutputPath { get; private set; }
+        internal string OutputDirectory { get; private set; }
+
+        internal static bool IsRequested(string[] args)
+        {
+            if (args == null) return false;
+            foreach (string argument in args)
+            {
+                if (argument == "--request-window-mode") return true;
+            }
+            return false;
+        }
+
+        internal static RequestWindowCommandOptions Parse(string[] args)
+        {
+            if (args == null) throw new ArgumentNullException("args");
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (int index = 0; index < args.Length; index += 2)
+            {
+                string name = args[index];
+                if (!IsSupported(name))
+                {
+                    throw new ArgumentException(
+                        "Unknown request-window argument: " + name + ".");
+                }
+                if (index + 1 >= args.Length
+                    || string.IsNullOrEmpty(args[index + 1]))
+                {
+                    throw new ArgumentException(
+                        "Argument " + name + " requires a value.");
+                }
+                if (values.ContainsKey(name))
+                {
+                    throw new ArgumentException(
+                        "Duplicate request-window argument: " + name + ".");
+                }
+                values.Add(name, args[index + 1]);
+            }
+
+            string mode = Required(values, "--request-window-mode");
+            if (mode != CaptureMode && mode != ExtractMode)
+            {
+                throw new ArgumentException(
+                    "Argument --request-window-mode must be exactly"
+                    + " \"capture\" or \"extract\".");
+            }
+            int firstRow = Row(Required(values, "--first-row"), "--first-row");
+            int exclusiveEnd = Row(Required(values, "--exclusive-end"),
+                "--exclusive-end");
+            if (exclusiveEnd <= firstRow)
+            {
+                throw new ArgumentException(
+                    "The request window is not a valid interval.");
+            }
+            string serviceManifest = ExistingAbsoluteFile(
+                Required(values, "--service-manifest"), "service-manifest");
+            if (mode == CaptureMode)
+            {
+                Reject(values, "--raw", "--capability-template",
+                    "--output-directory");
+                return new RequestWindowCommandOptions(mode,
+                    ExistingAbsoluteFile(Required(values, "--rom"), "ROM"),
+                    ExistingAbsoluteFile(Required(values, "--movie"), "movie"),
+                    Sha256(Required(values, "--movie-sha256")),
+                    null, serviceManifest,
+                    ExistingAbsoluteFile(Required(values, "--candidate-manifest"),
+                        "candidate-manifest"),
+                    null,
+                    ExistingAbsoluteDirectory(Required(values, "--bizhawk-home")),
+                    firstRow, exclusiveEnd,
+                    CreateNewAbsoluteFile(Required(values, "--output")), null);
+            }
+            Reject(values, "--rom", "--movie", "--movie-sha256",
+                "--candidate-manifest", "--bizhawk-home", "--output");
+            return new RequestWindowCommandOptions(mode, null, null, null,
+                ExistingAbsoluteFile(Required(values, "--raw"), "raw"),
+                serviceManifest, null,
+                ExistingAbsoluteFile(Required(values, "--capability-template"),
+                    "capability-template"),
+                null, firstRow, exclusiveEnd, null,
+                ExistingAbsoluteDirectory(
+                    Required(values, "--output-directory")));
+        }
+
+        private static bool IsSupported(string name)
+        {
+            return name == "--request-window-mode"
+                || name == "--rom"
+                || name == "--movie"
+                || name == "--movie-sha256"
+                || name == "--raw"
+                || name == "--service-manifest"
+                || name == "--candidate-manifest"
+                || name == "--capability-template"
+                || name == "--bizhawk-home"
+                || name == "--first-row"
+                || name == "--exclusive-end"
+                || name == "--output"
+                || name == "--output-directory";
+        }
+
+        private static void Reject(Dictionary<string, string> values,
+            params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (values.ContainsKey(name))
+                {
+                    throw new ArgumentException("Argument " + name
+                        + " is not supported in this request-window mode.");
+                }
+            }
+        }
+
+        private static string Required(Dictionary<string, string> values,
+            string name)
+        {
+            string value;
+            if (!values.TryGetValue(name, out value))
+            {
+                throw new ArgumentException(
+                    "Argument " + name + " is required.");
+            }
+            return value;
+        }
+
+        private static int Row(string value, string name)
+        {
+            int parsed;
+            if (!int.TryParse(value, NumberStyles.None,
+                CultureInfo.InvariantCulture, out parsed))
+            {
+                throw new ArgumentException("Argument " + name
+                    + " must be a non-negative movie row.");
+            }
+            return parsed;
+        }
+
+        private static string Sha256(string value)
+        {
+            if (value == null || value.Length != 64)
+            {
+                throw new ArgumentException("Argument --movie-sha256 must be"
+                    + " 64 lowercase hexadecimal characters.");
+            }
+            foreach (char character in value)
+            {
+                if (!((character >= '0' && character <= '9')
+                    || (character >= 'a' && character <= 'f')))
+                {
+                    throw new ArgumentException("Argument --movie-sha256 must"
+                        + " be 64 lowercase hexadecimal characters.");
+                }
+            }
+            return value;
+        }
+
+        private static string ExistingAbsoluteFile(string path, string label)
+        {
+            if (!Path.IsPathRooted(path) || !File.Exists(path))
+            {
+                throw new ArgumentException("The " + label
+                    + " path must be an existing absolute file.");
+            }
+            return Path.GetFullPath(path);
+        }
+
+        private static string ExistingAbsoluteDirectory(string path)
+        {
+            if (!Path.IsPathRooted(path) || !Directory.Exists(path))
+            {
+                throw new ArgumentException(
+                    "The path must be an existing absolute directory: "
+                    + path + ".");
+            }
+            return Path.GetFullPath(path);
+        }
+
+        private static string CreateNewAbsoluteFile(string path)
+        {
+            if (!Path.IsPathRooted(path)
+                || string.IsNullOrEmpty(Path.GetFileName(path)))
+            {
+                throw new ArgumentException(
+                    "Output path must be an absolute file path.");
+            }
+            string fullPath = Path.GetFullPath(path);
+            if (LinuxPathEntry.Exists(fullPath))
+            {
+                throw new IOException(
+                    "Request-window output already exists and will not be"
+                    + " replaced: " + fullPath);
+            }
+            return fullPath;
+        }
+    }
+
+    /// <summary>
     /// Closed command-line contract for production-owned raw complete-audio
     /// reference captures. It deliberately does not share the broad trace
     /// parser: the only selectable behavior is the game-owned pinned runner.
@@ -988,6 +1229,10 @@ namespace BizHawk.Headless.Gpgx
                     Console.Out.WriteLine(
                         "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED_DURABLY");
                     return 0;
+                }
+                if (RequestWindowCommandOptions.IsRequested(args))
+                {
+                    return RunRequestWindow(args, Console.Out, Console.Error);
                 }
                 if (CompleteAudioCommandOptions.IsRequested(args))
                 {
@@ -1285,6 +1530,62 @@ namespace BizHawk.Headless.Gpgx
         /// file. No caller-supplied observer, address, profile or test filter
         /// participates in the capture.
         /// </summary>
+        /// <summary>
+        /// The bounded S2 request-window command. Capture writes one raw-v3
+        /// stream for one explicit interval of one explicit recording;
+        /// extraction projects such a stream onto its bounded comparison
+        /// payload. Both stay measurement-only: the payload carries
+        /// production_bound:false and binds nothing.
+        /// </summary>
+        internal static int RunRequestWindow(
+            string[] args, TextWriter stdout, TextWriter stderr)
+        {
+            return RunRequestWindow(args, stdout, stderr,
+                (romPath, syncSettings) => GpgxHost.Open(romPath, syncSettings));
+        }
+
+        internal static int RunRequestWindow(
+            string[] args, TextWriter stdout, TextWriter stderr,
+            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost)
+        {
+            try
+            {
+                if (stdout == null) throw new ArgumentNullException("stdout");
+                RequestWindowCommandOptions options =
+                    RequestWindowCommandOptions.Parse(args);
+                if (options.Mode == RequestWindowCommandOptions.CaptureMode)
+                {
+                    Environment.SetEnvironmentVariable("BIZHAWK_HOME",
+                        options.BizHawkHome);
+                    S2AudioObserverProfile.VerifyInstallation(
+                        options.BizHawkHome);
+                    using (new NativeStandardOutputSilencer())
+                    {
+                        S2RequestWindowProducer.Capture(options.RomPath,
+                            options.MoviePath, options.MovieSha256,
+                            options.ServiceManifestPath,
+                            options.CandidateManifestPath, options.FirstRow,
+                            options.ExclusiveEnd, options.OutputPath, openHost,
+                            stdout);
+                    }
+                }
+                else
+                {
+                    S2RequestWindowProducer.Extract(options.RawPath,
+                        options.ServiceManifestPath,
+                        options.CapabilityTemplatePath, options.FirstRow,
+                        options.ExclusiveEnd, options.OutputDirectory, stdout);
+                }
+                stdout.Flush();
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                ReportFailure(stderr, exception);
+                return 1;
+            }
+        }
+
         private static int RunCompleteAudio(
             string[] args, TextWriter stdout, TextWriter stderr)
         {
