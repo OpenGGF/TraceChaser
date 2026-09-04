@@ -208,7 +208,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             lines.Add(new JObject
             {
                 ["type"] = "metadata",
-                ["schema"] = "openggf.s2-complete-run-audio-raw.v3",
+                ["schema"] = "openggf.s2-complete-run-audio-raw.v4",
                 ["rom_sha1"] = new string('c', 40),
                 ["bk2_sha256"] = new string('b', 64),
                 ["service_manifest_sha256"] = new string('e', 64),
@@ -239,7 +239,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     transfers.Add(new JObject
                     {
                         ["row"] = row, ["order"] = 0,
-                        ["global_transfer_ordinal"] = 0, ["request"] = 0x81,
+                        ["global_transfer_ordinal"] = 0, ["site"] = "sfx",
+                        ["request"] = 0x81,
                         ["slot"] = 0, ["pc"] = 0x10d6, ["a7"] = "4660",
                         ["native_ordinal"] = 0, ["source_cpu"] = 2,
                         ["service_token"] = 0, ["service_kind"] = 0,

@@ -1990,7 +1990,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string state = new string('0', 0x4000);
             var lines = new List<string>();
             lines.Add(Json(new JObject { ["type"]="metadata",
-                ["schema"]="openggf.s2-complete-run-audio-raw.v3",
+                ["schema"]="openggf.s2-complete-run-audio-raw.v4",
                 ["rom_sha1"]="8bca5dcef1af3e00098666fd892dc1c2a76333f9", ["bk2_sha256"]="e850798f882b8c580aad148bc97cb50f260cae1d336dd649fe2f4dfae6796aa5",
                 ["service_manifest_sha256"]="ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0", ["first_row"]=10148,
                 ["exclusive_end"]=10900, ["state_start"]=0,
@@ -2130,7 +2130,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static JObject Transfer(int row,int order,int global,int request,int slot,
             int nativeOrdinal,string a7)
         { return new JObject { ["row"]=row, ["order"]=order,
-            ["global_transfer_ordinal"]=global, ["request"]=request,["slot"]=slot,
+            ["global_transfer_ordinal"]=global, ["site"]="sfx",
+            ["request"]=request,["slot"]=slot,
             ["pc"]=0x10D6,["a7"]=a7,["native_ordinal"]=nativeOrdinal,
             ["source_cpu"]=2,["service_token"]=0,["service_kind"]=0,["depth"]=0,
             ["active_service_owner"]=new JObject { ["token"]=0,["kind"]=0,["depth"]=0 } }; }

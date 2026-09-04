@@ -46,3 +46,34 @@ recorded session signal. It is not a convenient truncation flag.
 The dedicated S2 special-stage Lua workflow is retained for producer research;
 ordinary and complete-run v5 publication uses the native segmenter. Validate
 the whole run root so manifest membership and order are checked together.
+
+## The request window's two transfer sites
+
+`sndDriverInput` makes two stores into Z80 RAM and the observer watches both.
+The SFX store, `move.b d0,zVar.Queue0(a1,d1.w)` inside `.loop`
+(`docs/s2disasm/s2.asm:1317-1326`), sits at PC `$10D6`. The music store,
+`move.b d0,zVar.QueueToPlay(a1)` at `.isNotPauseCommand` which the
+disassembly labels `loc_10C0` (`:1302-1304`), sits at PC `$10C0`. Both are
+fixed in `gpgx-audio-service-manifest-s2-request-v3.json` and opcode-checked
+at load; neither is caller-selectable.
+
+Every transfer in the payload carries a `site` of `sfx` or `music`, and the
+sink and extractor validate each site against its own rules. An `sfx` record
+keeps every guarantee it always had: a queue slot of 0 to 3, PC `$10D6`, a
+strictly increasing native ordinal, and a reviewed marker owner. A `music`
+record carries the reserved slot 4, PC `$10C0`, and no correlation at all,
+because that store emits no native action-7 marker; its row is observed and
+its service is not.
+
+`D1` is a queue slot only at the SFX store, where `.loop` sets it. At the
+music store `:1294-1295` leave it holding the pause-check residue of
+`move.b d0,d1` and `subi.b #MusID_Pause,d1`, so it is not read there.
+
+Watching only the SFX store made every music request invisible, and with it
+any sound a caller routes through `PlayMusic` rather than `PlaySound` — the
+ring-milestone check at `s2.asm:25913-25914` is one such caller. A capture
+that saw nine songs load recorded none of them.
+
+The payload version is `openggf.s2-complete-run-audio-raw.v4` and the transfer
+schema `openggf.s2-preconsumption-request-transfer.v2`. There is no
+backwards-compatible read of the older shape: the `site` field is required.

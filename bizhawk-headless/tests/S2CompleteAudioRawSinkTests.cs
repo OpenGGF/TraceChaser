@@ -308,7 +308,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string[] lines = output.ToString().Split(
                 new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
             JObject metadata = JObject.Parse(lines[0]);
-            AssertEx.Equal("openggf.s2-complete-run-audio-raw.v3",
+            AssertEx.Equal("openggf.s2-complete-run-audio-raw.v4",
                 (string)metadata["schema"]);
             AssertEx.Equal(false, (bool)metadata["production_bound"]);
             JObject frame = JObject.Parse(lines[2]);

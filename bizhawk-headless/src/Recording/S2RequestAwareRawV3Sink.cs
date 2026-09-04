@@ -17,7 +17,7 @@ namespace OpenGGF.BizHawk.Headless
         /// </summary>
         private sealed class RawV3Sink
         {
-        internal const string Schema = "openggf.s2-complete-run-audio-raw.v3";
+        internal const string Schema = "openggf.s2-complete-run-audio-raw.v4";
         private readonly StringWriter v2Output = new StringWriter(CultureInfo.InvariantCulture);
         private readonly S2CompleteAudioRawSink v2;
         private readonly TextWriter output;
@@ -83,18 +83,43 @@ namespace OpenGGF.BizHawk.Headless
 
         private JArray Transfers(int row, IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers)
         {
-            if (transfers.Count > 4) throw new InvalidDataException("The S2 raw-v3 transfer count exceeds the fixed slot bound.");
+            // One pass of sndDriverInput can transfer one music request and
+            // four SFX ones, because .doSFX loads moveq #4-1,d1 on the shipped
+            // fixBugs = 0 path (docs/s2disasm/s2.asm:1310-1315).
+            if (transfers.Count > 5) throw new InvalidDataException("The S2 raw-v3 transfer count exceeds the fixed slot bound.");
             var values = new JArray();
             uint previousNativeOrdinal = 0;
             bool hasPreviousNativeOrdinal = false;
             for (int index = 0; index < transfers.Count; index++)
             {
                 S2PreconsumptionRequestObserver.Transfer transfer = transfers[index];
-                if (transfer == null || transfer.Row != row || transfer.Request == 0 || transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc || (hasPreviousNativeOrdinal && transfer.NativeOrdinal <= previousNativeOrdinal) || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu || !HasReviewedMarkerOwner(transfer))
+                if (transfer == null || transfer.Row != row || transfer.Request == 0
+                    || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu)
                     throw new InvalidDataException("The S2 raw-v3 has an invalid request transfer.");
-                previousNativeOrdinal = transfer.NativeOrdinal;
-                hasPreviousNativeOrdinal = true;
-                values.Add(new JObject { ["row"] = row, ["order"] = index, ["global_transfer_ordinal"] = nextTransferOrdinal++, ["request"] = transfer.Request, ["slot"] = transfer.Slot, ["pc"] = transfer.Pc, ["a7"] = transfer.A7.ToString(CultureInfo.InvariantCulture), ["native_ordinal"] = transfer.NativeOrdinal, ["source_cpu"] = transfer.SourceCpu, ["service_token"] = transfer.ServiceToken, ["service_kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth, ["active_service_owner"] = new JObject { ["token"] = transfer.ServiceToken, ["kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth } });
+                // Each site keeps its own guarantees. The SFX store is
+                // marker-correlated, so its records still carry a queue slot,
+                // its own PC, a strictly increasing native ordinal and a
+                // reviewed marker owner. The music store at loc_10C0
+                // (:1302-1304) emits no native marker, so its records carry
+                // the reserved slot, that PC, and no correlation at all.
+                if (transfer.Site == S2PreconsumptionRequestObserver.TransferSite.Music)
+                {
+                    if (transfer.Slot != S2PreconsumptionRequestObserver.MusicSlot
+                        || transfer.Pc != S2PreconsumptionRequestObserver.MusicPc
+                        || transfer.NativeOrdinal != 0 || transfer.ServiceToken != 0
+                        || transfer.ServiceKind != 0 || transfer.Depth != 0)
+                        throw new InvalidDataException("The S2 raw-v3 has an invalid music request transfer.");
+                }
+                else
+                {
+                    if (transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc
+                        || (hasPreviousNativeOrdinal && transfer.NativeOrdinal <= previousNativeOrdinal)
+                        || !HasReviewedMarkerOwner(transfer))
+                        throw new InvalidDataException("The S2 raw-v3 has an invalid request transfer.");
+                    previousNativeOrdinal = transfer.NativeOrdinal;
+                    hasPreviousNativeOrdinal = true;
+                }
+                values.Add(new JObject { ["row"] = row, ["order"] = index, ["global_transfer_ordinal"] = nextTransferOrdinal++, ["site"] = transfer.Site == S2PreconsumptionRequestObserver.TransferSite.Music ? "music" : "sfx", ["request"] = transfer.Request, ["slot"] = transfer.Slot, ["pc"] = transfer.Pc, ["a7"] = transfer.A7.ToString(CultureInfo.InvariantCulture), ["native_ordinal"] = transfer.NativeOrdinal, ["source_cpu"] = transfer.SourceCpu, ["service_token"] = transfer.ServiceToken, ["service_kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth, ["active_service_owner"] = new JObject { ["token"] = transfer.ServiceToken, ["kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth } });
             }
             return values;
         }

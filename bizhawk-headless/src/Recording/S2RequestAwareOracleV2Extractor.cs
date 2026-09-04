@@ -16,7 +16,7 @@ namespace OpenGGF.BizHawk.Headless
     internal sealed class S2RequestAwareOracleV2Extractor
     {
         internal const string OracleSchema = "openggf.s2-oracle-audio-raw.v2";
-        internal const string RawSchema = "openggf.s2-complete-run-audio-raw.v3";
+        internal const string RawSchema = "openggf.s2-complete-run-audio-raw.v4";
         internal const string CapabilitySchema =
             "openggf.s2-request-aware-raw-v3-capability.v1";
         internal const string AttestationSchema =
@@ -356,7 +356,7 @@ namespace OpenGGF.BizHawk.Headless
                 ["state_start"]=0, ["state_exclusive_end"]=0x2000,
                 ["source_schema"]=RawSchema, ["source_first_row"]=sourceFirst,
                 ["source_exclusive_end"]=sourceEnd,
-                ["request_transfer_schema"]="openggf.s2-preconsumption-request-transfer.v1",
+                ["request_transfer_schema"]="openggf.s2-preconsumption-request-transfer.v2",
                 ["production_bound"]=false,
                 ["digest_domains"]=new JObject {
                     ["inventories"]="compact-json-lf-v1",
@@ -567,15 +567,42 @@ namespace OpenGGF.BizHawk.Headless
             ref uint previousNative, ref bool hasNative)
         {
             Exact(value,"request transfer","row","order","global_transfer_ordinal",
-                "request","slot","pc","a7","native_ordinal","source_cpu",
+                "site","request","slot","pc","a7","native_ordinal","source_cpu",
                 "service_token","service_kind","depth","active_service_owner");
             Require(Integer(value,"row")==row && Integer(value,"order")==order
                 && Integer(value,"global_transfer_ordinal")==global,
                 "request transfer order differs");
-            Require(Byte(value,"request") != 0 && Integer(value,"slot") >= 0
+            string site=String(value,"site");
+            Require(site=="sfx"||site=="music","request transfer site differs");
+            Require(Byte(value,"request") != 0
+                && Byte(value,"source_cpu")==S2PreconsumptionRequestObserver.MarkerSourceCpu,
+                "request transfer identity differs");
+            // sndDriverInput's music store at loc_10C0
+            // (docs/s2disasm/s2.asm:1302-1304) emits no native action-7
+            // marker, so its records carry the reserved slot, that PC and no
+            // correlation. The SFX store inside .loop (:1317-1326) keeps every
+            // guarantee it had.
+            if (site=="music")
+            {
+                Require(Integer(value,"slot")==S2PreconsumptionRequestObserver.MusicSlot
+                    && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.MusicPc
+                    && Unsigned(value,"native_ordinal")==0
+                    && Integer(value,"service_token")==0
+                    && Byte(value,"service_kind")==0 && Byte(value,"depth")==0,
+                    "music request transfer identity differs");
+                JObject musicOwner=Object(value["active_service_owner"],"active service owner");
+                Exact(musicOwner,"active service owner","token","kind","depth");
+                Require(Integer(musicOwner,"token")==0 && Integer(musicOwner,"kind")==0
+                    && Integer(musicOwner,"depth")==0,
+                    "music request service owner differs");
+                uint musicA7; if (!uint.TryParse(String(value,"a7"), out musicA7)
+                    || String(value,"a7")!=musicA7.ToString())
+                    throw Invalid("request transfer A7 differs");
+                return;
+            }
+            Require(Integer(value,"slot") >= 0
                 && Integer(value,"slot") <= 3
                 && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc
-                && Byte(value,"source_cpu")==S2PreconsumptionRequestObserver.MarkerSourceCpu
                 && ReviewedTransferOwner(value),
                 "request transfer identity differs");
             uint a7; if (!uint.TryParse(String(value,"a7"), out a7)

@@ -81,25 +81,39 @@ namespace OpenGGF.BizHawk.Headless
         private bool failed;
         private readonly int expectedEnd;
 
+        /// <summary>
+        /// Which of sndDriverInput's two stores into Z80 RAM a transfer came
+        /// from. The routine writes the music queue at .isNotPauseCommand,
+        /// which the disassembly labels loc_10C0
+        /// (docs/s2disasm/s2.asm:1302-1304), and the SFX queue inside .loop
+        /// (:1317-1326). They carry different guarantees, so a record names
+        /// its own site rather than leaving a reader to infer one.
+        /// </summary>
+        internal enum TransferSite { Sfx, Music }
+
         internal sealed class Transfer
         {
             internal Transfer(int row, byte request, ushort slot, uint stack,
                 uint nativeOrdinal, ushort serviceToken, byte serviceKind,
                 byte depth)
                 : this(row, request, slot, stack, nativeOrdinal, serviceToken,
-                    serviceKind, depth, MarkerSourceCpu)
+                    serviceKind, depth, MarkerSourceCpu, TransferSite.Sfx)
             { }
 
             internal Transfer(int row, byte request, ushort slot, uint stack,
                 uint nativeOrdinal, ushort serviceToken, byte serviceKind,
                 byte depth, byte sourceCpu)
+                : this(row, request, slot, stack, nativeOrdinal, serviceToken,
+                    serviceKind, depth, sourceCpu, TransferSite.Sfx)
+            { }
+
+            internal Transfer(int row, byte request, ushort slot, uint stack,
+                uint nativeOrdinal, ushort serviceToken, byte serviceKind,
+                byte depth, byte sourceCpu, TransferSite site)
             {
+                Site = site;
                 Row = row; Request = request; Slot = slot;
-                // sndDriverInput stores twice and the slot says which store
-                // this was: the reserved music slot can only come from
-                // loc_10C0 (docs/s2disasm/s2.asm:1302-1304), everything else
-                // from the SFX store inside .loop (:1317-1326).
-                Pc = slot == MusicSlot
+                Pc = site == TransferSite.Music
                     ? S2PreconsumptionRequestObserver.MusicPc
                     : S2PreconsumptionRequestObserver.Pc;
                 A7 = stack;
@@ -107,6 +121,7 @@ namespace OpenGGF.BizHawk.Headless
                 ServiceKind = serviceKind; Depth = depth; SourceCpu = sourceCpu;
             }
 
+            internal TransferSite Site { get; private set; }
             internal int Row { get; private set; }
             internal byte Request { get; private set; }
             internal ushort Slot { get; private set; }
@@ -301,7 +316,8 @@ namespace OpenGGF.BizHawk.Headless
             {
                 PendingTransfer music = musicPending[index];
                 transfers.Add(new Transfer(music.Row, music.Request,
-                    music.Slot, music.A7, 0, 0, 0, 0, MarkerSourceCpu));
+                    music.Slot, music.A7, 0, 0, 0, 0, MarkerSourceCpu,
+                    TransferSite.Music));
             }
             musicPending.Clear();
             activeRow = -1;
