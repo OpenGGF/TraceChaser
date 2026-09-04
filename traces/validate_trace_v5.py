@@ -436,7 +436,12 @@ class Validation:
                 except (OSError, EOFError):
                     self.reject(path, "malformed gzip payload")
                     return None
-            return path.read_text(encoding="utf-8", newline="")
+            # Path.read_text() only gained the newline= parameter in Python
+            # 3.13; open() with newline="" has offered the same disabled
+            # universal-newline behavior since long before that and works on
+            # the 3.12 interpreter this project also targets.
+            with path.open("r", encoding="utf-8", newline="") as handle:
+                return handle.read()
         except UnicodeDecodeError as error:
             self.reject(path, f"cannot read UTF-8 payload: {error}")
             return None

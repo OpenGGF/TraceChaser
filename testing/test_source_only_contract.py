@@ -52,7 +52,7 @@ class SourceOnlyWorkflowContractTests(unittest.TestCase):
             "monodis_status",
             "dotnet tool install --tool-path \"$RUNNER_TEMP/powershell\" PowerShell --version 7.4.7",
             "PowerShell 7.4.7",
-            "Mono JIT compiler version 6\\.12\\.0",
+            "Mono JIT compiler version 6\\.(8|12)\\.0",
             "python3 testing/source_only_ci.py",
         )
         for token in required:

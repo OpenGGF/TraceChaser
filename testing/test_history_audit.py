@@ -44,23 +44,38 @@ class HistoryAuditIntegrationTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual("history audit: PASS\n", result.stdout)
 
-    def test_exact_override_resume_audio_schemas_pass_history_audit(self):
-        schema = (
-            b'{"$schema":"https://json-schema.org/draft/2020-12/schema",'
-            b'"type":"object"}\n'
+    def test_curated_audio_schema_removed_from_head_still_passes_history(self):
+        schema_path = "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json"
+        self._write(
+            schema_path,
+            b'{"$id": "openggf.override-resume-first-divergence-metadata.v1"}\n',
         )
-        for path in (
-            "contracts/audio/override-resume-first-divergence-attestation-v1.schema.json",
-            "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json",
-            "contracts/audio/override-resume-first-divergence-reference-v1.schema.json",
-        ):
-            self._write(path, schema)
-        self._commit("add exact override-resume audio schemas")
+        self._commit("add curated audio override schema")
+        os.remove(self.repository / schema_path)
+        self._git("add", "-u")
+        self._git("commit", "-q", "-m", "remove curated audio override schema")
 
         result = self._audit()
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual("history audit: PASS\n", result.stdout)
+
+    def test_uncurated_audio_contract_shape_is_rejected_in_history(self):
+        self._write(
+            "contracts/audio/nested/override-resume-first-divergence-v1.schema.json",
+            b"{}\n",
+        )
+        introducing_commit = self._commit("add nested audio schema")
+
+        result = self._audit()
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn(f"commit={introducing_commit}", result.stdout)
+        self.assertIn(
+            "path=contracts/audio/nested/override-resume-first-divergence-v1.schema.json",
+            result.stdout,
+        )
+        self.assertIn("reason=contract file outside curated exceptions", result.stdout)
 
     def test_deleted_bk2_is_reported_with_commit_object_and_path(self):
         self._write("scratch/movie.bk2", b"PK\x03\x04synthetic movie")

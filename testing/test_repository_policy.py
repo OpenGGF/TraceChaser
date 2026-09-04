@@ -87,6 +87,9 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
             "traces/validate.py": b"print('validate')\n",
             "dependencies/bizhawk-2.11.lock.json": b'{"version":"2.11"}\n',
             "contracts/audio/normalization-contract-v1.json": b'{"version":1}\n',
+            "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json": (
+                b'{"$id": "openggf.override-resume-first-divergence-metadata.v1"}\n'
+            ),
             "testing/fixtures/expected.txt": b"small curated contract\n",
         }
         for path, content in safe_files.items():
@@ -99,31 +102,26 @@ class RepositoryPolicyIntegrationTest(unittest.TestCase):
         self.assertEqual("repository policy: PASS\n", result.stdout)
         self.assertEqual([], self._find_violations())
 
-    def test_accepts_only_exact_override_resume_audio_schema_paths(self):
-        schema = (
-            b'{"$schema":"https://json-schema.org/draft/2020-12/schema",'
-            b'"type":"object"}\n'
-        )
-        exact_paths = (
-            "contracts/audio/override-resume-first-divergence-attestation-v1.schema.json",
-            "contracts/audio/override-resume-first-divergence-metadata-v1.schema.json",
-            "contracts/audio/override-resume-first-divergence-reference-v1.schema.json",
-        )
-        for path in exact_paths:
-            self._write(path, schema)
-        adjacent_path = "contracts/audio/override-resume-first-divergence-unlisted.json"
-        self._write(adjacent_path, schema)
+    def test_rejects_contract_files_outside_the_curated_audio_schema_glob(self):
+        rejected = {
+            "contracts/audio/override-resume-first-divergence-v1.json": b"{}\n",
+            "contracts/audio/nested/override-resume-first-divergence-v1.schema.json": (
+                b"{}\n"
+            ),
+            "contracts/audio-decoy.schema.json": b"{}\n",
+        }
+        for path, content in rejected.items():
+            self._write(path, content)
         self._git("add", ".")
 
         result = self._audit()
 
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        for path in exact_paths:
-            self.assertNotIn(f"path={path} ", result.stdout)
-        self.assertIn(
-            f"path={adjacent_path} reason=contract file outside curated exceptions",
-            result.stdout,
-        )
+        for path in rejected:
+            self.assertIn(
+                f"path={path} reason=contract file outside curated exceptions",
+                result.stdout,
+            )
 
     def test_ignores_untracked_artifacts(self):
         self._write("traces/validate.py", b"print('tracked source')\n")
