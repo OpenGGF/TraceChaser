@@ -14,6 +14,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2PreconsumptionRequestObserverTests retain the fixed accepted transfer until its exact A7 marker",
                 RetainsFixedAcceptedTransferUntilExactMarker));
             tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests preserve the reviewed kind-3 marker owner through correlation",
+                PreservesKind3MarkerOwnerThroughCorrelation));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests preserve the reviewed nested kind-3 marker owner through correlation",
+                PreservesNestedKind3MarkerOwnerThroughCorrelation));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject every other nested kind-3 marker owner topology",
+                RejectsEveryOtherNestedKind3MarkerOwnerTopology));
+            tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests use exact production GPGX M68K register names",
                 UsesExactProductionM68kRegisterNames));
             tests.Add(new TestMain.TestCase(
@@ -22,6 +31,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests pin the unbound fixed request manifest without changing v2 authority",
                 PinsUnboundFixedManifestWithoutChangingV2Authority));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject ambiguous legacy marker inventory fields",
+                RejectsAmbiguousLegacyMarkerInventoryFields));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject reordered or inexact marker inventory maps",
+                RejectsReorderedOrInexactMarkerInventoryMaps));
             tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests make the session own the callback advance drain and correlation",
                 SessionOwnsCallbackAdvanceDrainAndCorrelation));
@@ -191,6 +206,113 @@ namespace OpenGGF.BizHawk.Headless.Tests
             DisposeIncompleteSession(observer);
         }
 
+        private static void PreservesKind3MarkerOwnerThroughCorrelation()
+        {
+            var host = RequestHost(0xCE, 2, 0x00FF1000);
+            var api = new QueuedTraceApi();
+            var observer = OpenSession(host, api);
+            observer.AdvanceRow(0, () =>
+                api.Events = new[] { Kind3ServiceBegin(0, 1) });
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                observer.AdvanceRow(1, () =>
+                {
+                    api.Events = new GpgxAudioTraceEvent[0];
+                    host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[]
+                    {
+                        Kind3Marker(0x00FF1000, 0, 1)
+                    };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal((ushort)1, transfers[0].ServiceToken);
+            AssertEx.Equal((byte)3, transfers[0].ServiceKind);
+            AssertEx.Equal((byte)0, transfers[0].Depth);
+            AssertEx.Equal((byte)2, transfers[0].SourceCpu);
+            DisposeIncompleteSession(observer);
+        }
+
+        private static void PreservesNestedKind3MarkerOwnerThroughCorrelation()
+        {
+            const ushort rootToken = 0x1234;
+            const ushort childToken = 0x2345;
+            var host = RequestHost(0xB5, 1, 0x00FFFDAE);
+            var api = new QueuedTraceApi();
+            var observer = OpenSession(host, api);
+            observer.AdvanceRow(0, () =>
+                api.Events = new[] { DpcmRootBegin(0, rootToken) });
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                observer.AdvanceRow(1, () =>
+                {
+                    GpgxAudioTraceEvent child = NestedKind3ServiceBegin(
+                        0, rootToken, childToken);
+                    api.Events = new[] { child };
+                    host.Execute(S2PreconsumptionRequestObserver.Pc);
+                    api.Events = new[]
+                    {
+                        child,
+                        NestedKind3Marker(0x00FFFDAE, 1,
+                            rootToken, childToken)
+                    };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal(childToken, transfers[0].ServiceToken);
+            AssertEx.Equal((byte)3, transfers[0].ServiceKind);
+            AssertEx.Equal((byte)1, transfers[0].Depth);
+            DisposeIncompleteSession(observer);
+        }
+
+        private static void RejectsEveryOtherNestedKind3MarkerOwnerTopology()
+        {
+            AssertNestedTopologyRejected(marker =>
+                { marker.ParentToken = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ParentToken = 0x3456; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceToken = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceToken = 0x1234; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.ServiceKindId = 4; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.Depth = 0; return marker; },
+                "native audio observer returned");
+            AssertNestedTopologyRejected(marker =>
+                { marker.Depth = 2; return marker; },
+                "native audio observer returned");
+        }
+
+        private static void AssertNestedTopologyRejected(
+            Func<GpgxAudioTraceEvent, GpgxAudioTraceEvent> mutate,
+            string message)
+        {
+            const ushort rootToken = 0x1234;
+            const ushort childToken = 0x2345;
+            var host = RequestHost(0xB5, 1, 0x00FFFDAE);
+            var api = new QueuedTraceApi();
+            using (var observer = OpenSession(host, api))
+            {
+                observer.AdvanceRow(0, () =>
+                    api.Events = new[] { DpcmRootBegin(0, rootToken) });
+                AssertEx.Throws<InvalidOperationException>(() =>
+                    observer.AdvanceRow(1, () =>
+                    {
+                        GpgxAudioTraceEvent child = NestedKind3ServiceBegin(
+                            0, rootToken, childToken);
+                        api.Events = new[] { child };
+                        host.Execute(S2PreconsumptionRequestObserver.Pc);
+                        GpgxAudioTraceEvent marker = NestedKind3Marker(
+                            0x00FFFDAE, 1, rootToken, childToken);
+                        marker = mutate(marker);
+                        api.Events = new[] { child, marker };
+                    }), message);
+            }
+        }
+
         private static void RejectsMalformedCorrelation()
         {
             var host = new FakeHost();
@@ -217,22 +339,73 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x0010D6u, candidate.Pc);
             AssertEx.Equal("13801009", candidate.Opcode);
             AssertEx.Equal((ushort)24, candidate.MarkerToken);
+            AssertEx.Equal((ushort)25, candidate.Kind3MarkerToken);
             AssertEx.Equal(false, candidate.ProductionBound);
             AssertEx.Throws<InvalidOperationException>(() =>
                 candidate.RequireProductionAuthority(), "unbound");
             AssertEx.Equal(
                 "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
                 S2AudioObserverProfile.ServiceManifestSha256);
+            // The candidate now names the observer patch that carries its
+            // marker and the selftest that proves the boundary.
             AssertEx.Equal(
                 S2PreconsumptionRequestProfile.CandidateNativePatchSha256,
                 Sha256File(Path.Combine(EndToEndTests.ToolDirectory,
-                    "native", "gpgx-audio-observer-candidates",
-                    "0001-s2-request-successor-ordinal.patch")));
+                    "native", "gpgx-audio-observer",
+                    "0001-buffer-z80-audio-events.patch")));
             AssertEx.Equal(
                 S2PreconsumptionRequestProfile.CandidateNativeRecipeSha256,
                 Sha256File(Path.Combine(EndToEndTests.ToolDirectory,
-                    "native", "gpgx-audio-observer-candidates",
-                    "s2-request-selftest-recipe.json")));
+                    "native", "gpgx-audio-observer", "selftest", "run.sh")));
+        }
+
+        private static void RejectsAmbiguousLegacyMarkerInventoryFields()
+        {
+            AssertCandidateManifestRejected(root =>
+                root["request_transfer"]["marker_token"] = 24,
+                "marker token map");
+            AssertCandidateManifestRejected(root =>
+                root["request_transfer"]["marker_expected_kinds"] =
+                    new JArray(0, 3), "marker token map");
+        }
+
+        private static void RejectsReorderedOrInexactMarkerInventoryMaps()
+        {
+            AssertCandidateManifestRejected(root =>
+            {
+                JArray map = (JArray)root["request_transfer"]
+                    ["marker_tokens_by_expected_kind"];
+                JToken first = map[0];
+                map[0] = map[1];
+                map[1] = first;
+            }, "marker token map");
+            AssertCandidateManifestRejected(root =>
+                root["request_transfer"]["marker_tokens_by_expected_kind"]
+                    [0]["extra"] = 1, "marker token map");
+            AssertCandidateManifestRejected(root =>
+                ((JArray)root["request_transfer"]
+                    ["marker_tokens_by_expected_kind"]).RemoveAt(1),
+                "marker token map");
+        }
+
+        private static void AssertCandidateManifestRejected(
+            Action<JObject> mutate, string message)
+        {
+            string scratch = TestScratch.CreateRootPath(
+                "s2-request-marker-map");
+            Directory.CreateDirectory(scratch);
+            try
+            {
+                JObject root = JObject.Parse(File.ReadAllText(Fixture(
+                    "gpgx-audio-service-manifest-s2-request-v3.json")));
+                mutate(root);
+                string path = Path.Combine(scratch, "candidate.json");
+                File.WriteAllText(path, root.ToString());
+                AssertEx.Throws<InvalidDataException>(() =>
+                    S2PreconsumptionRequestProfile.LoadCandidate(path),
+                    message);
+            }
+            finally { Directory.Delete(scratch, true); }
         }
 
         private static void SessionOwnsCallbackAdvanceDrainAndCorrelation()
@@ -278,7 +451,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     Fixture("gpgx-audio-service-manifests-v1.json"),
                     host, output);
             AssertEx.Equal(1, api.ConfigureCalls);
-            AssertEx.Equal(1, api.FixedCandidateHookCount);
+            AssertEx.Equal(2, api.FixedCandidateHookCount);
             AssertEx.Equal(1, host.Registrations);
             AssertEx.Equal(S2PreconsumptionRequestObserver.Pc, host.Address);
             try
@@ -289,10 +462,17 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     host.AdvanceAction = () =>
                     {
                         api.Events = new GpgxAudioTraceEvent[0];
-                        if (ownedRow == S2AudioObserverProfile.FirstRow)
+                        if (ownedRow == S2AudioObserverProfile.FirstRow - 1)
+                        {
+                            api.Events = BootstrapAndKind3Begin();
+                        }
+                        else if (ownedRow == S2AudioObserverProfile.FirstRow)
                         {
                             host.Execute(S2PreconsumptionRequestObserver.Pc);
-                            api.Events = new[] { Marker(0x00FF1000, 0) };
+                            api.Events = new[]
+                            {
+                                Kind3Marker(0x00FF1000, 0, 2)
+                            };
                         }
                     };
                     producer.AdvanceRow(row, new Bk2Frame());
@@ -316,6 +496,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     (int)transfers[0]["native_ordinal"]);
                 AssertEx.Equal((long)events[0]["payload"],
                     (long)transfers[0]["a7"]);
+                AssertEx.Equal(2,
+                    (int)transfers[0]["service_token"]);
+                AssertEx.Equal(3,
+                    (int)transfers[0]["service_kind"]);
+                AssertEx.Equal(0,
+                    (int)transfers[0]["depth"]);
                 AssertEx.Equal(0, host.Disposals);
             }
             finally
@@ -343,7 +529,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Throws<InvalidDataException>(() =>
                     S2CompleteAudioCaptureRunner.OpenRequestAwareRawV3Candidate(
                         path, Fixture("gpgx-audio-service-manifests-v1.json"),
-                        host, new StringWriter()), "hook identity");
+                        host, new StringWriter()), "marker token map");
                 AssertEx.Equal(0, host.Registrations);
                 AssertEx.Equal(0, api.ConfigureCalls);
             }
@@ -867,7 +1053,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             return new GpgxAudioTraceEvent
             {
-                Kind = 10, Value = 3, Pc = 0x002000, Subject = 25,
+                Kind = 10, Value = 3, Pc = 0x002000, Subject = 30,
                 Ordinal = ordinal, PayloadLength = 4, Payload = 0,
                 SourceCpu = 2, ServiceToken = 0, ParentToken = 0,
                 ServiceKindId = 0, Depth = 0
@@ -900,6 +1086,113 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 SourceCpu = 2, ServiceToken = 0, ParentToken = 0,
                 ServiceKindId = 0, Depth = 0
             };
+        }
+
+        private static GpgxAudioTraceEvent Kind3Marker(uint a7,
+            uint ordinal, ushort serviceToken)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 10, Value = 3,
+                Pc = S2PreconsumptionRequestObserver.Pc,
+                Subject = 25, Ordinal = ordinal,
+                PayloadLength = 4, Payload = a7,
+                SourceCpu = 2, ServiceToken = serviceToken,
+                ParentToken = 0, ServiceKindId = 3, Depth = 0
+            };
+        }
+
+        private static GpgxAudioTraceEvent Kind3ServiceBegin(
+            uint ordinal, ushort token)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 1, Ordinal = ordinal, ServiceToken = token,
+                ParentToken = 0, Pc = 0x002FF0, Subject = 31,
+                ServiceKindId = 3, Depth = 0, SourceCpu = 2
+            };
+        }
+
+        private static GpgxAudioTraceEvent DpcmRootBegin(
+            uint ordinal, ushort token)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 1, Ordinal = ordinal, ServiceToken = token,
+                ParentToken = 0, Pc = 0x002FE0, Subject = 32,
+                ServiceKindId = 4, Depth = 0, SourceCpu = 2
+            };
+        }
+
+        private static GpgxAudioTraceEvent NestedKind3ServiceBegin(
+            uint ordinal, ushort rootToken, ushort childToken)
+        {
+            return new GpgxAudioTraceEvent
+            {
+                Kind = 1, Ordinal = ordinal, ServiceToken = childToken,
+                ParentToken = rootToken, Pc = 0x002FE2, Subject = 33,
+                ServiceKindId = 3, Depth = 1, SourceCpu = 2
+            };
+        }
+
+        private static GpgxAudioTraceEvent NestedKind3Marker(uint a7,
+            uint ordinal, ushort rootToken, ushort childToken)
+        {
+            GpgxAudioTraceEvent marker = Kind3Marker(a7, ordinal, childToken);
+            marker.ParentToken = rootToken;
+            marker.Depth = 1;
+            return marker;
+        }
+
+        private static GpgxAudioTraceEvent[] BootstrapAndKind3Begin()
+        {
+            const int ChunkCount = 1024;
+            var events = new GpgxAudioTraceEvent[ChunkCount + 5];
+            events[0] = new GpgxAudioTraceEvent
+            {
+                Ordinal = 0, Kind = 1, ServiceToken = 1,
+                ParentToken = 0, ServiceKindId = 2, Depth = 0,
+                SourceCpu = 2, Pc = 0x000EC000, Subject = 9
+            };
+            events[1] = new GpgxAudioTraceEvent
+            {
+                Ordinal = 1, Kind = 5, ServiceToken = 1,
+                ParentToken = 0, ServiceKindId = 2, Depth = 0,
+                SourceCpu = 2, Pc = 0x000EC036, Subject = 1
+            };
+            for (int index = 0; index < ChunkCount; index++)
+            {
+                events[index + 2] = new GpgxAudioTraceEvent
+                {
+                    Ordinal = (uint)(index + 2), Kind = 6,
+                    ServiceToken = 1, ParentToken = 0,
+                    ServiceKindId = 2, Depth = 0, SourceCpu = 2,
+                    Pc = 0x000EC036, Subject = 1,
+                    Offset = (ushort)(index * 8), PayloadLength = 8
+                };
+            }
+            events[ChunkCount + 2] = new GpgxAudioTraceEvent
+            {
+                Ordinal = (uint)(ChunkCount + 2), Kind = 7,
+                ServiceToken = 1, ParentToken = 0,
+                ServiceKindId = 2, Depth = 0, SourceCpu = 2,
+                Pc = 0x000EC036, Subject = 1, Offset = 8192
+            };
+            events[ChunkCount + 3] = new GpgxAudioTraceEvent
+            {
+                Ordinal = (uint)(ChunkCount + 3), Kind = 2,
+                ServiceToken = 1, ParentToken = 0,
+                ServiceKindId = 2, Depth = 0, SourceCpu = 2,
+                Pc = 0x000EC036, Subject = 10
+            };
+            events[ChunkCount + 4] = new GpgxAudioTraceEvent
+            {
+                Ordinal = (uint)(ChunkCount + 4), Kind = 1,
+                ServiceToken = 2, ParentToken = 0,
+                ServiceKindId = 3, Depth = 0, SourceCpu = 1,
+                Pc = 56, Subject = 1
+            };
+            return events;
         }
 
         private static GpgxAudioTraceEvent ServiceBegin(
@@ -941,19 +1234,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AbiVersion = 4, StructSize = 64, KindSize = 16,
                 HookSize = 32, RangeSize = 16, EventSize = 32,
                 WatchMaskBytes = 8192, EventCapacity = 65536,
-                HookCount = 4, KindCount = 1
+                HookCount = 8, KindCount = 3,
+                MaxContinuationFrames = 4
             };
             var hooks = new[]
             {
                 new GpgxAudioObserverAdapter.ServiceHook
                 {
-                    HookToken = S2PreconsumptionRequestObserver.MarkerToken,
-                    Action = 7, Cpu = 2,
-                    Pc = S2PreconsumptionRequestObserver.Pc
-                },
-                new GpgxAudioObserverAdapter.ServiceHook
-                {
-                    HookToken = 25, Action = 7, Cpu = 2, Pc = 0x002000
+                    HookToken = 31, Action = 1, Cpu = 2, Pc = 0x002FF0,
+                    ServiceKindId = 3, ExpectedActiveKind = 0
                 },
                 new GpgxAudioObserverAdapter.ServiceHook
                 {
@@ -964,12 +1253,46 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 {
                     HookToken = 27, Action = 2, Cpu = 1, Pc = 0x003001,
                     ServiceKindId = 0, ExpectedActiveKind = 1
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = S2PreconsumptionRequestObserver.MarkerToken,
+                    Action = 7, Cpu = 2,
+                    Pc = S2PreconsumptionRequestObserver.Pc
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 25, Action = 7, Cpu = 2,
+                    Pc = S2PreconsumptionRequestObserver.Pc,
+                    ExpectedActiveKind = 3
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 30, Action = 7, Cpu = 2, Pc = 0x002000
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 32, Action = 1, Cpu = 2, Pc = 0x002FE0,
+                    ServiceKindId = 4, ExpectedActiveKind = 0
+                },
+                new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken = 33, Action = 1, Cpu = 2, Pc = 0x002FE2,
+                    ServiceKindId = 3, ExpectedActiveKind = 4
                 }
             };
             return new CompleteRunAudioObserver(api, config, new byte[8192],
                 new[]
                 {
-                    new GpgxAudioObserverAdapter.ServiceKind { KindId = 1 }
+                    new GpgxAudioObserverAdapter.ServiceKind { KindId = 1 },
+                    new GpgxAudioObserverAdapter.ServiceKind
+                    {
+                        KindId = 3, Flags = 6, ContinuationFrameLimit = 4
+                    },
+                    new GpgxAudioObserverAdapter.ServiceKind
+                    {
+                        KindId = 4, Flags = 7, ContinuationFrameLimit = 4
+                    }
                 }, hooks,
                 new GpgxAudioObserverAdapter.SnapshotRange[0]);
         }
@@ -994,21 +1317,46 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 ConfigureCalls++;
                 FixedCandidateHookCount = 0;
+                int candidateSiteMarkerCount = 0;
+                bool exactCandidateMap = true;
+                bool sorted = true;
                 for (int index = 0; index < hooks.Length; index++)
                 {
                     GpgxAudioObserverAdapter.ServiceHook hook = hooks[index];
-                    if (hook.HookToken == 24 && hook.Action == 7
-                        && hook.Cpu == 2 && hook.Pc == 0x0010D6
-                        && hook.ServiceKindId == 0
-                        && hook.ExpectedActiveKind == 0 && hook.Flags == 0
-                        && hook.OpcodeLength == 4 && hook.RangeFirst == 0
-                        && hook.RangeCount == 0
-                        && hook.Opcode == 0x09108013UL
-                        && hook.Reserved == 0)
-                        FixedCandidateHookCount++;
+                    if (index != 0)
+                    {
+                        GpgxAudioObserverAdapter.ServiceHook previous =
+                            hooks[index - 1];
+                        if (previous.Cpu > hook.Cpu
+                            || (previous.Cpu == hook.Cpu
+                                && previous.Pc > hook.Pc)
+                            || (previous.Cpu == hook.Cpu
+                                && previous.Pc == hook.Pc
+                                && previous.HookToken >= hook.HookToken))
+                            sorted = false;
+                    }
+                    if (hook.Action == 7 && hook.Cpu == 2
+                        && hook.Pc == 0x0010D6)
+                    {
+                        bool common = hook.ServiceKindId == 0
+                            && hook.Flags == 0 && hook.OpcodeLength == 4
+                            && hook.RangeFirst == 0 && hook.RangeCount == 0
+                            && hook.Opcode == 0x09108013UL
+                            && hook.Reserved == 0;
+                        bool exact = candidateSiteMarkerCount == 0
+                            ? hook.HookToken == 24
+                                && hook.ExpectedActiveKind == 0
+                            : candidateSiteMarkerCount == 1
+                                && hook.HookToken == 25
+                                && hook.ExpectedActiveKind == 3;
+                        exactCandidateMap &= common && exact;
+                        candidateSiteMarkerCount++;
+                    }
                 }
+                if (exactCandidateMap && candidateSiteMarkerCount == 2)
+                    FixedCandidateHookCount = 2;
                 if (RequireFixedCandidateHook
-                    && FixedCandidateHookCount != 1) return -3;
+                    && (FixedCandidateHookCount != 2 || !sorted)) return -3;
                 phase = 1;
                 return 0;
             }

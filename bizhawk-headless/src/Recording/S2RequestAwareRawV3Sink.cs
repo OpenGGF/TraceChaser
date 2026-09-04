@@ -77,7 +77,8 @@ namespace OpenGGF.BizHawk.Headless
             if (cutoff == null) throw new ArgumentNullException("cutoff");
             if (lastRow != exclusiveEnd - 1)
                 throw new InvalidDataException("The S2 raw-v3 candidate rejects an early or empty cutoff.");
-            v2.Complete(cutoff); Flush(false, null); complete = true;
+            v2.CompleteRequestAwareInventoryOnly(cutoff);
+            Flush(false, null); complete = true;
         }
 
         private JArray Transfers(int row, IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers)
@@ -89,13 +90,36 @@ namespace OpenGGF.BizHawk.Headless
             for (int index = 0; index < transfers.Count; index++)
             {
                 S2PreconsumptionRequestObserver.Transfer transfer = transfers[index];
-                if (transfer == null || transfer.Row != row || transfer.Request == 0 || transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc || (hasPreviousNativeOrdinal && transfer.NativeOrdinal <= previousNativeOrdinal) || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu || transfer.ServiceToken != S2PreconsumptionRequestObserver.MarkerServiceToken || transfer.ServiceKind != S2PreconsumptionRequestObserver.MarkerServiceKind || transfer.Depth != S2PreconsumptionRequestObserver.MarkerDepth)
+                if (transfer == null || transfer.Row != row || transfer.Request == 0 || transfer.Slot > 3 || transfer.Pc != S2PreconsumptionRequestObserver.Pc || (hasPreviousNativeOrdinal && transfer.NativeOrdinal <= previousNativeOrdinal) || transfer.SourceCpu != S2PreconsumptionRequestObserver.MarkerSourceCpu || !HasReviewedMarkerOwner(transfer))
                     throw new InvalidDataException("The S2 raw-v3 has an invalid request transfer.");
                 previousNativeOrdinal = transfer.NativeOrdinal;
                 hasPreviousNativeOrdinal = true;
                 values.Add(new JObject { ["row"] = row, ["order"] = index, ["global_transfer_ordinal"] = nextTransferOrdinal++, ["request"] = transfer.Request, ["slot"] = transfer.Slot, ["pc"] = transfer.Pc, ["a7"] = transfer.A7.ToString(CultureInfo.InvariantCulture), ["native_ordinal"] = transfer.NativeOrdinal, ["source_cpu"] = transfer.SourceCpu, ["service_token"] = transfer.ServiceToken, ["service_kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth, ["active_service_owner"] = new JObject { ["token"] = transfer.ServiceToken, ["kind"] = transfer.ServiceKind, ["depth"] = transfer.Depth } });
             }
             return values;
+        }
+
+        /// <summary>
+        /// The two reviewed owners a transfer may carry: the root boundary, and
+        /// a transfer nested under a kind-3 VInt service. Anything else is not
+        /// a topology this candidate has reviewed.
+        /// </summary>
+        private static bool HasReviewedMarkerOwner(
+            S2PreconsumptionRequestObserver.Transfer transfer)
+        {
+            bool root = transfer.ServiceToken
+                    == S2PreconsumptionRequestObserver.MarkerServiceToken
+                && transfer.ServiceKind
+                    == S2PreconsumptionRequestObserver.MarkerServiceKind
+                && transfer.Depth == S2PreconsumptionRequestObserver.MarkerDepth;
+            bool kind3 = transfer.ServiceToken
+                    != S2PreconsumptionRequestObserver.MarkerServiceToken
+                && transfer.ServiceKind
+                    == S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
+                && (transfer.Depth
+                        == S2PreconsumptionRequestObserver.MarkerDepth
+                    || transfer.Depth == 1);
+            return root || kind3;
         }
 
         private void Flush(bool metadata, Action<JObject> framePatch)

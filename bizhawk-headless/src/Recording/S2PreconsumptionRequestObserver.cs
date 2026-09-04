@@ -23,9 +23,11 @@ namespace OpenGGF.BizHawk.Headless
     {
         internal const uint Pc = 0x0010D6;
         internal const ushort MarkerToken = 24;
+        internal const ushort Kind3MarkerToken = 25;
         internal const byte MarkerSourceCpu = 2;
         internal const ushort MarkerServiceToken = 0;
         internal const byte MarkerServiceKind = 0;
+        internal const byte Kind3MarkerServiceKind = 3;
         internal const byte MarkerDepth = 0;
         private const int MaximumTransfersPerRow = 4;
 
@@ -35,6 +37,7 @@ namespace OpenGGF.BizHawk.Headless
         private readonly Queue<PendingTransfer> pending =
             new Queue<PendingTransfer>();
         private readonly List<Transfer> published = new List<Transfer>();
+        private ushort rowStartKind4RootToken;
         private int activeRow = -1;
         private int nextRow;
         private bool disposed;
@@ -114,6 +117,7 @@ namespace OpenGGF.BizHawk.Headless
                 throw new ArgumentOutOfRangeException("expectedExclusiveEnd");
             if (candidate.Pc != Pc || candidate.Opcode != "13801009"
                 || candidate.MarkerToken != MarkerToken
+                || candidate.Kind3MarkerToken != Kind3MarkerToken
                 || candidate.ProductionBound)
                 throw new InvalidDataException(
                     "The S2 request candidate cannot select a different hook or authority state.");
@@ -192,6 +196,8 @@ namespace OpenGGF.BizHawk.Headless
             if (activeRow >= 0 || pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request observer has an unmatched prior row.");
+            rowStartKind4RootToken =
+                nativeObserver.CurrentS2RequestKind4RootToken();
             activeRow = row;
         }
 
@@ -221,14 +227,11 @@ namespace OpenGGF.BizHawk.Headless
                     throw new InvalidOperationException(
                         "The S2 request marker predates its callback successor boundary.");
                 if (value.Kind != 10 || value.Value != 3 || value.Pc != Pc
-                    || value.Subject != MarkerToken || value.PayloadLength != 4)
+                    || value.PayloadLength != 4)
                     throw new InvalidOperationException(
                         "The S2 request next marker is not its exact fixed action-7 record.");
                 if (value.SourceCpu != MarkerSourceCpu
-                    || value.ServiceToken != MarkerServiceToken
-                    || value.ParentToken != MarkerServiceToken
-                    || value.ServiceKindId != MarkerServiceKind
-                    || value.Depth != MarkerDepth)
+                    || !HasReviewedMarkerOwner(value, events, index))
                     throw new InvalidOperationException(
                         "The S2 request marker source/owner differs.");
                 pending.Dequeue();
@@ -244,13 +247,54 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidOperationException(
                     "The S2 request callback has no exact native A7 marker.");
             activeRow = -1;
+            rowStartKind4RootToken = 0;
             return transfers.AsReadOnly();
         }
 
         private static bool IsFixedMarkerCandidate(GpgxAudioTraceEvent value)
         {
             return value.Subject == MarkerToken
+                || value.Subject == Kind3MarkerToken
                 || (value.Kind == 10 && value.Value == 3 && value.Pc == Pc);
+        }
+
+        private bool HasReviewedMarkerOwner(GpgxAudioTraceEvent value,
+            IReadOnlyList<GpgxAudioTraceEvent> events, int markerIndex)
+        {
+            bool root = value.Subject == MarkerToken
+                && value.ServiceToken == MarkerServiceToken
+                && value.ParentToken == MarkerServiceToken
+                && value.ServiceKindId == MarkerServiceKind
+                && value.Depth == MarkerDepth;
+            bool kind3 = value.Subject == Kind3MarkerToken
+                && value.ServiceToken != MarkerServiceToken
+                && value.ParentToken == MarkerServiceToken
+                && value.ServiceKindId == Kind3MarkerServiceKind
+                && value.Depth == MarkerDepth;
+            bool nestedKind3 = value.Subject == Kind3MarkerToken
+                && value.ServiceToken != MarkerServiceToken
+                && value.ParentToken != MarkerServiceToken
+                && value.ServiceToken != value.ParentToken
+                && value.ServiceKindId == Kind3MarkerServiceKind
+                && value.Depth == 1
+                && HasKind4RootLifecycle(value.ParentToken, events,
+                    markerIndex);
+            return root || kind3 || nestedKind3;
+        }
+
+        private bool HasKind4RootLifecycle(ushort rootToken,
+            IReadOnlyList<GpgxAudioTraceEvent> events, int markerIndex)
+        {
+            if (rootToken == rowStartKind4RootToken) return true;
+            for (int index = 0; index < markerIndex; index++)
+            {
+                GpgxAudioTraceEvent value = events[index];
+                if (value.Kind == 1 && value.ServiceToken == rootToken
+                    && value.ParentToken == 0 && value.ServiceKindId == 4
+                    && value.Depth == 0)
+                    return true;
+            }
+            return false;
         }
 
         private void OnTransfer()

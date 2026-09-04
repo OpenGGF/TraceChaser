@@ -972,6 +972,24 @@ namespace OpenGGF.BizHawk.Headless
             return ordinal;
         }
 
+        /// <summary>
+        /// Returns the exact carried kind-4 root identity used only to close
+        /// candidate S2 request correlation against the validated lifecycle.
+        /// </summary>
+        internal ushort CurrentS2RequestKind4RootToken()
+        {
+            if (capturing) throw new InvalidOperationException(
+                "The S2 request root identity must be sampled before its frame.");
+            if (faulted) throw new InvalidOperationException(
+                "The audio observer is faulted after a failed publication.");
+            if (pendingDeferredBegin != null || activeServices.Count == 0)
+                return 0;
+            ServiceBuilder root = activeServices[0];
+            return root.Token != 0 && root.CurrentParentToken == 0
+                && root.Kind == 4 && root.CurrentDepth == 0
+                ? root.Token : (ushort)0;
+        }
+
         public void CaptureFrame(Action frameAdvance,
             Action<GpgxAudioTraceEvent[], int> consume)
         {CaptureFrameCore(frameAdvance,consume,false,-1);}

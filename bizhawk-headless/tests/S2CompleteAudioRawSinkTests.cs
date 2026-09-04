@@ -64,6 +64,18 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2CompleteAudioRawSinkTests reject an early raw v3 cutoff",
                 RejectsEarlyRawV3Cutoff));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests keep complete raw v2 override and PCM mandatory before cutoff",
+                KeepsCompleteRawV2OverrideAndPcmMandatoryBeforeCutoff));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject pending following-row PCM in both completion policies",
+                RejectsPendingFollowingRowPcmInBothCompletionPolicies));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests reject raw v3 resume and PCM XOR inventory",
+                RejectsRawV3ResumeAndPcmXorInventory));
+            tests.Add(new TestMain.TestCase(
+                "S2CompleteAudioRawSinkTests confine inventory-only completion to the private raw v3 sink",
+                ConfinesInventoryOnlyCompletionToPrivateRawV3Sink));
             if (Environment.GetEnvironmentVariable(
                 "OPENGGF_S2_COMPLETE_AUDIO_REFERENCE") == "1")
             {
@@ -441,6 +453,167 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "early or empty cutoff");
         }
 
+        private static void KeepsCompleteRawV2OverrideAndPcmMandatoryBeforeCutoff()
+        {
+            var output = new StringWriter();
+            var sink = new S2CompleteAudioRawSink(
+                new FakeStateSource(new byte[0x2000]), output, 1, 2);
+            sink.Begin(EmptyFrontier());
+            sink.Frame(1, EmptyFrame(1), EmptyPacket());
+
+            AssertEx.Throws<InvalidDataException>(
+                () => sink.Complete(EmptyFrontier()),
+                "no exact override-resume service and PCM packet");
+            AssertEx.Equal(false, output.ToString().Contains(
+                "\"type\":\"cutoff\""));
+        }
+
+        private static void RejectsPendingFollowingRowPcmInBothCompletionPolicies()
+        {
+            var v2Output = new StringWriter();
+            var v2 = new S2CompleteAudioRawSink(
+                new FakeStateSource(new byte[0x2000]), v2Output, 1, 2);
+            v2.Begin(EmptyFrontier());
+            v2.Frame(1, RestoreFrame(1), EmptyPacket());
+            AssertEx.Throws<InvalidDataException>(
+                () => v2.Complete(EmptyFrontier()), "following-row PCM");
+            AssertEx.Equal(false, v2Output.ToString().Contains(
+                "\"type\":\"cutoff\""));
+
+            var v3Output = new StringWriter();
+            var v3 = RequestAwareSink(
+                new FakeStateSource(new byte[0x2000]), v3Output, 1, 2);
+            v3.Begin(EmptyFrontier());
+            v3.Frame(1, RestoreFrame(1), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]);
+            AssertEx.Throws<InvalidDataException>(
+                () => v3.Complete(EmptyFrontier()), "following-row PCM");
+            AssertEx.Equal(false, v3Output.ToString().Contains(
+                "\"type\":\"cutoff\""));
+        }
+
+        private static void RejectsRawV3ResumeAndPcmXorInventory()
+        {
+            var output = new StringWriter();
+            var sink = RequestAwareSink(
+                new FakeStateSource(new byte[0x2000]), output, 1, 2);
+            sink.Begin(EmptyFrontier());
+            sink.Frame(1, EmptyFrame(1), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]);
+            sink.SetCompletionStateForTesting(true, false, false);
+
+            AssertEx.Throws<InvalidDataException>(
+                () => sink.Complete(EmptyFrontier()),
+                "override-resume and PCM inventory differ");
+            AssertEx.Equal(false, output.ToString().Contains(
+                "\"type\":\"cutoff\""));
+        }
+
+        private static void ConfinesInventoryOnlyCompletionToPrivateRawV3Sink()
+        {
+            string sourceRoot = Path.Combine(EndToEndTests.ToolDirectory,
+                "src");
+            string sinkPath = Path.Combine(sourceRoot, "Recording",
+                "S2CompleteAudioRawSink.cs");
+            string candidatePath = Path.Combine(sourceRoot, "Recording",
+                "S2RequestAwareRawV3Sink.cs");
+            string sinkSource = File.ReadAllText(sinkPath);
+            string candidateSource = File.ReadAllText(candidatePath);
+            string entry = "CompleteRequestAwareInventoryOnly";
+            AssertEx.Equal(true, sinkSource.Contains(
+                "internal void " + entry + "("));
+            AssertEx.Equal(true, sinkSource.Contains(
+                "private enum CompletionPurpose"));
+            AssertEx.Equal(true, candidateSource.Contains(
+                "private sealed class RawV3Sink"));
+            AssertEx.Equal(true, candidateSource.Contains(
+                "v2." + entry + "(cutoff)"));
+            AssertEx.Equal(true, typeof(IS2CompleteAudioCaptureSink).GetMethod(
+                "Complete") != null);
+            AssertEx.Equal(true, typeof(S2CompleteAudioRawSink).GetMethod(
+                "Complete", BindingFlags.Instance | BindingFlags.Public)
+                != null);
+
+            var production = new Dictionary<string, string>(
+                StringComparer.Ordinal);
+            foreach (string path in Directory.GetFiles(sourceRoot, "*.cs",
+                SearchOption.AllDirectories))
+                production.Add(Path.GetFullPath(path), File.ReadAllText(path));
+            ValidateInventoryOnlyCallSites(production, sinkPath,
+                candidatePath, entry);
+
+            var forbidden = new Dictionary<string, string>(production,
+                StringComparer.Ordinal);
+            forbidden.Add(Path.Combine(sourceRoot, "Cli",
+                "ForbiddenCandidateCall.cs"),
+                "v2." + entry + "(cutoff);");
+            AssertEx.Throws<InvalidDataException>(() =>
+                ValidateInventoryOnlyCallSites(forbidden, sinkPath,
+                    candidatePath, entry), "ForbiddenCandidateCall.cs");
+        }
+
+        private static void ValidateInventoryOnlyCallSites(
+            IDictionary<string, string> sources, string sinkPath,
+            string candidatePath, string entry)
+        {
+            string expectedDefinition = Path.GetFullPath(sinkPath);
+            string expectedCall = Path.GetFullPath(candidatePath);
+            foreach (KeyValuePair<string, string> source in sources)
+            {
+                string path = Path.GetFullPath(source.Key);
+                int expected = path == expectedDefinition
+                    || path == expectedCall ? 1 : 0;
+                int actual = Occurrences(source.Value, entry);
+                if (actual != expected)
+                    throw new InvalidDataException(
+                        "The inventory-only S2 completion entry has a forbidden production call site: "
+                        + Path.GetFileName(path));
+            }
+        }
+
+        internal static byte[] ZeroInventoryRequestAwareRawForTesting()
+        {
+            var output = new StringWriter(
+                System.Globalization.CultureInfo.InvariantCulture);
+            var sink = RequestAwareSink(
+                new FakeStateSource(new byte[0x2000]), output, 1, 4);
+            sink.Begin(EmptyFrontier());
+            sink.Frame(1, EmptyFrame(1), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]);
+            const uint a7 = 0x00FF1020;
+            var marker = new GpgxAudioTraceEvent
+            {
+                Ordinal = 0, ServiceToken = 0, ParentToken = 0,
+                Pc = S2PreconsumptionRequestObserver.Pc,
+                Subject = S2PreconsumptionRequestObserver.MarkerToken,
+                Kind = 10, ServiceKindId = 0, Depth = 0, SourceCpu = 2,
+                PayloadLength = 4, Value = 3, Payload = a7
+            };
+            var frame = new CompleteRunAudioObserver.FrameCapture(
+                new[] { marker },
+                new List<CompleteRunAudioObserver.ServiceBuilder>(),
+                new List<CompleteRunAudioObserver.ResetRecord>(), 0,
+                (CompleteRunAudioObserver.DeferredBeginReservation)null, 2);
+            sink.Frame(2, frame, EmptyPacket(), new[]
+            {
+                new S2PreconsumptionRequestObserver.Transfer(
+                    2, 0xB5, 3, a7, 0, 0, 0, 0)
+            });
+            sink.Frame(3, EmptyFrame(3), EmptyPacket(),
+                new S2PreconsumptionRequestObserver.Transfer[0]);
+            sink.Complete(EmptyFrontier());
+            return System.Text.Encoding.UTF8.GetBytes(output.ToString());
+        }
+
+        private static int Occurrences(string value, string needle)
+        {
+            int count = 0, index = 0;
+            while ((index = value.IndexOf(needle, index,
+                StringComparison.Ordinal)) >= 0)
+            { count++; index += needle.Length; }
+            return count;
+        }
+
         private static CompleteRunAudioObserver.CutoffFrontier EmptyFrontier()
         {
             return new CompleteRunAudioObserver.CutoffFrontier(
@@ -460,6 +633,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
             return new RequestAwareSinkHarness(state, output);
         }
 
+        private static RequestAwareSinkHarness RequestAwareSink(
+            IS2CompleteAudioStateSource state, TextWriter output,
+            int firstRow, int exclusiveEnd)
+        {
+            return new RequestAwareSinkHarness(
+                state, output, firstRow, exclusiveEnd);
+        }
+
         private sealed class RequestAwareSinkHarness
         {
             private readonly object sink;
@@ -469,6 +650,19 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
             internal RequestAwareSinkHarness(
                 IS2CompleteAudioStateSource state, TextWriter output)
+                : this(state, output, null)
+            { }
+
+            internal RequestAwareSinkHarness(
+                IS2CompleteAudioStateSource state, TextWriter output,
+                int firstRow, int exclusiveEnd)
+                : this(state, output,
+                    new object[] { state, output, firstRow, exclusiveEnd })
+            { }
+
+            private RequestAwareSinkHarness(
+                IS2CompleteAudioStateSource state, TextWriter output,
+                object[] constructorArguments)
             {
                 Type type = typeof(S2CompleteAudioCaptureRunner
                     .RequestAwareRawV3Candidate).GetNestedType(
@@ -477,7 +671,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "The closed producer has no private raw-v3 sink.");
                 sink = Activator.CreateInstance(type,
                     BindingFlags.Instance | BindingFlags.NonPublic,
-                    null, new object[] { state, output }, null);
+                    null, constructorArguments
+                        ?? new object[] { state, output }, null);
                 begin = type.GetMethod("Begin",
                     BindingFlags.Instance | BindingFlags.NonPublic);
                 frame = type.GetMethod("Frame",
@@ -499,6 +694,29 @@ namespace OpenGGF.BizHawk.Headless.Tests
             internal void Complete(
                 CompleteRunAudioObserver.CutoffFrontier cutoff)
             { Invoke(complete, new object[] { cutoff }); }
+
+            internal void SetCompletionStateForTesting(
+                bool resume, bool pcm, bool awaiting)
+            {
+                FieldInfo v2Field = sink.GetType().GetField("v2",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (v2Field == null) throw new InvalidOperationException(
+                    "The closed producer sink lost its v2 closure owner.");
+                object v2 = v2Field.GetValue(sink);
+                SetBoolean(v2, "resumeSelected", resume);
+                SetBoolean(v2, "pcmSelected", pcm);
+                SetBoolean(v2, "awaitingFollowingRowPcm", awaiting);
+            }
+
+            private static void SetBoolean(
+                object target, string name, bool value)
+            {
+                FieldInfo field = target.GetType().GetField(name,
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field == null) throw new InvalidOperationException(
+                    "The S2 completion state changed: " + name);
+                field.SetValue(target, value);
+            }
 
             private void Invoke(MethodInfo method, object[] arguments)
             {

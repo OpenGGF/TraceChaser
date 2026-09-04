@@ -121,7 +121,8 @@ gpgx_audio_trace_drain
 gpgx_audio_trace_end_frame
 gpgx_audio_trace_event_count
 gpgx_audio_trace_event_size
-gpgx_audio_trace_first_fault'
+gpgx_audio_trace_first_fault
+gpgx_audio_trace_s2_request_successor_ordinal'
   [[ "$exports" = "$expected" ]] || fail "observer exports differ:
 $exports"
 

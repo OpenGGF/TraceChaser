@@ -31,7 +31,6 @@ namespace OpenGGF.BizHawk.Headless
         internal const string AuthorityId = "s2-request-candidate-unbound";
         private const int MarkerKind = 10;
         private const int MarkerValue = 3;
-        private const int MarkerSubject = 24;
 
         /// <summary>Names the three files an extraction writes.</summary>
         internal sealed class ExtractionOutputs
@@ -105,8 +104,8 @@ namespace OpenGGF.BizHawk.Headless
                     {
                         throw new InvalidOperationException(
                             "The request-window capture failed at movie row "
-                            + row.ToString(CultureInfo.InvariantCulture) + ".",
-                            error);
+                            + row.ToString(CultureInfo.InvariantCulture) + ": "
+                            + error.Message, error);
                     }
                 }
                 producer.Complete();
@@ -196,10 +195,18 @@ namespace OpenGGF.BizHawk.Headless
                         byte[] bytes = Canonical(value);
                         allBytes.AddRange(bytes);
                         allCount++;
-                        bool marker = (int)value["kind"] == MarkerKind
-                            && (int)value["value"] == MarkerValue
-                            && (int)value["pc"] == S2PreconsumptionRequestObserver.Pc
-                            && (int)value["subject"] == MarkerSubject;
+                        // The extractor's own marker classification: either
+                        // request marker token, or the fixed action-7 record at
+                        // the request PC.
+                        bool marker =
+                            (int)value["subject"]
+                                == S2PreconsumptionRequestObserver.MarkerToken
+                            || (int)value["subject"]
+                                == S2PreconsumptionRequestObserver.Kind3MarkerToken
+                            || ((int)value["kind"] == MarkerKind
+                                && (int)value["value"] == MarkerValue
+                                && (int)value["pc"]
+                                    == S2PreconsumptionRequestObserver.Pc);
                         if (marker)
                         {
                             markerBytes.AddRange(bytes);

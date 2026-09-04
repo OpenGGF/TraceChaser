@@ -27,13 +27,13 @@ namespace OpenGGF.BizHawk.Headless
         private const int DefaultWindowFirst = 10150;
         private const int DefaultWindowEnd = 10900;
         private const string CandidateManifestSha256 =
-            "7fa043d51da88ac25a885ed371c55f33362a9af909c05b7807558643e1edc62e";
+            "5f496d28ab911ba7eb6b48d3848848d57f424933ecdec7dacb18cf40f7ff0644";
         private const string CandidatePatchSha256 =
-            "03ee8c72e14c96875cdbda4dc401bed358a8e4e1314d9fc63907598b24a1ba5b";
+            "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b";
         private const string CandidateRecipeSha256 =
-            "f1bae0e92c238c8fb92fc424482e51facecc1aabb01e9443c889ef49e7450312";
+            "50efba4fdcf4d3787ceb42192e15b16e614823b117feeb8c30590f1db0c855a6";
         private const string CandidateProfileSha256 =
-            "e955877eb60bc1ba7c281cc63bd3b9f7146e086cb14162dfaf09e38fae227719";
+            "acded87014391797787f69a66daaac8a6d0edbe2995dd54e9a1bdb35dd8a62df";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
         /// <summary>
         /// True when the capability's inventory was derived from the very raw
@@ -63,8 +63,10 @@ namespace OpenGGF.BizHawk.Headless
             if (string.IsNullOrEmpty(movieSha256))
                 throw new ArgumentNullException("movieSha256");
             expectedMovieSha256 = movieSha256;
+            // A bounded window-source candidate was cut at capture time, so
+            // its window is its whole source and the two starts coincide.
             if (sourceStart < 0 || sourceStop <= sourceStart
-                || windowStart <= sourceStart || windowStop > sourceStop
+                || windowStart < sourceStart || windowStop > sourceStop
                 || windowStop <= windowStart)
                 throw new ArgumentException("The S2 request-aware bounds are invalid.");
             sourceFirst = sourceStart; sourceEnd = sourceStop;
@@ -186,8 +188,11 @@ namespace OpenGGF.BizHawk.Headless
             { throw Invalid("baseline lifecycle differs",error); }
             int latch0 = replay.YmPort0Address;
             int latch1 = replay.YmPort1Address;
-            int precedingLatch0 = 0, precedingLatch1 = 0;
-            JObject preceding = null;
+            bool coincidentWindow = windowFirst == sourceFirst;
+            int precedingLatch0 = coincidentWindow ? latch0 : 0;
+            int precedingLatch1 = coincidentWindow ? latch1 : 0;
+            JObject preceding = coincidentWindow
+                ? (JObject)firstBaseline.DeepClone() : null;
             long baseCount = 0, allCount = 0, markerCount = 0, requestCount = 0;
             int occupancy = 0, nextGlobal = 0, expectedRow = sourceFirst;
             var resumePcm = new ResumePcmValidator();
@@ -571,9 +576,7 @@ namespace OpenGGF.BizHawk.Headless
                 && Integer(value,"slot") <= 3
                 && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc
                 && Byte(value,"source_cpu")==S2PreconsumptionRequestObserver.MarkerSourceCpu
-                && Integer(value,"service_token")==S2PreconsumptionRequestObserver.MarkerServiceToken
-                && Byte(value,"service_kind")==S2PreconsumptionRequestObserver.MarkerServiceKind
-                && Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth,
+                && ReviewedTransferOwner(value),
                 "request transfer identity differs");
             uint a7; if (!uint.TryParse(String(value,"a7"), out a7)
                 || String(value,"a7")!=a7.ToString())
@@ -590,22 +593,61 @@ namespace OpenGGF.BizHawk.Headless
                 "request service owner differs");
             JObject marker; if (!markers.TryGetValue(native,out marker)
                 || !consumed.Add(native) || !Marker(marker)
+                || Integer(marker,"service_token")
+                    !=Integer(value,"service_token")
+                || Byte(marker,"service_kind")!=Byte(value,"service_kind")
+                || Byte(marker,"depth")!=Byte(value,"depth")
                 || String(marker,"payload") != String(value,"a7"))
                 throw Invalid("request transfer/action-7 marker differs");
         }
 
+        private static bool ReviewedTransferOwner(JObject value)
+        {
+            int token=Integer(value,"service_token");
+            int kind=Byte(value,"service_kind");
+            int depth=Byte(value,"depth");
+            return (token==S2PreconsumptionRequestObserver.MarkerServiceToken
+                    &&kind==S2PreconsumptionRequestObserver.MarkerServiceKind
+                    &&depth==S2PreconsumptionRequestObserver.MarkerDepth)
+                ||(token!=S2PreconsumptionRequestObserver.MarkerServiceToken
+                    &&kind==S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
+                    &&(depth==S2PreconsumptionRequestObserver.MarkerDepth
+                        ||depth==1));
+        }
+
         private static bool Marker(JObject value)
-        { return Byte(value,"kind")==10 && Unsigned(value,"value")==3
+        {
+            bool common=Byte(value,"kind")==10 && Unsigned(value,"value")==3
             && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc
-            && Unsigned(value,"subject")==S2PreconsumptionRequestObserver.MarkerToken
             && Byte(value,"source_cpu")==S2PreconsumptionRequestObserver.MarkerSourceCpu
-            && Integer(value,"service_token")==S2PreconsumptionRequestObserver.MarkerServiceToken
-            && Integer(value,"parent_token")==S2PreconsumptionRequestObserver.MarkerServiceToken
-            && Byte(value,"service_kind")==S2PreconsumptionRequestObserver.MarkerServiceKind
-            && Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth
-            && Byte(value,"payload_length")==4; }
+            && Byte(value,"payload_length")==4;
+            bool root=Unsigned(value,"subject")
+                    ==S2PreconsumptionRequestObserver.MarkerToken
+                &&Integer(value,"service_token")
+                    ==S2PreconsumptionRequestObserver.MarkerServiceToken
+                &&Integer(value,"parent_token")
+                    ==S2PreconsumptionRequestObserver.MarkerServiceToken
+                &&Byte(value,"service_kind")
+                    ==S2PreconsumptionRequestObserver.MarkerServiceKind
+                &&Byte(value,"depth")==S2PreconsumptionRequestObserver.MarkerDepth;
+            int kind3Token=Integer(value,"service_token");
+            int kind3Parent=Integer(value,"parent_token");
+            int kind3Depth=Byte(value,"depth");
+            bool kind3=Unsigned(value,"subject")
+                    ==S2PreconsumptionRequestObserver.Kind3MarkerToken
+                &&kind3Token!=S2PreconsumptionRequestObserver.MarkerServiceToken
+                &&Byte(value,"service_kind")
+                    ==S2PreconsumptionRequestObserver.Kind3MarkerServiceKind
+                &&((kind3Parent==S2PreconsumptionRequestObserver.MarkerServiceToken
+                        &&kind3Depth==S2PreconsumptionRequestObserver.MarkerDepth)
+                    ||(kind3Parent!=S2PreconsumptionRequestObserver.MarkerServiceToken
+                        &&kind3Parent!=kind3Token&&kind3Depth==1));
+            return common&&(root||kind3);
+        }
         private static bool MarkerCandidate(JObject value)
         { return Unsigned(value,"subject")==S2PreconsumptionRequestObserver.MarkerToken
+            || Unsigned(value,"subject")
+                ==S2PreconsumptionRequestObserver.Kind3MarkerToken
             || (Byte(value,"kind")==10 && Unsigned(value,"value")==3
                 && Unsigned(value,"pc")==S2PreconsumptionRequestObserver.Pc); }
 

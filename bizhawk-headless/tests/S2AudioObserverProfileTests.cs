@@ -201,10 +201,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 identity.InstallationId);
             // CoreId now carries the patch digest the build recorded.
             AssertEx.Equal(
-                "77ba1eabeaa4b550437117925062e5d4e3e3ada5f5f197112cde8c89a57980bb",
+                "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b",
                 identity.CoreId);
             AssertEx.Equal(5, identity.AbiVersion);
-            AssertEx.Equal("6feee0d1b2ca882b", identity.BuildId);
+            AssertEx.Equal("9ded8f477abe193d", identity.BuildId);
 
             string root = TestScratch.CreateRootPath("s2-audio-install");
             Directory.CreateDirectory(Path.Combine(root,

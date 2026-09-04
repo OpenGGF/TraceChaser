@@ -9,14 +9,14 @@
   },
   "native_patch": {
     "file": "0001-buffer-z80-audio-events.patch",
-    "sha256": "77ba1eabeaa4b550437117925062e5d4e3e3ada5f5f197112cde8c89a57980bb"
+    "sha256": "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b"
   },
   "core": {
-    "decompressed_sha256": "c47e8e1aef25b39d4a947d8d57f77b2680cfb013103315945a48dabc2f4a54b0",
-    "compressed_sha256": "28b7d3760d9770fa21c548366f9ec85d2e4038f0e77d3d8a847f99f0ddc48d41",
-    "build_id": "6feee0d1b2ca882b"
+    "decompressed_sha256": "177fb4b04e73fa12edc2fdcb097d6f11a8850a8cdf86fabeaaf8b374d62e4464",
+    "compressed_sha256": "25ee305d8bcac2567d60fd04c14238784ddd018808d4dafe7d5ef2b8372677b6",
+    "build_id": "9ded8f477abe193d"
   },
   "identity": {
-    "sha256": "c28e4b8a76f7e5a2df742c5b4769edfe1a6a2bc875e03c5a2d6b5bef91d207bc"
+    "sha256": "95188e3c2cbb433188bce06e995d497afd290246ee6123da6f0060a5463893e7"
   }
 }

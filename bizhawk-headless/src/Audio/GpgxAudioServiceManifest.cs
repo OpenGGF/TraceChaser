@@ -82,13 +82,12 @@ namespace OpenGGF.BizHawk.Headless
             {
                 for(int i=0;i<hooks.Length;i++)
                     if(hooks[i].HookToken==S2PreconsumptionRequestObserver.MarkerToken
+                        ||hooks[i].HookToken==S2PreconsumptionRequestObserver.Kind3MarkerToken
                         ||(hooks[i].Cpu==S2PreconsumptionRequestObserver.MarkerSourceCpu
                             &&hooks[i].Pc==S2PreconsumptionRequestObserver.Pc)
                         ||hooks[i].Action==7)
                         throw new InvalidDataException("The authenticated S2 profile collides with the fixed request hook.");
-                var extended=new GpgxAudioObserverAdapter.ServiceHook[hooks.Length+1];
-                Array.Copy(hooks,extended,hooks.Length);
-                extended[hooks.Length]=new GpgxAudioObserverAdapter.ServiceHook
+                var rootMarker=new GpgxAudioObserverAdapter.ServiceHook
                 {
                     HookToken=S2PreconsumptionRequestObserver.MarkerToken,
                     Action=7,Cpu=S2PreconsumptionRequestObserver.MarkerSourceCpu,
@@ -98,6 +97,34 @@ namespace OpenGGF.BizHawk.Headless
                     Flags=0,OpcodeLength=4,RangeFirst=0,RangeCount=0,
                     Opcode=0x09108013UL,Reserved=0
                 };
+                var kind3Marker=new GpgxAudioObserverAdapter.ServiceHook
+                {
+                    HookToken=S2PreconsumptionRequestObserver.Kind3MarkerToken,
+                    Action=7,Cpu=S2PreconsumptionRequestObserver.MarkerSourceCpu,
+                    Pc=S2PreconsumptionRequestObserver.Pc,
+                    ServiceKindId=S2PreconsumptionRequestObserver.MarkerServiceKind,
+                    ExpectedActiveKind=S2PreconsumptionRequestObserver.Kind3MarkerServiceKind,
+                    Flags=0,OpcodeLength=4,RangeFirst=0,RangeCount=0,
+                    Opcode=0x09108013UL,Reserved=0
+                };
+                // The core requires hooks ordered by CPU, then PC, then token,
+                // so the pair is inserted at its ordered position rather than
+                // appended past the authenticated M68K hooks.
+                int insertion=0;
+                while(insertion<hooks.Length
+                    &&(hooks[insertion].Cpu<rootMarker.Cpu
+                        ||(hooks[insertion].Cpu==rootMarker.Cpu
+                            &&hooks[insertion].Pc<rootMarker.Pc)
+                        ||(hooks[insertion].Cpu==rootMarker.Cpu
+                            &&hooks[insertion].Pc==rootMarker.Pc
+                            &&hooks[insertion].HookToken<rootMarker.HookToken)))
+                    insertion++;
+                var extended=new GpgxAudioObserverAdapter.ServiceHook[hooks.Length+2];
+                Array.Copy(hooks,0,extended,0,insertion);
+                extended[insertion]=rootMarker;
+                extended[insertion+1]=kind3Marker;
+                Array.Copy(hooks,insertion,extended,insertion+2,
+                    hooks.Length-insertion);
                 hooks=extended;
             }
             var config=new GpgxAudioObserverAdapter.Config { Magic=0x31544147,AbiVersion=1,StructSize=64,HookSize=32,RangeSize=16,EventSize=32,MaxDepth=8,MaxOpcodeBytes=8,ResetServiceKind=1,MaxContinuationFrames=4,WatchMaskBytes=8192,HookCount=(uint)hooks.Length,RangeCount=(uint)ranges.Length,SnapshotBytesTotal=snapshots,EventCapacity=65536,MaxServiceTokensPerFrame=65535,KindSize=16,KindCount=(ushort)kinds.Length };

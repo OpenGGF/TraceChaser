@@ -51,6 +51,16 @@ every non-action-7 marker retain zero payload length and bytes. The sample is
 taken at the reviewed instruction boundary after the managed execute callback
 and before opcode execution, without mutating emulated state.
 
+The observer also exports `gpgx_audio_trace_s2_request_successor_ordinal`,
+which reports the event ordinal a Sonic 2 request marker will take, sampled
+inside the managed execute callback at the `sndDriverInput` transfer
+instruction. It is not an ABI action and adds no event: it answers one
+question about ordering, and only when the configured hooks are exactly the
+reviewed pair of action-7 markers at that PC and the service stack is in one
+of the two reviewed shapes. Anything else returns the ABI/config limit rather
+than a number. `selftest/run.sh` proves both the boundary and the fixed marker
+topology.
+
 ABI v5 adds action 13, `SNAPSHOT_AT_PC`, the one parent-independent
 observation. Every other action attaches to the service stack, which is shared
 across processors: the active service at an M68K instruction is whichever Z80
