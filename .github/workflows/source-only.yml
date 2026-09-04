@@ -110,9 +110,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_integration }}
     runs-on: [self-hosted, linux, x64, tracechaser-bizhawk-2.11]
     timeout-minutes: 45
-    env:
-      BIZHAWK_ARCHIVE: ${{ runner.tool_cache }}/tracechaser/BizHawk-2.11-linux-x64.tar.gz
-      BIZHAWK_HOME: ${{ github.workspace }}/.dependencies/BizHawk-2.11-linux-x64
+    # The runner context is only available inside steps, so the BizHawk paths
+    # are declared per step rather than at job level (a job-level runner.*
+    # reference makes the whole workflow file invalid).
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -120,6 +120,9 @@ jobs:
           persist-credentials: false
 
       - name: Verify official archive identity and stage the runtime
+        env:
+          BIZHAWK_ARCHIVE: ${{ runner.tool_cache }}/tracechaser/BizHawk-2.11-linux-x64.tar.gz
+          BIZHAWK_HOME: ${{ github.workspace }}/.dependencies/BizHawk-2.11-linux-x64
         run: |
           set -euo pipefail
           test -f "$BIZHAWK_ARCHIVE"
@@ -127,4 +130,6 @@ jobs:
           bizhawk/preflight_bizhawk_2_11.sh --bizhawk-home "$BIZHAWK_HOME"
 
       - name: Run native source integration tests
+        env:
+          BIZHAWK_HOME: ${{ github.workspace }}/.dependencies/BizHawk-2.11-linux-x64
         run: BIZHAWK_HOME="$BIZHAWK_HOME" bizhawk-headless/test.sh --no-gates
