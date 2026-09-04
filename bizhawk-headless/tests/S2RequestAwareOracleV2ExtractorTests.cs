@@ -1893,6 +1893,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             public IDisposable RegisterExecuteCallback(uint address,
                 Action value)
             {
+                // Both of sndDriverInput's stores into Z80 RAM are watched:
+                // the SFX one inside .loop and the music one at loc_10C0
+                // (docs/s2disasm/s2.asm:1302-1304, :1317-1326). These tests
+                // drive the SFX site, so only that callback is kept.
+                if (address == S2PreconsumptionRequestObserver.MusicPc)
+                    return new CallbackRegistration(this);
                 if (address != S2PreconsumptionRequestObserver.Pc)
                     throw new InvalidOperationException("callback PC");
                 callback = value;

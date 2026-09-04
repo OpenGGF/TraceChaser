@@ -27,13 +27,13 @@ namespace OpenGGF.BizHawk.Headless
         private const int DefaultWindowFirst = 10150;
         private const int DefaultWindowEnd = 10900;
         private const string CandidateManifestSha256 =
-            "5f496d28ab911ba7eb6b48d3848848d57f424933ecdec7dacb18cf40f7ff0644";
+            "858ee7905edd1d31ebf0aa0a71213382354ec735267dad556831ac5dac0b5e52";
         private const string CandidatePatchSha256 =
             "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b";
         private const string CandidateRecipeSha256 =
             "50efba4fdcf4d3787ceb42192e15b16e614823b117feeb8c30590f1db0c855a6";
         private const string CandidateProfileSha256 =
-            "acded87014391797787f69a66daaac8a6d0edbe2995dd54e9a1bdb35dd8a62df";
+            "2589688946774b5a8977d16b969ec72e510eca4069bf3e8a61c3fde66d2a0212";
         private readonly int sourceFirst, sourceEnd, windowFirst, windowEnd;
         /// <summary>
         /// True when the capability's inventory was derived from the very raw

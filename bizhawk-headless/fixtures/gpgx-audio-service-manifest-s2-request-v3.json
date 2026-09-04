@@ -1,5 +1,5 @@
 {
-  "schema": "openggf.s2-preconsumption-request-manifest.v1",
+  "schema": "openggf.s2-preconsumption-request-manifest.v2",
   "production_bound": false,
   "base_service_manifest_sha256": "ef8f8103c38d70e41cb09cb29751f56815a0401709dc509071aa514d614813a0",
   "candidate_native_patch_file": "bizhawk-headless/native/gpgx-audio-observer/0001-buffer-z80-audio-events.patch",
@@ -25,5 +25,14 @@
     ],
     "source_file": "docs/s2disasm/s2.asm",
     "source_label": "sndDriverInput accepted M68K-to-Z80 transfer"
+  },
+  "music_transfer": {
+    "cpu": "M68K",
+    "pc": 4288,
+    "opcode": "13400008",
+    "slot": 4,
+    "source_file": "docs/s2disasm/s2.asm",
+    "source_label": "sndDriverInput accepted M68K-to-Z80 music transfer",
+    "note": "move.b d0,zVar.QueueToPlay(a1) at .isNotPauseCommand, which the disassembly labels loc_10C0 (s2.asm:1302-1304). It is the other of sndDriverInput's two stores into Z80 RAM; request_transfer names the SFX one inside .loop (:1317-1326). D1 is not a queue slot here, because :1294-1295 leave it holding the pause-check residue of move.b d0,d1 and subi.b #MusID_Pause,d1, so the slot is the fixed identity above rather than a register read."
   }
 }

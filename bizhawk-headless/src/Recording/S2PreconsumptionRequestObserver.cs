@@ -22,6 +22,25 @@ namespace OpenGGF.BizHawk.Headless
     internal sealed class S2PreconsumptionRequestObserver : IDisposable
     {
         internal const uint Pc = 0x0010D6;
+        /// <summary>
+        /// sndDriverInput's other store into Z80 RAM: move.b
+        /// d0,zVar.QueueToPlay(a1) at .isNotPauseCommand, which the
+        /// disassembly labels loc_10C0 (docs/s2disasm/s2.asm:1302-1304).
+        /// <see cref="Pc"/> names the SFX store inside .loop (:1317-1326);
+        /// this one carries every music request, and also any sound a caller
+        /// routes through PlayMusic rather than PlaySound, such as the
+        /// ring-milestone check at :25913-25914.
+        /// </summary>
+        internal const uint MusicPc = 0x0010C0;
+        /// <summary>
+        /// The slot a music transfer is recorded under. The SFX site reads D1,
+        /// which the .loop index makes a real queue slot, but at
+        /// <see cref="MusicPc"/> D1 holds the pause-check residue of
+        /// move.b d0,d1 and subi.b #MusID_Pause,d1 (:1294-1295), so it is not
+        /// a slot and is not read. Four is outside the driver's 0..3 SFX
+        /// queue, so a music transfer can never be confused with one.
+        /// </summary>
+        internal const ushort MusicSlot = 4;
         internal const ushort MarkerToken = 24;
         internal const ushort Kind3MarkerToken = 25;
         internal const byte MarkerSourceCpu = 2;
@@ -29,11 +48,19 @@ namespace OpenGGF.BizHawk.Headless
         internal const byte MarkerServiceKind = 0;
         internal const byte Kind3MarkerServiceKind = 3;
         internal const byte MarkerDepth = 0;
-        private const int MaximumTransfersPerRow = 4;
+        /// <summary>
+        /// One pass of sndDriverInput can transfer at most one music request
+        /// and four SFX ones, because .doSFX loads moveq #4-1,d1 on the
+        /// shipped fixBugs = 0 path (docs/s2disasm/s2.asm:1310-1315). The
+        /// bound is that maximum rather than a comfortable margin, so a row
+        /// that genuinely exceeds it fails loudly instead of being trimmed.
+        /// </summary>
+        private const int MaximumTransfersPerRow = 5;
 
         private readonly ICpuRegisterReader registers;
         private readonly CompleteRunAudioObserver nativeObserver;
         private readonly IDisposable registration;
+        private readonly IDisposable musicRegistration;
         private readonly Queue<PendingTransfer> pending =
             new Queue<PendingTransfer>();
         private readonly List<Transfer> published = new List<Transfer>();
@@ -59,7 +86,14 @@ namespace OpenGGF.BizHawk.Headless
                 byte depth, byte sourceCpu)
             {
                 Row = row; Request = request; Slot = slot;
-                Pc = S2PreconsumptionRequestObserver.Pc; A7 = stack;
+                // sndDriverInput stores twice and the slot says which store
+                // this was: the reserved music slot can only come from
+                // loc_10C0 (docs/s2disasm/s2.asm:1302-1304), everything else
+                // from the SFX store inside .loop (:1317-1326).
+                Pc = slot == MusicSlot
+                    ? S2PreconsumptionRequestObserver.MusicPc
+                    : S2PreconsumptionRequestObserver.Pc;
+                A7 = stack;
                 NativeOrdinal = nativeOrdinal; ServiceToken = serviceToken;
                 ServiceKind = serviceKind; Depth = depth; SourceCpu = sourceCpu;
             }
@@ -116,6 +150,9 @@ namespace OpenGGF.BizHawk.Headless
             if (expectedExclusiveEnd <= 0)
                 throw new ArgumentOutOfRangeException("expectedExclusiveEnd");
             if (candidate.Pc != Pc || candidate.Opcode != "13801009"
+                || candidate.MusicPc != MusicPc
+                || candidate.MusicOpcode != "13400008"
+                || candidate.MusicSlot != MusicSlot
                 || candidate.MarkerToken != MarkerToken
                 || candidate.Kind3MarkerToken != Kind3MarkerToken
                 || candidate.ProductionBound)
@@ -131,6 +168,11 @@ namespace OpenGGF.BizHawk.Headless
             if (registration == null)
                 throw new InvalidOperationException(
                     "The fixed S2 request observer was not registered.");
+            musicRegistration =
+                host.RegisterExecuteCallback(MusicPc, OnMusicTransfer);
+            if (musicRegistration == null)
+                throw new InvalidOperationException(
+                    "The fixed S2 music request observer was not registered.");
         }
 
         internal IReadOnlyList<Transfer> PublishedTransfers
@@ -297,6 +339,34 @@ namespace OpenGGF.BizHawk.Headless
             return false;
         }
 
+        /// <summary>
+        /// The music half of sndDriverInput. It records the same request byte
+        /// from D0 and the same successor ordinal, under the fixed
+        /// <see cref="MusicSlot"/>; it reads no slot register, because there
+        /// is none to read at this instruction.
+        /// </summary>
+        private void OnMusicTransfer()
+        {
+            if (activeRow < 0)
+                throw new InvalidOperationException(
+                    "The S2 music request callback is outside an active row.");
+            if (pending.Count >= MaximumTransfersPerRow)
+                throw new InvalidOperationException(
+                    "The S2 music request callback exceeded its five-slot bound.");
+            byte request = (byte)registers.ReadCpuRegister("M68K D0");
+            if (request == 0)
+                throw new InvalidOperationException(
+                    "The S2 music request callback observed a zero transfer.");
+            pending.Enqueue(new PendingTransfer
+            {
+                Row = activeRow,
+                Request = request,
+                Slot = MusicSlot,
+                A7 = registers.ReadCpuRegister("M68K A7"),
+                SuccessorOrdinal = nativeObserver.CurrentS2RequestSuccessorOrdinal()
+            });
+        }
+
         private void OnTransfer()
         {
             if (activeRow < 0)
@@ -304,7 +374,7 @@ namespace OpenGGF.BizHawk.Headless
                     "The S2 request callback is outside an active row.");
             if (pending.Count >= MaximumTransfersPerRow)
                 throw new InvalidOperationException(
-                    "The S2 request callback exceeded its four-slot bound.");
+                    "The S2 request callback exceeded its five-slot bound.");
             byte request = (byte)registers.ReadCpuRegister("M68K D0");
             ushort slot = (ushort)registers.ReadCpuRegister("M68K D1");
             if (request == 0)
@@ -328,6 +398,7 @@ namespace OpenGGF.BizHawk.Headless
             if (disposed) return;
             disposed = true;
             registration.Dispose();
+            musicRegistration.Dispose();
             if (pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request observer ended with unmatched callbacks.");

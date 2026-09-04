@@ -113,6 +113,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2PreconsumptionRequestObserverTests reject callback overflow in one owned row",
                 RejectsCallbackOverflow));
             tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests record the music store under its reserved slot",
+                RecordsTheMusicStoreUnderItsReservedSlot));
+            tests.Add(new TestMain.TestCase(
+                "S2PreconsumptionRequestObserverTests reject a zero music transfer",
+                RejectsAZeroMusicTransfer));
+            tests.Add(new TestMain.TestCase(
                 "S2PreconsumptionRequestObserverTests reject a callback outside the owned row",
                 RejectsCallbackOutsideOwnedRow));
             tests.Add(new TestMain.TestCase(
@@ -178,8 +184,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x00FF1020u, transfers[0].A7);
             AssertEx.Equal(0u, transfers[0].NativeOrdinal);
             DisposeIncompleteSession(observer);
-            AssertEx.Equal(1, host.Registrations);
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Registrations);
+            AssertEx.Equal(2, host.Disposals);
             AssertEx.Equal(S2PreconsumptionRequestObserver.Pc, host.Address);
         }
 
@@ -436,7 +442,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal((ushort)2, transfers[0].Slot);
             }
             finally { DisposeIncompleteSession(session); }
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void ClosesNativeCorrelationAndRawV3Publication()
@@ -452,7 +458,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     host, output);
             AssertEx.Equal(1, api.ConfigureCalls);
             AssertEx.Equal(2, api.FixedCandidateHookCount);
-            AssertEx.Equal(1, host.Registrations);
+            AssertEx.Equal(2, host.Registrations);
             AssertEx.Equal(S2PreconsumptionRequestObserver.Pc, host.Address);
             try
             {
@@ -509,7 +515,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Throws<InvalidDataException>(
                     () => producer.Dispose(), "full power-on interval");
             }
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void RejectsClosedProducerManifestMismatch()
@@ -576,10 +582,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
             producer.AdvanceRow(0, new Bk2Frame());
             AssertEx.Throws<InvalidDataException>(() => producer.Complete(),
                 "full power-on interval");
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
             AssertEx.Equal(1, api.DisableCalls);
             producer.Dispose();
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
             AssertEx.Equal(1, api.DisableCalls);
         }
 
@@ -694,8 +700,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     session.PublishedTransfers[0].Row);
             }
             finally { DisposeIncompleteSession(session); }
-            AssertEx.Equal(1, host.Registrations);
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Registrations);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void IgnoresOrdinaryEventsWithoutRequest()
@@ -766,6 +772,50 @@ namespace OpenGGF.BizHawk.Headless.Tests
             }
         }
 
+        /// <summary>
+        /// sndDriverInput's music store carries every music request, and any
+        /// sound a caller routes through PlayMusic rather than PlaySound, such
+        /// as the ring-milestone check at docs/s2disasm/s2.asm:25913-25914.
+        /// It is recorded under the reserved slot and its own PC.
+        /// </summary>
+        private static void RecordsTheMusicStoreUnderItsReservedSlot()
+        {
+            var host = new FakeHost();
+            host.Set("M68K D0", 0x0000008E); host.Set("M68K D1", 0x0000000E);
+            host.Set("M68K A7", 0x00FF1020);
+            var api = new QueuedTraceApi();
+            var observer = OpenSession(host, api);
+            IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
+                observer.AdvanceRow(0, () =>
+                {
+                    api.Events = new GpgxAudioTraceEvent[0];
+                    host.Execute(S2PreconsumptionRequestObserver.MusicPc);
+                    api.Events = new[] { Marker(0x00FF1020, 0) };
+                });
+            AssertEx.Equal(1, transfers.Count);
+            AssertEx.Equal((byte)0x8E, transfers[0].Request);
+            // D1 held 0Eh and is deliberately not read here: at loc_10C0 it is
+            // the pause-check residue of move.b d0,d1 and subi.b
+            // #MusID_Pause,d1 (:1294-1295), not a queue slot.
+            AssertEx.Equal(S2PreconsumptionRequestObserver.MusicSlot,
+                transfers[0].Slot);
+            AssertEx.Equal(0x0010C0u, transfers[0].Pc);
+            DisposeIncompleteSession(observer);
+        }
+
+        private static void RejectsAZeroMusicTransfer()
+        {
+            var host = RequestHost(0, 0, 0x00FF1020);
+            var api = new QueuedTraceApi();
+            using (var session = OpenSession(host, api))
+            {
+                AssertEx.Throws<InvalidOperationException>(
+                    () => session.AdvanceRow(0, () =>
+                        host.Execute(S2PreconsumptionRequestObserver.MusicPc)),
+                    "zero transfer");
+            }
+        }
+
         private static void RejectsCallbackOverflow()
         {
             var host = RequestHost(1, 0, 0x10);
@@ -774,9 +824,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 AssertEx.Throws<InvalidOperationException>(() => session.AdvanceRow(0, () =>
                 {
-                    for (int index = 0; index < 5; index++)
+                    // One pass of sndDriverInput can transfer one music
+                    // request and four SFX ones, so the bound is five and the
+                    // sixth callback is the overflow
+                    // (docs/s2disasm/s2.asm:1310-1315).
+                    for (int index = 0; index < 6; index++)
                         host.Execute(S2PreconsumptionRequestObserver.Pc);
-                }), "four-slot");
+                }), "five-slot");
             }
         }
 
@@ -828,9 +882,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var session = OpenSession(host, api);
             AssertEx.Throws<InvalidDataException>(() => session.Complete(),
                 "full power-on interval");
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
             session.Dispose();
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void RejectsMarkerObservedBeforeCallback()
@@ -854,9 +908,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var session = OpenSession(host, new QueuedTraceApi());
             AssertEx.Throws<InvalidDataException>(() => session.Dispose(),
                 "full power-on interval");
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
             session.Dispose();
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void CompletesFullCandidateIntervalAndUnregistersOnce()
@@ -868,9 +922,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 session.AdvanceRow(row, () =>
                     api.Events = new GpgxAudioTraceEvent[0]);
             session.Complete();
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
             session.Dispose();
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void RejectsCrossRowCandidateAdvance()
@@ -879,7 +933,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var session = OpenSession(host, new QueuedTraceApi());
             AssertEx.Throws<InvalidDataException>(() => session.AdvanceRow(1,
                 () => { }), "cannot carry evidence across rows");
-            AssertEx.Equal(1, host.Disposals);
+            AssertEx.Equal(2, host.Disposals);
         }
 
         private static void RejectsReversedFifoCallbackMarkerEvidence()
@@ -1413,7 +1467,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             private readonly Dictionary<string,uint> registers =
                 new Dictionary<string,uint>(StringComparer.Ordinal);
             private Action callback;
-            internal uint Address; internal int Registrations; internal int Disposals;
+            private Action musicCallback;
+            internal uint Address; internal uint MusicAddress;
+            internal int Registrations; internal int Disposals;
             internal QueuedTraceApi AudioApi;
             internal Action AdvanceAction;
             internal void Set(string name, uint value)
@@ -1427,9 +1483,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
             }
             internal void Execute(uint address)
             {
-                if (address != Address || callback == null)
-                    throw new InvalidOperationException("No fixed callback is registered.");
-                callback();
+                if (address == Address && callback != null) { callback(); return; }
+                if (address == MusicAddress && musicCallback != null)
+                { musicCallback(); return; }
+                throw new InvalidOperationException("No fixed callback is registered.");
             }
             public int CompletedFrame { get { return 0; } }
             public bool IsLagged { get { return false; } }
@@ -1438,7 +1495,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
             public void SetButton(string name, bool pressed) { }
             public IDisposable RegisterExecuteCallback(uint address, Action value)
             {
-                Address = address; callback = value; Registrations++;
+                // sndDriverInput has two stores into Z80 RAM and the observer
+                // watches both: the SFX one inside .loop and the music one at
+                // loc_10C0 (docs/s2disasm/s2.asm:1302-1304, :1317-1326). The
+                // fake keeps them apart so a test can drive either.
+                if (address == S2PreconsumptionRequestObserver.MusicPc)
+                { MusicAddress = address; musicCallback = value; }
+                else { Address = address; callback = value; }
+                Registrations++;
                 return new Registration(this);
             }
             public void Advance()

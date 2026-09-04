@@ -26,16 +26,22 @@ namespace OpenGGF.BizHawk.Headless
 
         internal sealed class Candidate
         {
-            internal Candidate(uint pc, string opcode, ushort markerToken,
+            internal Candidate(uint pc, string opcode, uint musicPc,
+                string musicOpcode, ushort musicSlot, ushort markerToken,
                 ushort kind3MarkerToken, bool productionBound)
             {
-                Pc = pc; Opcode = opcode; MarkerToken = markerToken;
+                Pc = pc; Opcode = opcode; MusicPc = musicPc;
+                MusicOpcode = musicOpcode; MusicSlot = musicSlot;
+                MarkerToken = markerToken;
                 Kind3MarkerToken = kind3MarkerToken;
                 ProductionBound = productionBound;
             }
 
             internal uint Pc { get; private set; }
             internal string Opcode { get; private set; }
+            internal uint MusicPc { get; private set; }
+            internal string MusicOpcode { get; private set; }
+            internal ushort MusicSlot { get; private set; }
             internal ushort MarkerToken { get; private set; }
             internal ushort Kind3MarkerToken { get; private set; }
             internal bool ProductionBound { get; private set; }
@@ -54,7 +60,7 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidDataException(
                     "The S2 request candidate manifest must be an existing absolute file.");
             JObject root = JObject.Parse(File.ReadAllText(path));
-            RequireEqual("openggf.s2-preconsumption-request-manifest.v1",
+            RequireEqual("openggf.s2-preconsumption-request-manifest.v2",
                 RequiredString(root, "schema"), "schema");
             if ((bool?)root["production_bound"] != false)
                 throw new InvalidDataException("The S2 request candidate must remain unbound.");
@@ -100,8 +106,30 @@ namespace OpenGGF.BizHawk.Headless
                 RequiredString(transfer, "source_file"), "source file");
             RequireEqual("sndDriverInput accepted M68K-to-Z80 transfer",
                 RequiredString(transfer, "source_label"), "source label");
+            // sndDriverInput's other store. Fixed exactly as the first one is:
+            // the manifest may name it, never choose it.
+            JObject music = root["music_transfer"] as JObject;
+            if (music == null) throw new InvalidDataException(
+                "The S2 request candidate has no music transfer definition.");
+            RequireEqual("M68K", RequiredString(music, "cpu"), "music CPU");
+            if ((uint?)music["pc"] != S2PreconsumptionRequestObserver.MusicPc
+                || RequiredString(music, "opcode") != "13400008"
+                || (int?)music["slot"] != S2PreconsumptionRequestObserver.MusicSlot)
+                throw new InvalidDataException(
+                    "The S2 music request fixed hook identity differs.");
+            if (music.Property("native_action") != null
+                || music.Property("marker_event_kind") != null
+                || music.Property("marker_tokens_by_expected_kind") != null)
+                throw new InvalidDataException(
+                    "The S2 music request site emits no native marker and must not claim one.");
+            RequireEqual("docs/s2disasm/s2.asm",
+                RequiredString(music, "source_file"), "music source file");
+            RequireEqual("sndDriverInput accepted M68K-to-Z80 music transfer",
+                RequiredString(music, "source_label"), "music source label");
             return new Candidate(S2PreconsumptionRequestObserver.Pc,
-                "13801009", S2PreconsumptionRequestObserver.MarkerToken,
+                "13801009", S2PreconsumptionRequestObserver.MusicPc,
+                "13400008", S2PreconsumptionRequestObserver.MusicSlot,
+                S2PreconsumptionRequestObserver.MarkerToken,
                 S2PreconsumptionRequestObserver.Kind3MarkerToken, false);
         }
 
@@ -119,6 +147,10 @@ namespace OpenGGF.BizHawk.Headless
             if (api == null) throw new ArgumentNullException("api");
             if (candidate.Pc != S2PreconsumptionRequestObserver.Pc
                 || candidate.Opcode != "13801009"
+                || candidate.MusicPc != S2PreconsumptionRequestObserver.MusicPc
+                || candidate.MusicOpcode != "13400008"
+                || candidate.MusicSlot
+                    != S2PreconsumptionRequestObserver.MusicSlot
                 || candidate.MarkerToken
                     != S2PreconsumptionRequestObserver.MarkerToken
                 || candidate.Kind3MarkerToken
