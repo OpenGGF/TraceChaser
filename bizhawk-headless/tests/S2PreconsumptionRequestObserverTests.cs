@@ -788,9 +788,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
             IReadOnlyList<S2PreconsumptionRequestObserver.Transfer> transfers =
                 observer.AdvanceRow(0, () =>
                 {
+                    // The music store emits no native action-7 marker, so the
+                    // row carries none: it is published from its own list at
+                    // row end rather than by marker correlation.
                     api.Events = new GpgxAudioTraceEvent[0];
                     host.Execute(S2PreconsumptionRequestObserver.MusicPc);
-                    api.Events = new[] { Marker(0x00FF1020, 0) };
                 });
             AssertEx.Equal(1, transfers.Count);
             AssertEx.Equal((byte)0x8E, transfers[0].Request);

@@ -61,6 +61,15 @@ namespace OpenGGF.BizHawk.Headless
         private readonly CompleteRunAudioObserver nativeObserver;
         private readonly IDisposable registration;
         private readonly IDisposable musicRegistration;
+        /// <summary>
+        /// Music-store transfers, kept apart from <see cref="pending"/>
+        /// because that queue's contract is one native action-7 marker per
+        /// callback and this site emits none. They are published with the row
+        /// they arrived in and with zeroed native correlation fields, which is
+        /// the honest record: the row is observed, the service is not.
+        /// </summary>
+        private readonly List<PendingTransfer> musicPending =
+            new List<PendingTransfer>();
         private readonly Queue<PendingTransfer> pending =
             new Queue<PendingTransfer>();
         private readonly List<Transfer> published = new List<Transfer>();
@@ -288,6 +297,13 @@ namespace OpenGGF.BizHawk.Headless
             if (pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request callback has no exact native A7 marker.");
+            for (int index = 0; index < musicPending.Count; index++)
+            {
+                PendingTransfer music = musicPending[index];
+                transfers.Add(new Transfer(music.Row, music.Request,
+                    music.Slot, music.A7, 0, 0, 0, 0, MarkerSourceCpu));
+            }
+            musicPending.Clear();
             activeRow = -1;
             rowStartKind4RootToken = 0;
             return transfers.AsReadOnly();
@@ -350,20 +366,24 @@ namespace OpenGGF.BizHawk.Headless
             if (activeRow < 0)
                 throw new InvalidOperationException(
                     "The S2 music request callback is outside an active row.");
-            if (pending.Count >= MaximumTransfersPerRow)
+            if (pending.Count + musicPending.Count >= MaximumTransfersPerRow)
                 throw new InvalidOperationException(
                     "The S2 music request callback exceeded its five-slot bound.");
             byte request = (byte)registers.ReadCpuRegister("M68K D0");
             if (request == 0)
                 throw new InvalidOperationException(
                     "The S2 music request callback observed a zero transfer.");
-            pending.Enqueue(new PendingTransfer
+            // No successor ordinal is read. That call is only valid inside the
+            // armed native action-7 context the SFX site owns, and this store
+            // runs outside it; asking for one fails with status -3 on the
+            // driver's very first music load.
+            musicPending.Add(new PendingTransfer
             {
                 Row = activeRow,
                 Request = request,
                 Slot = MusicSlot,
                 A7 = registers.ReadCpuRegister("M68K A7"),
-                SuccessorOrdinal = nativeObserver.CurrentS2RequestSuccessorOrdinal()
+                SuccessorOrdinal = 0
             });
         }
 
@@ -399,6 +419,9 @@ namespace OpenGGF.BizHawk.Headless
             disposed = true;
             registration.Dispose();
             musicRegistration.Dispose();
+            if (musicPending.Count != 0)
+                throw new InvalidOperationException(
+                    "The S2 music request observer ended with unpublished callbacks.");
             if (pending.Count != 0)
                 throw new InvalidOperationException(
                     "The S2 request observer ended with unmatched callbacks.");
