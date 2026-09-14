@@ -7,8 +7,8 @@ namespace OpenGGF.BizHawk.Headless
     /// Byte-exact port of the S2 Lua run-mode run_manifest.json emitter
     /// (bizhawk/s2_trace_recorder.lua v9.13-s2, write_run_manifest;
     /// spec s2-run-mode-behavior.md §6, §11). Written exactly once at
-    /// run termination to the run root. rom_checksum is the inline literal
-    /// "7B905383" (S2 World REV01 CRC32), not computed at runtime. String fields
+    /// run termination to the run root. rom_checksum keeps the stock literal
+    /// "7B905383" for S2, or the verified full-dump SHA-1 for KiS2. String fields
     /// that the Lua renders with %q (run_id, dir, kind, trace_profile,
     /// entry_kind) go through the %q-faithful quoting in the shared
     /// <see cref="RunManifestWriter"/> core; source_bk2 goes through the
@@ -23,7 +23,8 @@ namespace OpenGGF.BizHawk.Headless
             string sourceBk2,
             IList<RunManifestSegment> segments,
             IList<RunManifestTransition> transitions,
-            IList<DynamicArtGapTransition> dynamicArtGapTransitions = null)
+            IList<DynamicArtGapTransition> dynamicArtGapTransitions = null,
+            S2TraceIdentity identity = null)
         {
             if (runId == null)
             {
@@ -34,7 +35,8 @@ namespace OpenGGF.BizHawk.Headless
                 runId,
                 sourceBk2,
                 false,
-                "7B905383",
+                identity == null || identity == S2TraceIdentity.StockSonic2
+                    ? "7B905383" : identity.RomChecksum,
                 null,
                 segments,
                 transitions,

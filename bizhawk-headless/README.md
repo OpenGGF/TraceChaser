@@ -13,6 +13,7 @@ supported capture path on Linux for every game.
 |---|---|
 | S1 standard, complete-run, run mode | yes — gated |
 | S2 all three modes, complete-run | yes — gated |
+| KiS2 plain and full run | yes — chip observer profile, without native load audit; [contract](docs/kis2-run-mode.md) |
 | S3K standard (both profiles) | yes — gated |
 | S3K complete-run (level / bonus / special-stage) | yes — gated |
 

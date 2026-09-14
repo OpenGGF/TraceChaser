@@ -122,7 +122,8 @@ namespace OpenGGF.BizHawk.Headless
             }
             return CaptureCore(
                 movie, host, runId, sourceBk2, recordingDate,
-                effectiveMovieLength, segmentSink, requiredDynamicArtRom);
+                effectiveMovieLength, segmentSink, requiredDynamicArtRom,
+                S2TraceIdentity.StockSonic2);
         }
 
         /// <summary>
@@ -140,7 +141,23 @@ namespace OpenGGF.BizHawk.Headless
         {
             return CaptureCore(
                 movie, host, runId, sourceBk2, recordingDate,
-                effectiveMovieLength, segmentSink, null);
+                effectiveMovieLength, segmentSink, null, S2TraceIdentity.StockSonic2);
+        }
+
+        /// <summary>
+        /// KiS2 uses the S2 RAM state machine with chip-resident SS loops.
+        /// The exact lock-on identity gates those fixed observer addresses;
+        /// stock S2 dynamic-art audit must not be armed on the chip program.
+        /// </summary>
+        public static S2RunCaptureResult CaptureKis2(
+            Bk2Movie movie, IGpgxHost host, string runId, string sourceBk2,
+            string recordingDate, IRunSegmentSink segmentSink, byte[] rom)
+        {
+            string sha1 = RomIdentity.ComputeSha1(rom);
+            if (sha1 != RomIdentity.Kis2LockOnSha1)
+                throw new ArgumentException("KiS2 run capture requires the verified lock-on ROM.");
+            return CaptureCore(movie, host, runId, sourceBk2, recordingDate,
+                0, segmentSink, null, S2TraceIdentity.Kis2(sha1));
         }
 
         private static S2RunCaptureResult CaptureCore(
@@ -151,7 +168,7 @@ namespace OpenGGF.BizHawk.Headless
             string recordingDate,
             int effectiveMovieLength,
             IRunSegmentSink segmentSink,
-            byte[] loadQueueRom)
+            byte[] loadQueueRom, S2TraceIdentity identity)
         {
             if (movie == null)
             {
@@ -197,7 +214,7 @@ namespace OpenGGF.BizHawk.Headless
                     : effectiveMovieLength,
                 segmentSink,
                 loadQueueRom,
-                dynamicArt);
+                dynamicArt, identity);
 
             try
             {
@@ -427,6 +444,7 @@ namespace OpenGGF.BizHawk.Headless
 
             private bool manifestWritten;
             private string runManifestJson;
+            private readonly S2TraceIdentity identity;
             private readonly byte[] loadQueueRom;
             private readonly S2DynamicArtObserver dynamicArt;
 
@@ -437,8 +455,9 @@ namespace OpenGGF.BizHawk.Headless
                 int effectiveMovieLength,
                 IRunSegmentSink segmentSink,
                 byte[] loadQueueRom,
-                S2DynamicArtObserver dynamicArt)
+                S2DynamicArtObserver dynamicArt, S2TraceIdentity identity)
             {
+                this.identity = identity;
                 this.runId = runId;
                 this.sourceBk2 = sourceBk2;
                 this.recordingDate = recordingDate;
@@ -545,9 +564,8 @@ namespace OpenGGF.BizHawk.Headless
                 // Post-SS re-arm: when the previous finished segment was
                 // the special stage, this arm is that stage's exit
                 // boundary. At this point segments == [..., level, ss], so
-                // the indices are exact without adjustment; the ROM zeroes
-                // ring tracking on the post-SS reload, so rings_after
-                // genuinely records 0 (§3).
+                // the indices are exact without adjustment; stock S2 zeroes ring tracking while KiS2 restores
+                // the checkpoint bank. Sample the actual reload result.
                 if (segments.Count > 0
                     && segments[segments.Count - 1].Kind
                         == RunManifestSegment.SpecialStageKind)
@@ -659,7 +677,7 @@ namespace OpenGGF.BizHawk.Headless
                     runId,
                     segments.Count,
                     loadQueueRom != null,
-                    traceFrame > 0);
+                    traceFrame > 0, identity);
                 var entry = new RunManifestSegment(
                     dirToken,
                     RunManifestSegment.LevelKind,
@@ -773,7 +791,8 @@ namespace OpenGGF.BizHawk.Headless
                 // which SpecialStageRunObjectsPassBinder rejects as a BK2
                 // identity mismatch at sequence 0.
                 ssRunObjects = new S2SpecialStageRunObjectsObserver(
-                    host, frameNow, () => traceFrame);
+                    host, frameNow, () => traceFrame,
+                    identity.MainCharacter == "knuckles");
                 ArmDynamicArtSegment();
             }
 
@@ -853,7 +872,7 @@ namespace OpenGGF.BizHawk.Headless
                     recordingDate,
                     runId,
                     segments.Count,
-                    dynamicArt != null);
+                    dynamicArt != null, identity);
                 var entry = new RunManifestSegment(
                     dirToken,
                     RunManifestSegment.SpecialStageKind,
@@ -908,7 +927,7 @@ namespace OpenGGF.BizHawk.Headless
                         runId, sourceBk2, segments, transitions,
                         dynamicArt == null
                             ? null
-                            : dynamicArtGapTransitions);
+                            : dynamicArtGapTransitions, identity);
                     manifestWritten = true;
                 }
             }

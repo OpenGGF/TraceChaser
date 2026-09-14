@@ -1454,21 +1454,10 @@ namespace BizHawk.Headless.Gpgx
                     }
                     if (traceGame == "kis2")
                     {
-                        // Knuckles in Sonic 2: plain S2 trace mode only.
-                        // Run mode and the special-stage recorder carry
-                        // S2-REV01 ROM-offset audits that the chip-resident
-                        // KiS2 program does not satisfy.
-                        if (options.RunId != null
-                            || options.GameplaySegment.HasValue
-                            || options.TraceProfile
-                                == S2SpecialStageCaptureRunner.TraceProfile)
-                        {
-                            throw new ArgumentException(
-                                "The Knuckles in Sonic 2 lock-on ROM supports"
-                                + " only plain --mode trace with the"
-                                + " gameplay_unlock or level_gated_reset_aware"
-                                + " profile.");
-                        }
+                        ValidateKis2TraceOptions(options);
+                        if (options.RunId != null)
+                            return RunS2TraceRun(options, installation, romSha1,
+                                movie, stdout, stderr, openHost, true);
                         return RunS2Trace(
                             options,
                             installation,
@@ -3081,6 +3070,18 @@ namespace BizHawk.Headless.Gpgx
         /// (<see cref="ExpandRunNewlines"/>), applied to the streams by the
         /// sink and to the manifest here.
         /// </summary>
+        internal static void ValidateKis2TraceOptions(CommandLineOptions options)
+        {
+            if (options.GameplaySegment.HasValue || options.EffectiveMovieLength != 0
+                || options.LoadQueueState
+                || (options.TraceProfile != null
+                    && options.TraceProfile != S2TraceCaptureRunner.GameplayUnlockProfile
+                    && (options.RunId != null
+                        || options.TraceProfile != S2TraceCaptureRunner.LevelGatedResetAwareProfile)))
+                throw new ArgumentException("KiS2 supports plain gameplay_unlock or level_gated_reset_aware,"
+                    + " or --run-id with gameplay_unlock and the full movie; native load audit is unavailable.");
+        }
+
         private static int RunS2TraceRun(
             CommandLineOptions options,
             BizHawkInstallation installation,
@@ -3088,7 +3089,8 @@ namespace BizHawk.Headless.Gpgx
             Bk2Movie movie,
             TextWriter stdout,
             TextWriter stderr,
-            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost)
+            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost,
+            bool kis2 = false)
         {
             NoReplacePublisher publisher = null;
             NoReplacePublisher.IncrementalStagingSession session = null;
@@ -3105,7 +3107,12 @@ namespace BizHawk.Headless.Gpgx
                     options.RomPath,
                     movie.SyncSettings))
                 {
-                    result = S2RunCaptureRunner.Capture(
+                    result = kis2
+                        ? S2RunCaptureRunner.CaptureKis2(movie, host, options.RunId,
+                            Path.GetFileName(options.MoviePath),
+                            DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                            sink, File.ReadAllBytes(options.RomPath))
+                        : S2RunCaptureRunner.Capture(
                         movie,
                         host,
                         options.RunId,

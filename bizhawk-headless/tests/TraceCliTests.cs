@@ -21,6 +21,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
+            tests.Add(new TestMain.TestCase("TraceCli KiS2 rejects unsupported run profiles and audit requests", Kis2OptionsAreStrict));
+
             tests.Add(new TestMain.TestCase(
                 "TraceCli override-resume publisher accepts only the closed eight-input shape",
                 OverrideResumePublisherAcceptsOnlyClosedShape));
@@ -193,6 +195,25 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 if(Directory.Exists(root))Directory.Delete(root,true);
             }
+        }
+
+        private static void Kis2OptionsAreStrict()
+        {
+            string output = TestScratch.CreateRootPath("kis2-cli");
+            string fixture = TestScratch.CreateRootPath("kis2-fixtures");
+            var valid = new[] { "--mode", "trace", "--rom", "kis2.gen",
+                "--movie", "run.bk2", "--output", output, "--run-id", "kis2-run" };
+            Program.ValidateKis2TraceOptions(CommandLineOptions.Parse(valid, fixture));
+            foreach (string profile in new[] { "unknown", "complete_run", "level_gated_reset_aware", "s2_special_stage" })
+            {
+                var args = new List<string>(valid);
+                args.Add("--trace-profile"); args.Add(profile);
+                AssertEx.Throws<ArgumentException>(() => Program.ValidateKis2TraceOptions(
+                    CommandLineOptions.Parse(args.ToArray(), fixture)), "");
+            }
+            var audit = new List<string>(valid); audit.Add("--load-queue-state");
+            AssertEx.Throws<ArgumentException>(() => Program.ValidateKis2TraceOptions(
+                CommandLineOptions.Parse(audit.ToArray(), fixture)), "KiS2");
         }
 
         private static void CreditsDemoSelectorsAreStrict()

@@ -27,6 +27,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
+            tests.Add(new TestMain.TestCase("KiS2 run records chip SS passes and restored checkpoint rings", RecordsKis2Run));
+            tests.Add(new TestMain.TestCase("KiS2 run rejects the wrong ROM identity", RejectsWrongKis2Rom));
+
             tests.Add(new TestMain.TestCase(
                 "S2RunCaptureRunner records a level-ss-level round trip",
                 RecordsLevelSsLevelRoundTrip));
@@ -76,6 +79,67 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2RunCaptureRunner publication rejects scratch legacy"
                 + " audit omission",
                 PublicationRejectsScratchLegacyAuditOmission));
+        }
+
+        private static void RejectsWrongKis2Rom()
+        {
+            AssertEx.Throws<ArgumentException>(() => S2RunCaptureRunner.CaptureKis2(
+                null, null, "test", "test.bk2", "2026-09-14", null, new byte[16]),
+                "verified lock-on ROM");
+        }
+
+        private static void RecordsKis2Run()
+        {
+            string path = Environment.GetEnvironmentVariable("KIS2_ROM_PATH");
+            if (string.IsNullOrEmpty(path))
+                throw new TestMain.SkipTestException("KIS2_ROM_PATH is not set.");
+            byte[] rom = File.ReadAllBytes(path);
+            // Literal ROM anchors independently audited against the chip listing.
+            AssertEx.Equal((byte)0x4E, rom[0x300E52]);
+            AssertEx.Equal((byte)0x75, rom[0x300E53]);
+            AssertEx.Equal((byte)0x4E, rom[0x304CE0]);
+            AssertEx.Equal((byte)0x4A, rom[0x304D58]);
+            WithMovie(Rows(12), movie =>
+            {
+                var host = new FakeRunHost((h, frame) =>
+                {
+                    h.Ram[0xF600] = (byte)(frame >= 4 && frame < 8 ? 0x10 : 0x0C);
+                    h.Ram[0xB000] = (byte)(frame >= 4 && frame < 8 ? 9 : 1);
+                    h.SetU16(0xFE20, 75);
+                    h.Ram[0xFFB1] = (byte)(frame >= 8 ? 1 : 0);
+                    if (frame >= 5 && frame <= 7)
+                    {
+                        h.SetCpuRegister("M68K A0", 0xF608);
+                        h.SetCpuRegister("M68K A7", 0x100);
+                        h.SetU32(0x100, 0x300592);
+                        h.FireExecuteCallback(0x300E52);
+                        h.FireExecuteCallback(frame == 5 ? 0x304CE0u : 0x304D58u);
+                    }
+                });
+                var sink = new RunSegmentCollector();
+                S2RunCaptureResult result = S2RunCaptureRunner.CaptureKis2(
+                    movie, host, "kis2-run", "synthetic.bk2", "2026-09-14", sink, rom);
+                AssertEx.Equal(3, result.Segments.Count);
+                AssertEx.Equal(2, result.Transitions.Count);
+                AssertEx.Equal(75, result.Transitions[1].RingsAfter ?? -1);
+                AssertEx.Equal(1, result.Transitions[1].EmeraldsAfter ?? -1);
+                foreach (RunSegmentOutput segment in sink.Segments)
+                {
+                    AssertContains(segment.MetadataJson, "\"main_character\": \"knuckles\"");
+                    AssertContains(segment.MetadataJson, "\"sidekicks\": []");
+                    AssertContains(segment.MetadataJson, RomIdentity.Kis2LockOnSha1);
+                    AssertEx.Equal(false, segment.MetadataJson.Contains("load_queue_state_per_frame"));
+                    AssertEx.Equal(false, segment.MetadataJson.Contains("dynamic_art_transfer_state_per_frame"));
+                }
+                AssertEx.Equal(3, CountSubstring(sink.Segments[1].AuxStateJsonl, "\"type\":\"run_objects_end\""));
+                AssertContains(result.RunManifestJson, RomIdentity.Kis2LockOnSha1);
+                AssertEx.Equal(false, result.RunManifestJson.Contains("7B905383"));
+            });
+        }
+
+        private static int CountSubstring(string value, string needle)
+        {
+            return value.Split(new[] { needle }, StringSplitOptions.None).Length - 1;
         }
 
         private static void PublicationRejectsScratchLegacyAuditOmission()

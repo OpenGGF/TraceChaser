@@ -23,6 +23,7 @@ namespace OpenGGF.BizHawk.Headless
         private const int SpecialStageStarted = 0xDB23;
         private const int P1Held = 0xF604;
         private const int P2Held = 0xF606;
+        private readonly uint inputCallerReturn;
         private readonly IGpgxHost host;
         private readonly ICpuRegisterReader registers;
         private readonly Func<int> traceCursor;
@@ -41,8 +42,11 @@ namespace OpenGGF.BizHawk.Headless
         public S2SpecialStageRunObjectsObserver(
             IGpgxHost host,
             int bk2Offset,
-            Func<int> traceCursor)
+            Func<int> traceCursor, bool kis2 = false)
         {
+            // KiS2 s2.asm Vint_S2SS / ReadJoypads and the two SpecialStage
+            // loops; exact ROM identity is verified by CaptureKis2 before arming.
+            inputCallerReturn = kis2 ? 0x300592u : 0x88Eu;
             this.host = host;
             registers = host as ICpuRegisterReader;
             if (registers == null)
@@ -54,11 +58,11 @@ namespace OpenGGF.BizHawk.Headless
             this.bk2Offset = bk2Offset;
             this.traceCursor = traceCursor;
             inputRegistration = host.RegisterExecuteCallback(
-                ReadJoypadsReturn, OnInputSample);
+                kis2 ? 0x300E52u : ReadJoypadsReturn, OnInputSample);
             passRegistration = host.RegisterExecuteCallback(
-                PostRunObjects, OnPassComplete);
+                kis2 ? 0x304D58u : PostRunObjects, OnPassComplete);
             preStartPassRegistration = host.RegisterExecuteCallback(
-                PostRunObjectsBeforeStart, OnPassComplete);
+                kis2 ? 0x304CE0u : PostRunObjectsBeforeStart, OnPassComplete);
         }
 
         public IList<string> PublishForRow(int frame, bool lagged)
@@ -102,7 +106,7 @@ namespace OpenGGF.BizHawk.Headless
             int a0 = (int)(registers.ReadCpuRegister("M68K A0") & 0xFFFF);
             int a7 = (int)(registers.ReadCpuRegister("M68K A7") & 0xFFFF);
             uint returnPc = S2Ram.U32(host, a7) & 0xFFFFFF;
-            if (a0 != 0xF608 || returnPc != 0x88E)
+            if (a0 != 0xF608 || returnPc != inputCallerReturn)
             {
                 return;
             }

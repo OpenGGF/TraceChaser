@@ -65,7 +65,8 @@ namespace OpenGGF.BizHawk.Headless
             string recordingDate,
             string runId,
             int segmentIndex,
-            bool dynamicArtAudit = false)
+            bool dynamicArtAudit = false,
+            S2TraceIdentity identity = null)
         {
             if (sourceBk2 == null)
             {
@@ -89,9 +90,18 @@ namespace OpenGGF.BizHawk.Headless
                         TraceContract.DynamicArtTransferStatePerFrame)
                     .Append("\"],\n");
             }
-            json.Append("  \"characters\": [\"sonic\", \"tails\"],\n");
-            json.Append("  \"main_character\": \"sonic\",\n");
-            json.Append("  \"sidekicks\": [\"tails\"],\n");
+            bool kis2 = identity != null && identity.MainCharacter == "knuckles";
+            json.Append(kis2 ? "  \"characters\": [\"knuckles\"],\n"
+                : "  \"characters\": [\"sonic\", \"tails\"],\n");
+            json.Append(kis2 ? "  \"main_character\": \"knuckles\",\n"
+                : "  \"main_character\": \"sonic\",\n");
+            json.Append(kis2 ? "  \"sidekicks\": [],\n"
+                : "  \"sidekicks\": [\"tails\"],\n");
+            if (kis2)
+            {
+                json.Append("  \"rom_checksum\": \"").Append(JsonEscape(identity.RomChecksum)).Append("\",\n");
+                json.Append("  \"notes\": \"").Append(JsonEscape(identity.Notes)).Append("\",\n");
+            }
             json.Append("  \"bk2_frame_offset\": ")
                 .Append(Dec(bk2FrameOffset)).Append(",\n");
             json.Append("  \"trace_frame_count\": ")
