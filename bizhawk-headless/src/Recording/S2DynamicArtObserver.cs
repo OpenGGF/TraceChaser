@@ -47,6 +47,10 @@ namespace OpenGGF.BizHawk.Headless
 
         public S2DynamicArtObserver(
             byte[] rom, IGpgxHost host, Func<int> logicalFrame)
+            : this(rom, host, logicalFrame, DynamicArtRomProfile.Sonic2Rev01) { }
+
+        public S2DynamicArtObserver(byte[] rom, IGpgxHost host, Func<int> logicalFrame,
+            DynamicArtRomProfile.GameProfile profile)
         {
             if (rom == null) throw new ArgumentNullException("rom");
             if (host == null) throw new ArgumentNullException("host");
@@ -58,7 +62,10 @@ namespace OpenGGF.BizHawk.Headless
                     "S2 dynamic-art observation requires CPU register access.");
             }
 
-            profile = DynamicArtRomProfile.Sonic2Rev01;
+            this.profile = profile;
+            if (profile.RamConversionTable != 0
+                && RomIdentity.ComputeSha1(rom) != RomIdentity.Kis2LockOnSha1)
+                throw new ArgumentException("KiS2 dynamic art requires the verified lock-on ROM.");
             ValidateOpcodeWindows(rom, profile);
             this.rom = rom;
             this.host = host;
@@ -100,7 +107,8 @@ namespace OpenGGF.BizHawk.Headless
                 entry in entries)
             {
                 List<DynamicArtRomProfile.DecisionWindow> captured = entry.Value;
-                if (captured.Count == 1)
+                if (captured.Count == 1 && captured[0].EntryKind
+                    != DynamicArtRomProfile.DecisionEntryKind.SpecialSharedRegisters)
                 {
                     DynamicArtRomProfile.DecisionWindow window = captured[0];
                     registrations.Add(host.RegisterExecuteCallback((uint)entry.Key,
@@ -154,7 +162,7 @@ namespace OpenGGF.BizHawk.Headless
                     (uint)pilotCallerProbe.Key,
                     () => OnPilotCallerProbe(captured)));
             }
-            registrations.Add(host.RegisterExecuteCallback(0x144E, OnQueueEntry));
+            registrations.Add(host.RegisterExecuteCallback((uint)profile.QueueEntry, OnQueueEntry));
             registrations.Add(host.RegisterExecuteCallback(
                 (uint)profile.AcceptedDmaReturn, OnQueueReturn));
             registrations.Add(host.RegisterExecuteCallback(
@@ -537,7 +545,10 @@ namespace OpenGGF.BizHawk.Headless
             }
             Decision decision = activeDecision;
             activeDecision = null;
-            if (decision.Window.ReturnAddress != returnAddress)
+            if (decision.Window.ReturnAddress != returnAddress
+                && !(profile.RamConversionTable != 0
+                    && decision.Window.Owner == "knuckles"
+                    && returnAddress == profile.AcceptedDmaReturn))
             {
                 throw new InvalidOperationException(
                     "S2 player-DPLC decision returned through the wrong pinned callback");
@@ -586,6 +597,7 @@ namespace OpenGGF.BizHawk.Headless
             int slotAfter = ReadU32(profile.Ram.DmaCommandBufferSlot);
             if (slotAfter == attempt.SlotBefore)
             {
+                CloseTailDecision();
                 return;
             }
             if (slotAfter != attempt.SlotBefore + profile.Ram.DmaCommandStrideBytes)
@@ -594,6 +606,13 @@ namespace OpenGGF.BizHawk.Headless
                     "QueueDMATransfer returned without one verified next-slot advance");
             }
             activeDecision.AcceptedRequests.Add(acceptedRequest);
+            CloseTailDecision();
+        }
+
+        private void CloseTailDecision()
+        {
+            if (profile.RamConversionTable != 0 && activeDecision.Window.Owner == "knuckles")
+                OnDecisionReturn(profile.AcceptedDmaReturn);
         }
 
         private void OnProcessDmaQueue()
@@ -657,12 +676,31 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidOperationException(
                     "special-stage player DPLC did not queue a main-RAM art source");
             }
+            if (expected.SourceAddress != 0 && attempt.SourceAddress != expected.SourceAddress)
+                throw new InvalidOperationException("RAM source does not match the ROM-owned DPLC source");
+            if (expected.ConvertedBytes != null)
+                for (int i = 0; i < expected.ConvertedBytes.Length; i++)
+                    if (host.ReadMainRamByte((attempt.SourceAddress & 0xFFFF) + i)
+                        != expected.ConvertedBytes[i])
+                        throw new InvalidOperationException("Converted RAM art differs from the ROM conversion table");
             return new DynamicArtRequest(-1, -1, attempt.SourceAddress,
                 attempt.VramDestination, byteLength);
         }
 
         private IList<ExpectedRequest> DecodeExpectedRequests(string owner, int mappingFrame)
         {
+            if (owner == "knuckles") return DecodeConvertedRequests(mappingFrame);
+            if (owner == "ss-knuckles")
+            {
+                IList<ExpectedRequest> runs = DecodeDplc(profile.DplcTables[1],
+                    mappingFrame, BankDestination(owner), null, owner);
+                int entry = profile.DplcTables[1].Address;
+                entry += ReadU16(entry + mappingFrame * 2);
+                for (int i = 0; i < runs.Count; i++)
+                    runs[i].SourceAddress = MainRamAddressBase
+                        + ((ReadU16(entry + 2 + i * 2) & 0xFFF) << 5);
+                return runs;
+            }
             if (owner == "sonic" || owner == "tails" || owner == "tails-tails")
             {
                 DynamicArtRomProfile.DplcTable table = owner == "sonic"
@@ -681,6 +719,24 @@ namespace OpenGGF.BizHawk.Headless
             }
             return DecodeDplc(profile.DplcTables[2], specialFrame,
                 BankDestination(owner), null, owner);
+        }
+
+        private IList<ExpectedRequest> DecodeConvertedRequests(int mappingFrame)
+        {
+            IList<ExpectedRequest> runs = DecodeDplc(profile.DplcTables[0], mappingFrame,
+                BankDestination("knuckles"), profile.ArtSpans[0], "knuckles");
+            var bytes = new List<byte>();
+            foreach (ExpectedRequest run in runs)
+                for (int i = 0; i < run.ByteLength; i++)
+                    bytes.Add(rom[profile.RamConversionTable + rom[run.SourceAddress + i]]);
+            if (bytes.Count > profile.Ram.StagingBufferLength)
+                throw new InvalidOperationException("Converted DPLC exceeds its ROM-owned staging buffer");
+            if (bytes.Count == 0) return new List<ExpectedRequest>();
+            return new List<ExpectedRequest> { new ExpectedRequest {
+                SourceAddress = MainRamAddressBase + profile.Ram.StagingBuffer,
+                VramDestination = BankDestination("knuckles"), ByteLength = bytes.Count,
+                ConvertedBytes = bytes.ToArray()
+            }};
         }
 
         private IList<ExpectedRequest> DecodeSingleSpecialDplc(
@@ -938,6 +994,8 @@ namespace OpenGGF.BizHawk.Headless
         {
             switch (owner)
             {
+                case "knuckles":
+                case "ss-knuckles":
                 case "sonic":
                 case "ss-sonic": return profile.Ram.LastLoadedDplc;
                 case "tails":
@@ -1090,6 +1148,7 @@ namespace OpenGGF.BizHawk.Headless
 
         private sealed class ExpectedRequest
         {
+            public byte[] ConvertedBytes;
             public bool RomBacked;
             public int SourceAddress;
             public int SourceTileIndex;

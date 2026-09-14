@@ -82,6 +82,13 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
+        internal void ValidateOwner(string owner)
+        {
+            for (int i = 0; i < profile.DecisionWindows.Count; i++)
+                if (profile.DecisionWindows[i].Owner == owner) return;
+            throw new ArgumentException("dynamic-art owner is outside the pinned ROM profile", "owner");
+        }
+
         internal void ValidateCallback(
             DynamicArtTransferPhase phase, int romCallbackPc)
         {
@@ -716,7 +723,7 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (owner != "sonic" && owner != "tails" && owner != "tails-tails"
                 && owner != "ss-sonic" && owner != "ss-tails"
-                && owner != "ss-tails-tails")
+                && owner != "ss-tails-tails" && owner != "knuckles" && owner != "ss-knuckles")
             {
                 throw new ArgumentException("unknown dynamic-art owner", "owner");
             }
@@ -749,6 +756,7 @@ namespace OpenGGF.BizHawk.Headless
             {
                 throw new ArgumentNullException("callbackValidator");
             }
+            callbackValidator.ValidateOwner(owner);
             callbackValidator.ValidateCallback(phase, romCallbackPc);
             ReadOnlyCollection<DynamicArtRequest> frozen = FreezeRequests(
                 requests, "requests");

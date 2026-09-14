@@ -147,7 +147,7 @@ namespace OpenGGF.BizHawk.Headless
         /// <summary>
         /// KiS2 uses the S2 RAM state machine with chip-resident SS loops.
         /// The exact lock-on identity gates those fixed observer addresses;
-        /// stock S2 dynamic-art audit must not be armed on the chip program.
+        /// the chip dynamic-art profile observes its RAM conversion and DMA tail call.
         /// </summary>
         public static S2RunCaptureResult CaptureKis2(
             Bk2Movie movie, IGpgxHost host, string runId, string sourceBk2,
@@ -157,7 +157,7 @@ namespace OpenGGF.BizHawk.Headless
             if (sha1 != RomIdentity.Kis2LockOnSha1)
                 throw new ArgumentException("KiS2 run capture requires the verified lock-on ROM.");
             return CaptureCore(movie, host, runId, sourceBk2, recordingDate,
-                0, segmentSink, null, S2TraceIdentity.Kis2(sha1));
+                0, segmentSink, rom, S2TraceIdentity.Kis2(sha1, true));
         }
 
         private static S2RunCaptureResult CaptureCore(
@@ -206,7 +206,8 @@ namespace OpenGGF.BizHawk.Headless
                 ? null
                 : new S2DynamicArtObserver(
                     loadQueueRom, host,
-                    () => state.DynamicArtLogicalFrame);
+                    () => state.DynamicArtLogicalFrame,
+                    identity.RomChecksum == RomIdentity.Kis2LockOnSha1 ? DynamicArtRomProfile.Kis2LockOn : DynamicArtRomProfile.Sonic2Rev01);
             state = new RunState(
                 runId, sourceBk2, recordingDate,
                 effectiveMovieLength == 0

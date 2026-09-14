@@ -179,6 +179,40 @@ namespace OpenGGF.BizHawk.Headless
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x0D, 0xDB, 0x00)
             });
 
+        // KiS2 gameRevision=3, fixBugs=0. LoadSonicDynPLC converts all
+        // S&K DPLC runs into one RAM buffer before its QueueDMATransfer tail call.
+        public static readonly GameProfile Kis2LockOn = new GameProfile(
+            "kis2-lock-on",
+            new[] {
+                new DecisionWindow("knuckles", 0x317414, 0x31753E),
+                new DecisionWindow("knuckles", 0x31741A, 0x31753E,
+                    DecisionEntryKind.DirectD0, 0x333D9E),
+                new DecisionWindow("ss-knuckles", 0x32CCF0, 0x32CD38,
+                    DecisionEntryKind.SpecialSharedRegisters, 0,
+                    0x32CCF6, 0xF766, 0x5CA0, 0)
+            },
+            0x3011B4, new[] { 0x3011B6 },
+            new RamLayout(0xF766, 0, 0xF100, 0x500, 0, 0,
+                0xDC00, 0xDCFC, 14, 18),
+            new[] { new DplcTable("knuckles", 0x14BD0A),
+                new DplcTable("special-stage", 0x32D728) },
+            new[] { new ArtSpan("knuckles", 0x1200E0, 0x1FF80) },
+            new[] { new VramBank("knuckles", 0xF000),
+                new VramBank("ss-knuckles", 0x5CA0) },
+            new[] {
+                new OpcodeWindow("knuckles-decision", 0x317414,
+                    0x70,0x00,0x10,0x28,0x00,0x1A,0xB0,0x38,0xF7,0x66),
+                new OpcodeWindow("knuckles-tail-queue", 0x317538,
+                    0x4E,0xF9,0x00,0x30,0x11,0x58,0x4E,0x75),
+                new OpcodeWindow("queue-entry", 0x301158,
+                    0x22,0x78,0xDC,0xFC,0xB2,0xFC,0xDC,0xFC),
+                new OpcodeWindow("accepted-and-process", 0x3011B4,
+                    0x4E,0x75,0x4B,0xF9,0x00,0xC0,0x00,0x04,0x43,0xF8,0xDC,0x00),
+                new OpcodeWindow("pilot", 0x333D9E, 0x4E,0xF9,0x00,0x31,0x74,0x1A),
+                new OpcodeWindow("ss-decision", 0x32CCF0, 0x70,0x00,0x10,0x28,0x00,0x1A,0xB0,0x14,0x67,0x3E),
+                new OpcodeWindow("ss-return", 0x32CD38, 0x4E,0x75)
+            }, 0x301158, 0x317540);
+
         public sealed class GameProfile
         {
             internal GameProfile(
@@ -190,8 +224,11 @@ namespace OpenGGF.BizHawk.Headless
                 DplcTable[] dplcTables,
                 ArtSpan[] artSpans,
                 VramBank[] vramBanks,
-                OpcodeWindow[] opcodeWindows)
+                OpcodeWindow[] opcodeWindows, int queueEntry = 0x144E,
+                int ramConversionTable = 0)
             {
+                QueueEntry = queueEntry;
+                RamConversionTable = ramConversionTable;
                 Id = id;
                 DecisionWindows = Freeze(decisionWindows);
                 AcceptedDmaReturn = acceptedDmaReturn;
@@ -203,6 +240,8 @@ namespace OpenGGF.BizHawk.Headless
                 OpcodeWindows = Freeze(opcodeWindows);
             }
 
+            public int QueueEntry { get; private set; }
+            public int RamConversionTable { get; private set; }
             public string Id { get; private set; }
             public ReadOnlyCollection<DecisionWindow> DecisionWindows { get; private set; }
             public int AcceptedDmaReturn { get; private set; }

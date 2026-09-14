@@ -48,39 +48,46 @@ also names KiS2; it must not claim the stock S2 CRC. The run recorder samples
 post-return rings: KiS2 restores checkpoint rings whereas stock S2 clears them.
 No transition value is synthesized or copied into engine gameplay.
 
-The stock S2 dynamic-art/load profile is incompatible with the chip program.
-KiS2 deliberately omits that audit, its metadata capabilities and timing files,
-as the existing plain KiS2 recorder does. This limitation is explicit in metadata;
-full gameplay capture is not evidence of hardware-timing coverage. Stock S2
-keeps its mandatory audit and byte-compatible default identity paths.
+KiS2 named runs use the exact-ROM-gated dynamic-art profile. Level segments
+also observe the unchanged S2 Nemesis PLC RAM format: sixteen six-byte source/
+destination records at `$F680`, with prepared patterns remaining at `$F6F8`.
+The projector reads actual ROM pointers and headers. SS segments advertise
+only their observed dynamic-art capability. Plain KiS2 recording retains its
+unaudited compatibility behavior. Stock S2 retains its default identity bytes.
 
-Validation covers exact ROM identity rejection, metadata throughout a synthetic
-level/SS/level round trip, both fixed SS observer PCs, restored ring observations,
-and strict CLI options. Independent ROM/code review precedes candidate publication.
+## Art-transfer prerequisite
 
-## Current chain blocker
-
-The captured gameplay candidate is not yet a publishable OpenGGF v5 chain.
-`TraceRunManifest.DynamicArtRunValidator` requires the dynamic-art capability
-for the S2 schema; omission is a hard failure, not a switch to guessed timing.
-Do not weaken that validator or advertise an audit that was not observed.
-
-A follow-up ROM audit identifies the prerequisite implementation:
+The original candidate at `3841a5d` omitted dynamic-art evidence and was
+correctly rejected by the consumer chain validator. That omission cannot be
+repaired by metadata edits: the movie must be recaptured with these observers.
+The v5 event shape is unchanged; its explicit owners now include `knuckles`
+and `ss-knuckles`, bound to the corresponding ROM profile.
 
 - Normal `LoadSonicDynPLC` at `$317414` (direct-D0 entry `$31741A`, pilot caller
-  `$333D9E`) converts and concatenates all S&K DPLC runs into `$FFF100` RAM,
-  using table `$317540`, then submits one combined DMA to `$F000` VRAM.
-- DPLC table `$14BD0A`, raw art `$1200E0`; success tail-jumps from `$317538` to
-  QueueDMATransfer `$301158`, bypassing the no-work return at `$31753E`.
-  Queue accepted return is `$3011B4`; processing begins at `$3011B6`.
-- SS wrapper `$32CCC6`, shared decision `$32CCF0` and return `$32CD38` use
-  DPLC `$32D728` with tile offsets shifted by five, unlike stock S2's custom
-  shift-by-one encoding; decompressed source RAM is `$FF0000`.
-- The current producer and consumer owner sets omit Knuckles. Adding this
-  support requires an explicit shared owner and request contract, aggregation,
-  RAM-source validation and tail-call completion tests. It is not a PC-only
-  profile substitution. The existing v5 event shape may suffice; no schema
-  revision has yet been justified.
+  `$333D9E`) reads DPLC `$14BD0A` and raw art `$1200E0..$14005F`. Each source
+  byte is converted through the ROM's 256-byte table at `$317540`; all runs
+  concatenate into the fixBugs=0 `$FFF100..$FFF5FF` staging region.
+- Its success path tail-jumps from `$317538` to QueueDMATransfer `$301158`.
+  One request with RAM source `$FFF100`, VRAM destination `$F000` and total
+  converted byte length is validated against both ROM-derived runs and actual
+  RAM bytes at the accepted queue return `$3011B4`. Only a verified command
+  slot advance emits submission and closes that decision. Queue-full closes
+  without submission; suppressed/empty decisions close at `$31753E`.
+- SS decision `$32CCF0` and return `$32CD38` use DPLC `$32D728` with standard
+  tile offsets shifted by five. Each accepted run must use exactly `$FF0000`
+  plus that decoded byte offset, the decoded length and advancing VRAM bank
+  beginning `$5CA0`. SS emits submission at `$32CD38` after its calls return.
+- Both owners complete at ProcessDMAQueue `$3011B6`. Existing global FIFO,
+  lag forwarding, terminal and run-gap carry logic remains authoritative.
+  No observer writes RAM or supplies engine gameplay state.
+
+Focused prerequisite validation with explicit BizHawk and KiS2 paths:
+`test.sh --filter KiS2 --jobs 1` passed 10 tests, zero skips; stock
+`--filter S2DynamicArtObserver --jobs 1` passed 21 synthetic tests, zero skips.
+These cover exact identity, conversion corruption, source/destination/length
+rejection, accepted tail closure, queue-full/empty/suppressed paths, pilot
+run-gap carry, SS offsets and synthetic level/SS/level metadata.
+Real movie recapture and consumer validation are separate delivery checks.
 
 ## Validation of the initial candidate implementation
 

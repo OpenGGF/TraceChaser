@@ -90,6 +90,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2DynamicArtObserver rejects an unverified retail callback window",
                 RejectsUnverifiedCallbackWindow));
 
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art aggregates converted bytes and closes the accepted tail call", Kis2ConvertedTail));
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art rejects corrupted conversion and incorrect RAM requests", Kis2RejectsCorruptRequests));
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art closes queue-full, empty and suppressed decisions", Kis2NoWork));
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art carries direct-pilot work across run gaps", Kis2PilotGap));
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art uses standard SS tile offsets and exact RAM sources", Kis2Special));
+            tests.Add(new TestMain.TestCase("KiS2 dynamic art rejects a modified ROM identity", Kis2WrongIdentity));
+
             string romPath = Environment.GetEnvironmentVariable("S2_ROM_PATH");
             if (!String.IsNullOrEmpty(romPath) && File.Exists(romPath))
             {
@@ -109,6 +116,144 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     serial: true,
                     estimatedSeconds: 120.0));
             }
+        }
+
+        private static byte[] Kis2Rom()
+        {
+            string path = Environment.GetEnvironmentVariable("KIS2_ROM_PATH");
+            if (string.IsNullOrEmpty(path)) throw new TestMain.SkipTestException("KIS2_ROM_PATH is not set.");
+            return File.ReadAllBytes(path);
+        }
+
+        private static int Kis2Stage(FakeHost host, byte[] rom, int mapping = 1)
+        {
+            host.Ram[0xF766] = 0xFF;
+            host.Ram[S2Ram.PlayerBase + S2Ram.OffMappingFrame] = (byte)mapping;
+            int table = 0x14BD0A;
+            int entry = table + ((rom[table + mapping * 2] << 8) | rom[table + mapping * 2 + 1]);
+            int count = (rom[entry] << 8) | rom[entry + 1];
+            int output = 0;
+            for (int i = 0; i < count; i++)
+            {
+                int encoded = (rom[entry + 2 + i * 2] << 8) | rom[entry + 3 + i * 2];
+                int length = ((encoded >> 12) + 1) * 32;
+                int source = 0x1200E0 + (encoded & 0xFFF) * 32;
+                for (int b = 0; b < length; b++)
+                    host.Ram[0xF100 + output++] = rom[0x317540 + rom[source + b]];
+            }
+            return output;
+        }
+
+        private static void Kis2Queue(FakeHost host, int source, int destination, int length, bool accepted = true)
+        {
+            host.SetRegister("M68K D1", (uint)source);
+            host.SetRegister("M68K D2", (uint)destination);
+            host.SetRegister("M68K D3", (uint)(length / 2));
+            host.Fire(0x301158);
+            if (accepted) WriteU32(host.Ram, 0xDCFC, 0xDC0E);
+            host.Fire(0x3011B4);
+        }
+
+        private static void Kis2ConvertedTail()
+        {
+            byte[] rom = Kis2Rom(); var host = new FakeHost();
+            int length = Kis2Stage(host, rom);
+            using (var observer = new S2DynamicArtObserver(rom, host, () => 0, DynamicArtRomProfile.Kis2LockOn))
+            {
+                observer.ArmSegment(); host.Fire(0x317414); host.Fire(0x31741A);
+                Kis2Queue(host, 0xFFF100, 0xF000, length);
+                var row = observer.PublishRow(0, false);
+                AssertEx.Equal(1, row.Edges.Count);
+                AssertEx.Equal("knuckles", row.Edges[0].Owner);
+                AssertEx.Equal(0x3011B4, row.Edges[0].RomCallbackPc);
+                AssertEx.Equal(1, row.Edges[0].Requests.Count);
+                AssertEx.Equal(length, row.Edges[0].Requests[0].ByteLength);
+                AssertEx.Equal(0xFFF100, row.Edges[0].Requests[0].RamSourceAddress);
+                host.Fire(0x3011B6);
+                AssertEx.Equal(DynamicArtTransferPhase.Completed, observer.PublishRow(1, false).Edges[0].Phase);
+                observer.EndSegment();
+            }
+        }
+
+        private static void Kis2RejectsCorruptRequests()
+        {
+            for (int fault = 0; fault < 4; fault++)
+            {
+                byte[] rom = Kis2Rom(); var host = new FakeHost(); int length = Kis2Stage(host, rom);
+                using (var observer = new S2DynamicArtObserver(rom, host, () => 0, DynamicArtRomProfile.Kis2LockOn))
+                {
+                    observer.ArmSegment(); host.Fire(0x317414);
+                    if (fault == 0) host.Ram[0xF100] ^= 1;
+                    int source = fault == 1 ? 0xFFF120 : 0xFFF100;
+                    int destination = fault == 2 ? 0xF020 : 0xF000;
+                    int bytes = fault == 3 ? length + 32 : length;
+                    AssertEx.Throws<InvalidOperationException>(() => Kis2Queue(host, source, destination, bytes),
+                        fault == 0 ? "Converted RAM" : fault == 1 ? "RAM source" : "does not match");
+                }
+            }
+        }
+
+        private static void Kis2NoWork()
+        {
+            byte[] rom = Kis2Rom(); var host = new FakeHost(); int length = Kis2Stage(host, rom);
+            using (var observer = new S2DynamicArtObserver(rom, host, () => 0, DynamicArtRomProfile.Kis2LockOn))
+            {
+                observer.ArmSegment(); host.Fire(0x317414);
+                Kis2Queue(host, 0xFFF100, 0xF000, length, false);
+                AssertEx.Equal(0, observer.PublishRow(0, false).Edges.Count);
+                host.Ram[0xF766] = 1; host.Fire(0x317414); host.Fire(0x31753E);
+                Kis2Stage(host, rom, 0); host.Fire(0x317414); host.Fire(0x31753E);
+                AssertEx.Equal(0, observer.PublishRow(1, false).Edges.Count);
+                observer.EndSegment();
+            }
+        }
+
+        private static void Kis2PilotGap()
+        {
+            byte[] rom = Kis2Rom(); var host = new FakeHost(); int length = Kis2Stage(host, rom);
+            using (var observer = new S2DynamicArtObserver(rom, host, () => 12, DynamicArtRomProfile.Kis2LockOn))
+            {
+                host.SetRegister("M68K D0", 1); host.Fire(0x333D9E); host.Fire(0x31741A);
+                Kis2Queue(host, 0xFFF100, 0xF000, length);
+                AssertEx.Equal(1, observer.PublishGap().Count);
+                AssertEx.Equal(1, observer.ArmRunSegment().Count);
+                host.Fire(0x3011B6);
+                var row = observer.PublishRow(0, false);
+                AssertEx.Equal(DynamicArtSubmissionOrigin.RunGap, row.Edges[0].SubmissionOrigin);
+                observer.EndSegment();
+            }
+        }
+
+        private static void Kis2Special()
+        {
+            byte[] rom = Kis2Rom(); var host = new FakeHost();
+            host.Ram[0xF766] = 0xFF; host.Ram[S2Ram.PlayerBase + S2Ram.OffMappingFrame] = 1;
+            host.SetRegister("M68K A4", 0xFFFFF766); host.SetRegister("M68K D4", 0x5CA0); host.SetRegister("M68K D1", 0);
+            using (var observer = new S2DynamicArtObserver(rom, host, () => 0, DynamicArtRomProfile.Kis2LockOn))
+            {
+                observer.ArmSegment(); host.Fire(0x32CCF0);
+                int entry = 0x32D728 + ((rom[0x32D72A] << 8) | rom[0x32D72B]);
+                int count = (rom[entry] << 8) | rom[entry + 1]; int destination = 0x5CA0;
+                for (int i = 0; i < count; i++)
+                {
+                    int encoded = (rom[entry + 2 + i * 2] << 8) | rom[entry + 3 + i * 2];
+                    int length = ((encoded >> 12) + 1) * 32;
+                    WriteU32(host.Ram, 0xDCFC, 0xDC00);
+                    Kis2Queue(host, 0xFF0000 + ((encoded & 0xFFF) << 5), destination, length);
+                    destination += length;
+                }
+                host.Fire(0x32CD38); var row = observer.PublishRow(0, false);
+                AssertEx.Equal("ss-knuckles", row.Edges[0].Owner);
+                AssertEx.Equal(count, row.Edges[0].Requests.Count);
+                host.Fire(0x3011B6); observer.PublishRow(1, false); observer.EndSegment();
+            }
+        }
+
+        private static void Kis2WrongIdentity()
+        {
+            byte[] rom = Kis2Rom(); rom[0] ^= 1;
+            AssertEx.Throws<ArgumentException>(() => new S2DynamicArtObserver(rom, new FakeHost(), () => 0,
+                DynamicArtRomProfile.Kis2LockOn), "verified lock-on ROM");
         }
 
         private static void BatchesAcceptedRunsInsideDecision()

@@ -23,8 +23,7 @@ namespace OpenGGF.BizHawk.Headless
     /// empty rom_checksum/notes bytes. The Knuckles in Sonic 2 lock-on image
     /// runs the chip's patched Sonic 2 with Knuckles alone, so its metadata
     /// names the main character "knuckles", carries the dump's file SHA-1 as
-    /// rom_checksum, and states in notes that the payload has no native
-    /// load audit (no chip-offset dynamic-art profile exists yet).
+    /// rom_checksum, and states in notes whether native dynamic-art audit was observed.
     /// </summary>
     public sealed class S2TraceIdentity
     {
@@ -36,14 +35,16 @@ namespace OpenGGF.BizHawk.Headless
             + " REV01: S&K $000000, S2 $200000, chip $300000); recorded"
             + " through the S2 recorder without native load audit";
 
-        public static S2TraceIdentity Kis2(string romSha1)
+        public static S2TraceIdentity Kis2(string romSha1, bool dynamicArtAudit = false)
         {
             if (string.IsNullOrEmpty(romSha1))
             {
                 throw new ArgumentException(
                     "The KiS2 dump SHA-1 is required.", "romSha1");
             }
-            return new S2TraceIdentity("knuckles", romSha1, Kis2Notes);
+            return new S2TraceIdentity("knuckles", romSha1, dynamicArtAudit
+                ? Kis2Notes.Replace("without native load audit", "with native dynamic-art audit")
+                : Kis2Notes);
         }
 
         private S2TraceIdentity(

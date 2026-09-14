@@ -128,8 +128,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     AssertContains(segment.MetadataJson, "\"main_character\": \"knuckles\"");
                     AssertContains(segment.MetadataJson, "\"sidekicks\": []");
                     AssertContains(segment.MetadataJson, RomIdentity.Kis2LockOnSha1);
-                    AssertEx.Equal(false, segment.MetadataJson.Contains("load_queue_state_per_frame"));
-                    AssertEx.Equal(false, segment.MetadataJson.Contains("dynamic_art_transfer_state_per_frame"));
+                    AssertEx.Equal(segment.ManifestEntry.Kind == RunManifestSegment.LevelKind, segment.MetadataJson.Contains("load_queue_state_per_frame"));
+                    AssertEx.Equal(true, segment.MetadataJson.Contains("dynamic_art_transfer_state_per_frame"));
                 }
                 AssertEx.Equal(3, CountSubstring(sink.Segments[1].AuxStateJsonl, "\"type\":\"run_objects_end\""));
                 AssertContains(result.RunManifestJson, RomIdentity.Kis2LockOnSha1);
