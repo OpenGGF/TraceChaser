@@ -87,7 +87,33 @@ namespace OpenGGF.BizHawk.Headless
             return CaptureCore(
                 movie, host, traceProfile, targetGameplaySegment, sourceBk2,
                 recordingDate, physicsCsv, auxStateJsonl, metadataJson,
-                requiredDynamicArtRom);
+                requiredDynamicArtRom, S2TraceIdentity.StockSonic2);
+        }
+
+        /// <summary>
+        /// Knuckles in Sonic 2 capture through the S2 recorder. The lock-on
+        /// image runs the chip's patched Sonic 2 program, so every RAM read
+        /// of this recorder applies unchanged; the S2 REV01 dynamic-art ROM
+        /// profile does not (its opcode windows are S2 cart offsets), so no
+        /// native load audit is armed and the metadata says so. The dump's
+        /// file SHA-1 is written as rom_checksum.
+        /// </summary>
+        public static S2TraceCaptureResult CaptureKis2(
+            Bk2Movie movie,
+            IGpgxHost host,
+            string traceProfile,
+            int targetGameplaySegment,
+            string sourceBk2,
+            string recordingDate,
+            TextWriter physicsCsv,
+            TextWriter auxStateJsonl,
+            TextWriter metadataJson,
+            string romSha1)
+        {
+            return CaptureCore(
+                movie, host, traceProfile, targetGameplaySegment, sourceBk2,
+                recordingDate, physicsCsv, auxStateJsonl, metadataJson,
+                null, S2TraceIdentity.Kis2(romSha1));
         }
 
         /// <summary>
@@ -107,7 +133,8 @@ namespace OpenGGF.BizHawk.Headless
         {
             return CaptureCore(
                 movie, host, traceProfile, targetGameplaySegment, sourceBk2,
-                recordingDate, physicsCsv, auxStateJsonl, metadataJson, null);
+                recordingDate, physicsCsv, auxStateJsonl, metadataJson, null,
+                S2TraceIdentity.StockSonic2);
         }
 
         private static S2TraceCaptureResult CaptureCore(
@@ -120,8 +147,13 @@ namespace OpenGGF.BizHawk.Headless
             TextWriter physicsCsv,
             TextWriter auxStateJsonl,
             TextWriter metadataJson,
-            byte[] loadQueueRom)
+            byte[] loadQueueRom,
+            S2TraceIdentity identity)
         {
+            if (identity == null)
+            {
+                throw new ArgumentNullException("identity");
+            }
             if (movie == null)
             {
                 throw new ArgumentNullException("movie");
@@ -444,8 +476,11 @@ namespace OpenGGF.BizHawk.Headless
                     traceProfile,
                     sourceBk2,
                     recordingDate,
+                    null,
+                    0,
                     loadQueueRom != null,
-                    traceFrame > 0));
+                    traceFrame > 0,
+                    identity));
                 return new S2TraceCaptureResult(
                     offset, traceFrame, gameplaySegmentIndex);
                 }

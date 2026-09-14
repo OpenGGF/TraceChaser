@@ -237,6 +237,7 @@ namespace OpenGGF.BizHawk.Headless
             if (traceGame == "s1") return "Sonic The Hedgehog";
             if (traceGame == "s2") return "Sonic The Hedgehog 2";
             if (traceGame == "s3k") return "Sonic 3 & Knuckles";
+            if (traceGame == "kis2") return "Sonic and Knuckles & Sonic 2";
             throw new InvalidOperationException("Unsupported trace game identity: " + traceGame);
         }
 

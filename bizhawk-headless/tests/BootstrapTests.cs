@@ -56,6 +56,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "ROM identity detects Sonic 3 & Knuckles by SHA-1",
                 DetectsSonic3kBySha1));
             tests.Add(new TestMain.TestCase(
+                "ROM identity detects Knuckles in Sonic 2 by SHA-1",
+                DetectsKis2BySha1));
+            tests.Add(new TestMain.TestCase(
                 "ROM identity rejects unknown ROM in game detection",
                 RejectsUnknownRomInGameDetection));
             tests.Add(new TestMain.TestCase(
@@ -208,6 +211,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal("s3k", RomIdentity.DetectGame(ReadSonic3kRom()));
         }
 
+        private static void DetectsKis2BySha1()
+        {
+            byte[] rom = ReadKis2Rom();
+            AssertEx.Equal(0x340000, rom.Length);
+            AssertEx.Equal("kis2", RomIdentity.DetectGame(rom));
+            AssertEx.Equal(RomIdentity.Kis2LockOnSha1, RomIdentity.ComputeSha1(rom));
+        }
+
         private static void RejectsUnknownRomInGameDetection()
         {
             byte[] unknown = new byte[] { 0x01, 0x02, 0x03, 0x04 };
@@ -288,6 +299,23 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 throw new InvalidOperationException(
                     "Supplied S3K_ROM_PATH does not exist: " + romPath + ".");
+            }
+            return File.ReadAllBytes(romPath);
+        }
+
+        private static byte[] ReadKis2Rom()
+        {
+            string romPath =
+                Environment.GetEnvironmentVariable("KIS2_ROM_PATH");
+            if (string.IsNullOrEmpty(romPath))
+            {
+                throw new TestMain.SkipTestException(
+                    "KIS2_ROM_PATH is not set.");
+            }
+            if (!File.Exists(romPath))
+            {
+                throw new InvalidOperationException(
+                    "Supplied KIS2_ROM_PATH does not exist: " + romPath + ".");
             }
             return File.ReadAllBytes(romPath);
         }

@@ -14,6 +14,18 @@ namespace OpenGGF.BizHawk.Headless
         public const string Sonic3kLockOnSha1 =
             "CFBF98C36C776677290A872547AC47C53D2761D6";
 
+        /// <summary>
+        /// Knuckles in Sonic 2: the Sonic &amp; Knuckles lock-on image over
+        /// Sonic 2 World REV01 as one user-supplied 3,407,872-byte dump
+        /// (S&amp;K at $000000, S2 at $200000, the 256 KiB chip at $300000;
+        /// BizHawk gamedb "Sonic and Knuckles &amp; Sonic 2 (W) [!]"). The
+        /// running program is the chip's patched Sonic 2, so the S2 RAM map
+        /// and recorder apply; the S2 REV01 dynamic-art ROM profile does not
+        /// (its opcode windows are S2 cart offsets, not chip offsets).
+        /// </summary>
+        public const string Kis2LockOnSha1 =
+            "6CD0537A3AEE0E012BB86D5837DDFF9342595004";
+
         public static string ValidateSonic1Rev01(byte[] romBytes)
         {
             string actualSha1 = ComputeSha1(romBytes);
@@ -69,7 +81,8 @@ namespace OpenGGF.BizHawk.Headless
         /// <summary>
         /// Detects the trace game from the ROM's SHA-1: "s1" for Sonic 1
         /// World REV01, "s2" for Sonic 2 World REV01, "s3k" for the
-        /// Sonic 3 &amp; Knuckles locked-on combined image. The CLI
+        /// Sonic 3 &amp; Knuckles locked-on combined image, "kis2" for the
+        /// Knuckles in Sonic 2 lock-on image (S2 recorder pipeline). The CLI
         /// dispatches on this instead of a game flag so a supplied ROM
         /// always selects the matching recorder pipeline.
         /// </summary>
@@ -91,12 +104,18 @@ namespace OpenGGF.BizHawk.Headless
             {
                 return "s3k";
             }
+            if (string.Equals(
+                Kis2LockOnSha1, actualSha1, StringComparison.Ordinal))
+            {
+                return "kis2";
+            }
             throw new InvalidOperationException(
                 "ROM SHA-1 " + actualSha1 + " is not a supported trace ROM;"
                 + " expected Sonic 1 World REV01 (" + Sonic1Rev01Sha1
                 + "), Sonic 2 World REV01 (" + Sonic2Rev01Sha1
-                + "), or Sonic 3 & Knuckles locked-on ("
-                + Sonic3kLockOnSha1 + ").");
+                + "), Sonic 3 & Knuckles locked-on ("
+                + Sonic3kLockOnSha1 + "), or Knuckles in Sonic 2 lock-on ("
+                + Kis2LockOnSha1 + ").");
         }
 
         public static string ComputeSha1(byte[] romBytes)

@@ -17,6 +17,48 @@ namespace OpenGGF.BizHawk.Headless
     /// Removed script-version fields are never emitted by the strict-v5
     /// writer.
     /// </summary>
+    /// <summary>
+    /// Which playable program the S2 recorder observed. Stock Sonic 2
+    /// records Sonic (plus Tails under the sidekick rule) with the historical
+    /// empty rom_checksum/notes bytes. The Knuckles in Sonic 2 lock-on image
+    /// runs the chip's patched Sonic 2 with Knuckles alone, so its metadata
+    /// names the main character "knuckles", carries the dump's file SHA-1 as
+    /// rom_checksum, and states in notes that the payload has no native
+    /// load audit (no chip-offset dynamic-art profile exists yet).
+    /// </summary>
+    public sealed class S2TraceIdentity
+    {
+        public static readonly S2TraceIdentity StockSonic2 =
+            new S2TraceIdentity("sonic", "", "");
+
+        public const string Kis2Notes =
+            "logical ROM KIS2 (Sonic & Knuckles lock-on over Sonic 2 World"
+            + " REV01: S&K $000000, S2 $200000, chip $300000); recorded"
+            + " through the S2 recorder without native load audit";
+
+        public static S2TraceIdentity Kis2(string romSha1)
+        {
+            if (string.IsNullOrEmpty(romSha1))
+            {
+                throw new ArgumentException(
+                    "The KiS2 dump SHA-1 is required.", "romSha1");
+            }
+            return new S2TraceIdentity("knuckles", romSha1, Kis2Notes);
+        }
+
+        private S2TraceIdentity(
+            string mainCharacter, string romChecksum, string notes)
+        {
+            MainCharacter = mainCharacter;
+            RomChecksum = romChecksum;
+            Notes = notes;
+        }
+
+        public string MainCharacter { get; private set; }
+        public string RomChecksum { get; private set; }
+        public string Notes { get; private set; }
+    }
+
     public static class S2TraceMetadataWriter
     {
         /// <summary>
@@ -93,6 +135,55 @@ namespace OpenGGF.BizHawk.Headless
             bool loadQueueState = false,
             bool nativePreludeBootstrap = false)
         {
+            return Format(
+                romZoneId,
+                actRaw,
+                gameplaySegment,
+                bk2FrameOffset,
+                traceFrameCount,
+                startX,
+                startY,
+                sidekickPresent,
+                rngSeed,
+                traceProfile,
+                sourceBk2,
+                recordingDate,
+                runId,
+                segmentIndex,
+                loadQueueState,
+                nativePreludeBootstrap,
+                S2TraceIdentity.StockSonic2);
+        }
+
+        /// <summary>
+        /// Identity-aware overload: <paramref name="identity"/> selects the
+        /// main character name, rom_checksum and notes bytes. Stock Sonic 2
+        /// reproduces the historical byte-exact shape; the KiS2 identity is
+        /// the only other value.
+        /// </summary>
+        public static string Format(
+            int romZoneId,
+            int actRaw,
+            int gameplaySegment,
+            int bk2FrameOffset,
+            int traceFrameCount,
+            int startX,
+            int startY,
+            bool sidekickPresent,
+            uint rngSeed,
+            string traceProfile,
+            string sourceBk2,
+            string recordingDate,
+            string runId,
+            int segmentIndex,
+            bool loadQueueState,
+            bool nativePreludeBootstrap,
+            S2TraceIdentity identity)
+        {
+            if (identity == null)
+            {
+                throw new ArgumentNullException("identity");
+            }
             if (traceProfile == null)
             {
                 throw new ArgumentNullException("traceProfile");
@@ -128,10 +219,11 @@ namespace OpenGGF.BizHawk.Headless
                 .Append(Hex4(startX)).Append("\",\n");
             json.Append("  \"start_y\": \"0x")
                 .Append(Hex4(startY)).Append("\",\n");
+            string main = identity.MainCharacter;
             json.Append(sidekickPresent
-                ? "  \"characters\": [\"sonic\", \"tails\"],\n"
-                : "  \"characters\": [\"sonic\"],\n");
-            json.Append("  \"main_character\": \"sonic\",\n");
+                ? "  \"characters\": [\"" + main + "\", \"tails\"],\n"
+                : "  \"characters\": [\"" + main + "\"],\n");
+            json.Append("  \"main_character\": \"" + main + "\",\n");
             json.Append(sidekickPresent
                 ? "  \"sidekicks\": [\"tails\"],\n"
                 : "  \"sidekicks\": [],\n");
@@ -170,8 +262,10 @@ namespace OpenGGF.BizHawk.Headless
                 json.Append("  \"segment_index\": ")
                     .Append(Dec(segmentIndex)).Append(",\n");
             }
-            json.Append("  \"rom_checksum\": \"\",\n");
-            json.Append("  \"notes\": \"\"\n");
+            json.Append("  \"rom_checksum\": \"")
+                .Append(JsonEscape(identity.RomChecksum)).Append("\",\n");
+            json.Append("  \"notes\": \"")
+                .Append(JsonEscape(identity.Notes)).Append("\"\n");
             json.Append("}\n");
             return json.ToString();
         }

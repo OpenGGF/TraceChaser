@@ -86,6 +86,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal("Sonic The Hedgehog", GpgxHost.ResolveManagedGameName("s1"));
             AssertEx.Equal("Sonic The Hedgehog 2", GpgxHost.ResolveManagedGameName("s2"));
             AssertEx.Equal("Sonic 3 & Knuckles", GpgxHost.ResolveManagedGameName("s3k"));
+            AssertEx.Equal("Sonic and Knuckles & Sonic 2", GpgxHost.ResolveManagedGameName("kis2"));
             AssertEx.Throws<InvalidOperationException>(
                 () => GpgxHost.ResolveManagedGameName("unknown"), "Unsupported");
         }

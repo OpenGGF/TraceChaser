@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace OpenGGF.BizHawk.Headless.Tests
@@ -33,6 +34,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S2TraceMetadataWriter json-escapes profile and source",
                 JsonEscapesProfileAndSource));
+            tests.Add(new TestMain.TestCase(
+                "S2TraceMetadataWriter renders the KiS2 identity",
+                RendersKis2Identity));
         }
 
         private static void AssertsEhz1StrictV5Shape()
@@ -81,6 +85,28 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "gameplay_unlock",
                     "s2-ehz1.bk2",
                     "2026-07-13"));
+        }
+
+        private static void RendersKis2Identity()
+        {
+            string metadata = S2TraceMetadataWriter.Format(
+                0x00, 0, 0, 1200, 1500, 0x0060, 0x0290, false, 0u,
+                "gameplay_unlock", "kis2-ehz1.bk2", "2026-09-14",
+                null, 0, false, true,
+                S2TraceIdentity.Kis2(RomIdentity.Kis2LockOnSha1));
+            AssertEx.Equal(true, metadata.Contains("  \"game\": \"s2\",\n"));
+            AssertEx.Equal(true, metadata.Contains(
+                "  \"characters\": [\"knuckles\"],\n"
+                + "  \"main_character\": \"knuckles\",\n"
+                + "  \"sidekicks\": [],\n"));
+            AssertEx.Equal(true, metadata.Contains(
+                "  \"rom_checksum\": \"" + RomIdentity.Kis2LockOnSha1 + "\",\n"
+                + "  \"notes\": \"" + S2TraceIdentity.Kis2Notes + "\"\n"));
+            AssertEx.Equal(true, metadata.Contains(
+                "\"native_prelude_bootstrap\"],\n"));
+            AssertEx.Equal(false, metadata.Contains("load_queue_state_per_frame"));
+            AssertEx.Throws<ArgumentException>(
+                () => S2TraceIdentity.Kis2(""), "SHA-1");
         }
 
         private static void AssertsArzStrictV5Shape()

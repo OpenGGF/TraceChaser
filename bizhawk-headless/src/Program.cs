@@ -1452,6 +1452,33 @@ namespace BizHawk.Headless.Gpgx
                             stderr,
                             openHost);
                     }
+                    if (traceGame == "kis2")
+                    {
+                        // Knuckles in Sonic 2: plain S2 trace mode only.
+                        // Run mode and the special-stage recorder carry
+                        // S2-REV01 ROM-offset audits that the chip-resident
+                        // KiS2 program does not satisfy.
+                        if (options.RunId != null
+                            || options.GameplaySegment.HasValue
+                            || options.TraceProfile
+                                == S2SpecialStageCaptureRunner.TraceProfile)
+                        {
+                            throw new ArgumentException(
+                                "The Knuckles in Sonic 2 lock-on ROM supports"
+                                + " only plain --mode trace with the"
+                                + " gameplay_unlock or level_gated_reset_aware"
+                                + " profile.");
+                        }
+                        return RunS2Trace(
+                            options,
+                            installation,
+                            romSha1,
+                            movie,
+                            stdout,
+                            stderr,
+                            openHost,
+                            true);
+                    }
                     if (options.RunId != null)
                     {
                         return RunS2TraceRun(
@@ -2323,7 +2350,8 @@ namespace BizHawk.Headless.Gpgx
             Bk2Movie movie,
             TextWriter stdout,
             TextWriter stderr,
-            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost)
+            Func<string, GPGX.GPGXSyncSettings, IGpgxHost> openHost,
+            bool kis2 = false)
         {
             string traceProfile = options.TraceProfile
                 ?? S2TraceCaptureRunner.GameplayUnlockProfile;
@@ -2345,19 +2373,33 @@ namespace BizHawk.Headless.Gpgx
                 () => openHost(
                     options.RomPath,
                     movie.SyncSettings),
-                (host, writers) => S2TraceCaptureRunner.Capture(
-                    movie,
-                    host,
-                    traceProfile,
-                    targetGameplaySegment,
-                    Path.GetFileName(options.MoviePath),
-                    DateTime.Now.ToString(
-                        "yyyy-MM-dd",
-                        CultureInfo.InvariantCulture),
-                    writers[0],
-                    writers[1],
-                    writers[2],
-                    File.ReadAllBytes(options.RomPath)),
+                (host, writers) => kis2
+                    ? S2TraceCaptureRunner.CaptureKis2(
+                        movie,
+                        host,
+                        traceProfile,
+                        targetGameplaySegment,
+                        Path.GetFileName(options.MoviePath),
+                        DateTime.Now.ToString(
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture),
+                        writers[0],
+                        writers[1],
+                        writers[2],
+                        romSha1)
+                    : S2TraceCaptureRunner.Capture(
+                        movie,
+                        host,
+                        traceProfile,
+                        targetGameplaySegment,
+                        Path.GetFileName(options.MoviePath),
+                        DateTime.Now.ToString(
+                            "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture),
+                        writers[0],
+                        writers[1],
+                        writers[2],
+                        File.ReadAllBytes(options.RomPath)),
                 result =>
                     "BizHawk: " + installation.ManagedVersion + "\n"
                     + "ROM SHA-1: " + romSha1 + "\n"
