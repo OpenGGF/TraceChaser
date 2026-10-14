@@ -139,6 +139,41 @@ frequently a RAM-backed tmpfs: running four gates against one filled it and
 three captures failed with ENOSPC — correctly, because a full disk and a
 recorder that stopped early are indistinguishable to a byte gate.
 
+## Diagnostic rendered frames
+
+`GpgxHost` separately implements `IGpgxVideoCaptureHost`. Ordinary `Advance()`
+keeps the existing video-disabled trace behavior. `AdvanceWithVideo()` performs
+exactly one normal core frame with video enabled and sound disabled; it does not
+select a recorder, change controllers or write emulator RAM. After it returns,
+`CapturePublishedFrame()` copies that completed frame's ARGB pixels, dimensions,
+lag state and the exposed VRAM/CRAM/VSRAM domains. A frame advanced without video
+or a failed advancing step is rejected as stale. State loading invalidates the
+rendered generation even when it restores the same completed-frame number. Each snapshot owns its arrays;
+mutating a snapshot cannot change the emulator or another snapshot.
+
+This port was added for the independently specified S3K ending diagnostic
+comparison task (2026-10-14). It is an observation/capture capability, not fixture
+publication or a new trace hook. Use explicit ROM, runtime, inputs and external
+output roots. Runtime domain names and sizes fail closed: VRAM 65,536 bytes, CRAM 128 bytes and
+the pinned GPGX VSRAM backing 128 bytes (80 bytes are active Genesis VSRAM). The
+snapshot also records each domain's exposed endianness. Dimensions come from
+the video provider; no assumed crop, resize or frame offset is applied.
+
+Samples are taken after the completed hardware frame, outside core advancement.
+Frame-end VRAM/CRAM and RAM's prepared SAT/palette must not be substituted for
+the pixels drawn earlier in that frame. A scene comparator must record its native
+producer/publication and input ledger independently. Matching a phase, current
+RAM coordinate or completed-frame count alone is not pixel parity. Existing
+movie sync settings, timing differences and any declared one-time setup retain
+their own provenance; reference data never supplies later gameplay state.
+
+Bounded checks are registered with the existing host tests:
+`test.sh --filter GpgxHost --jobs 1` covers dispatch flags, stale/failed generations,
+owned copies and a serial real-S1 render-vs-ordinary full-RAM comparison. Supply
+an explicit original `S1_ROM_PATH` and the official `BIZHAWK_HOME`; the real case
+reports a skip when that ROM is absent. These checks qualify the port, not a scene
+capture or a complete trace-fixture sweep.
+
 ## Capturing a trace
 
 ```bash

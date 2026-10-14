@@ -9,7 +9,7 @@ using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
 namespace OpenGGF.BizHawk.Headless
 {
     public sealed partial class GpgxHost : IGpgxHost, ICpuRegisterReader,
-        IMainRamWriter, IOverrideResumeDiagnosticAudioHost
+        IMainRamWriter, IOverrideResumeDiagnosticAudioHost, IGpgxVideoCaptureHost
     {
         private readonly GPGX core;
         private readonly MutableController controller;
@@ -24,6 +24,7 @@ namespace OpenGGF.BizHawk.Headless
                 new List<ExecuteCallbackRegistration>();
         private Exception pendingExecuteCallbackException;
         private bool disposed;
+        private readonly GpgxVideoCaptureGeneration videoCaptureGeneration = new GpgxVideoCaptureGeneration();
         internal int LastCheckpointVideoLength { get; private set; }
         internal int LastCheckpointAudioFrames { get; private set; }
 
@@ -176,6 +177,7 @@ namespace OpenGGF.BizHawk.Headless
         internal void LoadSavestate(byte[] state)
         {
             if (disposed) throw new ObjectDisposedException("GpgxHost");
+            videoCaptureGeneration.Invalidate();
             ((IStatable)core).LoadStateBinary(state);
             soundProvider.DiscardSamples();
         }
@@ -281,12 +283,52 @@ namespace OpenGGF.BizHawk.Headless
 
         public void Advance()
         {
+            videoCaptureGeneration.Invalidate();
             core.FrameAdvance(controller, false, false);
             ThrowPendingExecuteCallbackException();
         }
 
+        public void AdvanceWithVideo()
+        {
+            if (disposed) throw new ObjectDisposedException("GpgxHost");
+            videoCaptureGeneration.Advance(
+                (render, sound) => core.FrameAdvance(controller, render, sound),
+                () => core.Frame, ThrowPendingExecuteCallbackException);
+        }
+
+        public GpgxPublishedVideoFrame CapturePublishedFrame()
+        {
+            if (disposed) throw new ObjectDisposedException("GpgxHost");
+            videoCaptureGeneration.RequireCurrent(core.Frame);
+            IMemoryDomains domains = core.ServiceProvider.GetService<IMemoryDomains>();
+            MemoryDomain vram = RequireVideoDomain(domains, "VRAM", 65536);
+            MemoryDomain cram = RequireVideoDomain(domains, "CRAM", 128);
+            MemoryDomain vsram = RequireVideoDomain(domains, "VSRAM", 128);
+            return new GpgxPublishedVideoFrame(core.Frame, IsLagged, LagCount,
+                videoProvider.BufferWidth, videoProvider.BufferHeight, videoProvider.GetVideoBuffer(),
+                CopyVideoDomain(vram), CopyVideoDomain(cram), CopyVideoDomain(vsram),
+                vram.EndianType.ToString(), cram.EndianType.ToString(), vsram.EndianType.ToString());
+        }
+
+        private static MemoryDomain RequireVideoDomain(IMemoryDomains domains, string name, int size)
+        {
+            if (domains == null) throw new InvalidOperationException("Published VDP domains unavailable.");
+            MemoryDomain domain = domains[name];
+            if (domain == null || domain.Size != size)
+                throw new InvalidOperationException("Required published " + name + " domain is absent or wrong-sized: expected " + size + ", actual " + (domain == null ? "absent" : domain.Size.ToString()) + ".");
+            return domain;
+        }
+
+        private static byte[] CopyVideoDomain(MemoryDomain domain)
+        {
+            var copy = new byte[checked((int)domain.Size)];
+            for (int i = 0; i < copy.Length; i++) copy[i] = domain.PeekByte(i);
+            return copy;
+        }
+
         internal void AdvanceDiagnosticAudio()
         {
+            videoCaptureGeneration.Invalidate();
             core.FrameAdvance(controller, false, true);
             ThrowPendingExecuteCallbackException();
         }
