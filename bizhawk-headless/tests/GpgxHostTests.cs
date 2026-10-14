@@ -18,6 +18,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "GpgxHost selects an exact managed game name for every supported ROM",
                 SelectsManagedGameNames));
 
+            tests.Add(new TestMain.TestCase("GpgxHost video exact render dispatch and stale generation", VideoDispatchAndStaleGeneration));
+            tests.Add(new TestMain.TestCase("GpgxHost video failed dispatch cannot publish pixels", VideoFailedDispatch));
+            tests.Add(new TestMain.TestCase("GpgxHost video snapshot owns all copied buffers", VideoSnapshotCopies));
+            tests.Add(new TestMain.TestCase("GpgxHost video failed non-video attempt invalidates the previous generation", NonVideoAttemptInvalidates));
+            tests.Add(new TestMain.TestCase("GpgxHost video real rendered frame preserves trace RAM and owns current buffers",
+                RealVideoFrame, game: "s1", serial: true, estimatedSeconds: 3.0));
+
             string romPath = Environment.GetEnvironmentVariable("S1_ROM_PATH");
             if (string.IsNullOrEmpty(romPath) || !File.Exists(romPath))
             {
@@ -78,6 +85,89 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     game: "s1",
                     serial: true,
                     estimatedSeconds: 10.0));
+            }
+        }
+
+        private static void VideoDispatchAndStaleGeneration()
+        {
+            var capture = new GpgxVideoCaptureGeneration(); int frame = 0;
+            AssertEx.Throws<InvalidOperationException>(() => capture.RequireCurrent(frame), "not advanced");
+            string order = "";
+            capture.Advance((render, sound) => { AssertEx.Equal(true, render); AssertEx.Equal(false, sound); frame++; order += "advance;"; },
+                () => { order += "frame;"; return frame; }, () => { order += "check;"; });
+            AssertEx.Equal("advance;check;frame;", order); capture.RequireCurrent(1);
+            frame++; AssertEx.Throws<InvalidOperationException>(() => capture.RequireCurrent(frame), "not advanced");
+            capture.Advance((render, sound) => frame++, () => frame, () => { }); capture.RequireCurrent(3);
+        }
+        private static void VideoFailedDispatch()
+        {
+            var capture = new GpgxVideoCaptureGeneration(); int frame = 0;
+            AssertEx.Throws<InvalidOperationException>(() => capture.Advance((r,s) => frame++, () => frame,
+                () => { throw new InvalidOperationException("callback failed"); }), "callback failed");
+            AssertEx.Throws<InvalidOperationException>(() => capture.RequireCurrent(frame), "not advanced");
+            capture.Advance((r,s) => { }, () => frame, () => { });
+            capture.RequireCurrent(frame);
+            AssertEx.Throws<InvalidOperationException>(() => capture.Advance((r,s) => { throw new InvalidOperationException("core failed before frame"); },
+                () => frame, () => { }), "core failed before frame");
+            AssertEx.Throws<InvalidOperationException>(() => capture.RequireCurrent(frame), "not advanced");
+        }
+        private static void NonVideoAttemptInvalidates()
+        {
+            var capture = new GpgxVideoCaptureGeneration(); int frame = 17;
+            capture.Advance((r,s) => { }, () => frame, () => { }); capture.RequireCurrent(frame);
+            // Both ordinary/video-disabled owners perform this boundary BEFORE the core call.
+            capture.Invalidate();
+            AssertEx.Throws<InvalidOperationException>(() => { throw new InvalidOperationException("ordinary core failed"); }, "ordinary core failed");
+            AssertEx.Throws<InvalidOperationException>(() => capture.RequireCurrent(frame), "not advanced");
+            capture.Advance((r,s) => frame++, () => frame, () => { }); capture.RequireCurrent(frame);
+        }
+        private static void VideoSnapshotCopies()
+        {
+            int[] pixels = { 0x123456, 0x654321 }; byte[] vram = new byte[65536], cram = new byte[128], vsram = new byte[128];
+            var frame = new GpgxPublishedVideoFrame(7, true, 3, 2, 1, pixels, vram, cram, vsram, "unknown", "unknown", "unknown");
+            pixels[0] = 0; vram[0] = cram[0] = vsram[0] = 4;
+            AssertEx.Equal(0x123456, frame.ArgbPixels[0]); AssertEx.Equal((byte)0, frame.Vram[0]);
+            AssertEx.Equal((byte)0, frame.Cram[0]); AssertEx.Equal((byte)0, frame.Vsram[0]);
+            AssertEx.Equal(7, frame.CompletedFrame); AssertEx.Equal(true, frame.IsLagged); AssertEx.Equal(3, frame.LagCount);
+            AssertEx.Throws<InvalidOperationException>(() => new GpgxPublishedVideoFrame(1,false,0,3,1,pixels,vram,cram,vsram,"","",""), "dimensions");
+        }
+        private static void RealVideoFrame()
+        {
+            string path = Environment.GetEnvironmentVariable("S1_ROM_PATH");
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) throw new TestMain.SkipTestException("Explicit S1_ROM_PATH required.");
+            byte[] renderedRam = new byte[65536]; int count;
+            using (var host = GpgxHost.Open(path, GpgxHost.CreateGhz1SyncSettings()))
+            {
+                IGpgxVideoCaptureHost capture = host;
+                AssertEx.Throws<InvalidOperationException>(() => capture.CapturePublishedFrame(), "not advanced");
+                // Real boot, ordinary neutral controls; finite admission, no RAM/VRAM setup.
+                for (int i = 0; i < 300; i++) capture.AdvanceWithVideo();
+                var frame = capture.CapturePublishedFrame(); count = host.CompletedFrame;
+                AssertEx.Equal(300, frame.CompletedFrame);
+                bool nonUniform = false;
+                for (int i = 1; i < frame.Width * frame.Height; i++) if (frame.ArgbPixels[i] != frame.ArgbPixels[0]) { nonUniform = true; break; }
+                AssertEx.Equal(true, nonUniform);
+                var original = capture.CapturePublishedFrame();
+                frame.ArgbPixels[0] ^= 1; frame.Vram[0] ^= 1; frame.Cram[0] ^= 1; frame.Vsram[0] ^= 1;
+                var fresh = capture.CapturePublishedFrame();
+                AssertEx.Equal(original.ArgbPixels[0], fresh.ArgbPixels[0]); AssertEx.Equal(original.Vram[0], fresh.Vram[0]);
+                AssertEx.Equal(original.Cram[0], fresh.Cram[0]); AssertEx.Equal(original.Vsram[0], fresh.Vsram[0]);
+                for (int i = 0; i < renderedRam.Length; i++) renderedRam[i] = host.ReadMainRamByte(i);
+                byte[] state = host.CloneSavestate();
+                byte saved = host.ReadMainRamByte(0); host.WriteMainRamByte(0, (byte)(saved ^ 0x5A));
+                host.LoadSavestate(state); AssertEx.Equal(300, host.CompletedFrame); AssertEx.Equal(saved, host.ReadMainRamByte(0));
+                AssertEx.Throws<InvalidOperationException>(() => capture.CapturePublishedFrame(), "not advanced");
+                capture.AdvanceWithVideo(); AssertEx.Equal(301, capture.CapturePublishedFrame().CompletedFrame);
+                host.AdvanceDiagnosticAudio(); AssertEx.Throws<InvalidOperationException>(() => capture.CapturePublishedFrame(), "not advanced");
+                capture.AdvanceWithVideo(); AssertEx.Equal(303, capture.CapturePublishedFrame().CompletedFrame);
+                host.Advance(); AssertEx.Throws<InvalidOperationException>(() => capture.CapturePublishedFrame(), "not advanced");
+                capture.AdvanceWithVideo(); AssertEx.Equal(305, capture.CapturePublishedFrame().CompletedFrame);
+                AssertEx.Equal(300, original.CompletedFrame);
+            }
+            using (var host = GpgxHost.Open(path, GpgxHost.CreateGhz1SyncSettings()))
+            {
+                for (int i = 0; i < count; i++) host.Advance();
+                for (int i = 0; i < renderedRam.Length; i++) AssertEx.Equal(renderedRam[i], host.ReadMainRamByte(i));
             }
         }
 
