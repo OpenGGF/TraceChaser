@@ -174,6 +174,40 @@ an explicit original `S1_ROM_PATH` and the official `BIZHAWK_HOME`; the real cas
 reports a skip when that ROM is absent. These checks qualify the port, not a scene
 capture or a complete trace-fixture sweep.
 
+## Exact S3K Kosinski service measurements
+
+`S3kExactKosMeasurementObserver` is an optional, read-only diagnostic capability.
+It does not replace `HardwareTimingEventEngine`, the canonical v5 ledger, or the
+legacy `load-time-measurement-v1` stream. The separately versioned schema2/v2
+stream records actual direct FIFO service opportunities, not elapsed hardware
+frames. Its fixed instruction-byte checks run before any callback registration.
+
+Default callbacks are module-child post-enqueue `$1B46`, actual occupied-head
+service `$1C1A`, and committed retirement `$1CE4` before the remaining FIFO shifts.
+An explicit `includeDirectSubmissions` option adds post-enqueue `$1BEE`; a return
+from there to `$1B46` is skipped so a module child is not observed twice. Only
+normal Level mode service returning to `$651C` or title-card service returning
+to `$62D8` is classified, and both caller JSR opcodes are verified from supplied
+ROM bytes. Any other service caller contaminates its head sample. Waiting jobs
+receive no units. Resumed heads retain their original source/destination; consumed
+cursors and decremented count are verified at retirement. Unobserved submissions
+are labeled `head_service_censored` and cannot supply a runtime profile cost.
+
+Supply explicit ROM/movie SHA identities, fixture name and raw hardware-frame
+clock; dispose the returned registration scope. Call `Reset()` only for the
+actual session/reset boundary: pending samples abort rather than emit a cost.
+Snapshots, gameplay RAM, controllers, VDP domains and trace sync points are never
+written by this observer. Caller PC, source/fingerprint and exact FIFO facts own
+classification; scene, fixture name and frame number cannot select behavior.
+
+The registered `--filter ExactKosMeasurement --jobs 1` checks exercise same-frame
+service, waiting, interrupted descriptor retention, consumed cursors, caller/hook
+revision gates, aborts, contamination and provenance validation. Existing
+`--filter HardwareTiming --jobs 1` controls keep legacy behavior separately
+qualified. Actual-native interrupted service and independent head/end observation
+must corroborate a profile publication; pure test vectors alone do not grant a
+cost. No measurement stream is a canonical trace fixture or replay input.
+
 ## Capturing a trace
 
 ```bash

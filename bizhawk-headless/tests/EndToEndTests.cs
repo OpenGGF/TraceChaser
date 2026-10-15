@@ -1443,6 +1443,23 @@ namespace OpenGGF.BizHawk.Headless.Tests
             }
         }
 
+        // The TraceChaser checkout that owns this build: bin/Release ->
+        // bizhawk-headless -> repository root. It resolves identically as a
+        // standalone worktree or as the consumer's tools/tracechaser gitlink,
+        // so TraceChaser-owned sources (bizhawk/ Lua) never depend on the
+        // consumer's compatibility forwarders.
+        internal static string TraceChaserRoot
+        {
+            get
+            {
+                return Path.GetFullPath(Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "..",
+                    "..",
+                    ".."));
+            }
+        }
+
         internal static string ToolDirectory
         {
             get
