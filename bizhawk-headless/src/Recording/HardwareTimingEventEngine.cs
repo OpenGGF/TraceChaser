@@ -61,7 +61,7 @@ namespace OpenGGF.BizHawk.Headless
             public string Fingerprint;
         }
 
-        private sealed class StandardKosShape
+        internal sealed class StandardKosShape
         {
             public int CompressedLength;
             public int DestinationLength;
@@ -910,7 +910,7 @@ namespace OpenGGF.BizHawk.Headless
                 shape.ModuleCount);
         }
 
-        private StandardKosShape InspectStandardKos(uint canonicalSource)
+        internal StandardKosShape InspectStandardKos(uint canonicalSource)
         {
             int start = checked((int)canonicalSource);
             int position = start;

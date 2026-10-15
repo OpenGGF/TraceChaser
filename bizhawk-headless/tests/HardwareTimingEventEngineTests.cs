@@ -2236,8 +2236,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     FileName = lua,
                     Arguments = Quote(scriptPath)
                         + " " + Quote(Path.Combine(
-                            EndToEndTests.RepositoryRoot,
-                            "tools", "bizhawk", "lib",
+                            EndToEndTests.TraceChaserRoot,
+                            "bizhawk", "lib",
                             "oggf_hardware_timing.lua"))
                         + " " + Quote(romPath)
                         + " " + source
@@ -2279,11 +2279,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 TraceContract.RecorderVersion);
 
             string standard = File.ReadAllText(Path.Combine(
-                EndToEndTests.RepositoryRoot,
-                "tools", "bizhawk", "s3k_trace_recorder.lua"));
+                EndToEndTests.TraceChaserRoot,
+                "bizhawk", "s3k_trace_recorder.lua"));
             string complete = File.ReadAllText(Path.Combine(
-                EndToEndTests.RepositoryRoot,
-                "tools", "bizhawk", "s3k_complete_run_recorder.lua"));
+                EndToEndTests.TraceChaserRoot,
+                "bizhawk", "s3k_complete_run_recorder.lua"));
             AssertEx.Equal(
                 true,
                 standard.Contains(
@@ -2486,8 +2486,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         private static void StandardLuaBoundsNeverArmedCapture()
         {
             string source = File.ReadAllText(Path.Combine(
-                EndToEndTests.RepositoryRoot,
-                "tools", "bizhawk", "s3k_trace_recorder.lua"));
+                EndToEndTests.TraceChaserRoot,
+                "bizhawk", "s3k_trace_recorder.lua"));
             int frameEnd = source.IndexOf(
                 "function on_frame_end()", StringComparison.Ordinal);
             int captureMovieGuard = source.IndexOf(

@@ -212,7 +212,7 @@ them, and that is a decision rather than a gap —
 `bizhawk-headless/docs/s3k-profiles-and-hooks.md` §2.4 records the reasoning,
 and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
-Do not "helpfully" add general M68K exec/memory-write callback support. Four fixed,
+Do not "helpfully" add general M68K exec/memory-write callback support. Five fixed,
 address-filtered observers are permitted exceptions, and nothing else is.
 
 The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001B46`,
@@ -251,7 +251,19 @@ active service token plus its declared snapshot bytes. Its fixed manifest owns t
 opcodes, and ranges; it may not select a profile, address, or request value from callers, or
 infer a request from later state or output.
 
-All four are observers. None may select a trace sync point, mutate emulation state, carry
+The fifth is the optional Sonic 3&K exact Kosinski service measurement observer
+(`S3kExactKosMeasurementObserver`). It is not part of any fixture capture or trace
+profile: it emits only the separately versioned diagnostic `load-time-measurement-v2`
+stream. Its fixed PCs are the module post-enqueue `0x001B46` (shared with the first
+exception), the occupied-head service entry `0x001C1A` of `Process_Kos_Queue`, the
+committed-retirement branch `0x001CE4` after `Process_Kos_Queue_EndReached` decrements
+the count and before the FIFO shifts, and the explicitly opted-in top-level `Queue_Kos`
+`rts` at `0x001BEE`. Every hook opcode and both caller `jsr Process_Kos_Queue` sites
+(`0x006516`, `0x0062D2`) are byte-checked before any registration. It may read only
+the FIFO descriptors, count word and the caller return address; it may not write RAM,
+classify by scene, fixture or frame, select a sync point, or feed a replay.
+
+All five are observers. None may select a trace sync point, mutate emulation state, carry
 a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate must
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and
