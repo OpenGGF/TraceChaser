@@ -195,8 +195,9 @@ Seven harnesses run, ending with `snapshot-at-pc-harness`. Any failure aborts.
 
 ## Observation-only 68000 stall counters (0004, stall ABI v1)
 
-`0004-m68k-stall-counters.patch` applies after 0001-0003 and adds cumulative counters for the 68000 time GPGX
-adds outside instruction execution, which per-PC execute histograms cannot see:
+`0004-m68k-stall-counters.patch` applies after 0001-0003 and adds cumulative counters for four enumerated
+sources of 68000 time that per-PC execute histograms cannot see. They are not all of the time GPGX adds outside
+instruction execution; see the uncounted list below.
 
 | Counter | GPGX site (051d430d) |
 |---|---|
@@ -207,8 +208,19 @@ adds outside instruction execution, which per-PC execute histograms cannot see:
 | Frame rebase (base + `m68k.cycles` is a monotonic stamp) | `system.c` `system_frame_gen`/`_scd` |
 
 Every insertion only reads the value the core already computed, behind a single `gpgx_m68k_stall_enabled` branch; no
-emulated cycle, callback order, input or savestate content changes. The other GPGX writes to `m68k.cycles` are
-reset, illegal-address lockup, Sega CD polling and the stopped-CPU fast path, none of which counts as a stall here.
+emulated cycle, callback order, input or savestate content changes.
+
+Not counted by v1, so a closure built on these counters must account for them separately:
+
+- interrupt acceptance, `USE_CYCLES(m68ki_cycle_interrupts[...])` at `m68k/m68kcpu.h:1449`: 50-59 cycles
+  (350-413 MCLK) per accepted VInt or HInt, depending on the cycle phase;
+- 68000 accesses to the Z80 window `$A00000-$A0FFFF`, `+1*7` MCLK each at `mem68k.c:144` and `:179`;
+- instruction execution itself (`USE_CYCLES` in the instruction handlers), plus reset, illegal-address lockup,
+  Sega CD polling and the stopped-CPU fast path (`m68kcpu.c:277`).
+
+A Z80-initiated 68000-bus DMA (`vdp_ctrl.c` with a `Z80.cycles` base) could move `m68k.cycles` backwards; the
+`after > before` guard then counts nothing. S3K does not do this. Counting the uncounted sources is stall ABI v2
+work.
 
 The ABI is independent of the audio-trace, S3K parity and S3K PCM ABIs: `gpgx_m68k_stall_abi_version` (1),
 `_snapshot_size` (80), `_enable(abi)`, `_read(out, size)` and `_disable`. A read before enable returns -1 and a size

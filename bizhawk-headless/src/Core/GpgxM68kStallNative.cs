@@ -64,7 +64,8 @@ namespace OpenGGF.BizHawk.Headless
                 throw new InvalidOperationException("GPGX 68000 stall counters rejected ABI v1: " + result);
         }
 
-        // Read inside a managed execute callback (an instruction boundary) or between frames.
+        // Read between FrameAdvance calls. An in-frame read is only valid from an observer that AGENTS.md explicitly
+        // sanctions to read stall data; none does today.
         public GpgxM68kStallSnapshotV1 Read()
         {
             GpgxM68kStallSnapshotV1 snapshot;
