@@ -294,6 +294,27 @@ The marker records:
 
 These record input identity. They are not a host attestation.
 
+### Draining the 68000 CPU ledger (stall ABI v2)
+
+`--m68k-ledger-window` needs a core built with 0001-0005. It starts from an explicit ingress savestate and its
+provenance JSON (`--ingress-state`, `--ingress-provenance`), advances `--frames` frames with no input, and drains the
+native ledger only between FrameAdvance calls.
+
+- **Ingress.** The provenance must declare `ingress_kind` and match the ROM, the loaded core and the state's
+  SHA-256. The ingress is produced outside TraceChaser. For OpenGGF's S3K ending research it is a declared-setup
+  state with the label `declared_setup`; authentic movie-only coverage is a separate campaign.
+- **Options.** `--ledger off` gives the non-perturbation control. On the S3K ROM only, two options use
+  `Level_frame_counter` as a frame label: `--save-state-when-label-exceeds` and `--audio-label-window`.
+- **Boundary.** The three root flags and the output rules are the same as `--final-pcm-window`.
+- **Outputs:**
+  - `intervals.jsonl`: one row per closed VInt-to-VInt interval. The first row is the partial interval opened by
+    enable and is marked `complete: false`;
+  - `interval-slots.csv`: per-PC count and MCLK by context;
+  - `accepts.jsonl`, `frames.jsonl`, `audio-window.s16` and savestates;
+  - `metadata.json`, written last as the completion marker.
+- **Fails closed** on any native flag, a gap, an empty or unjoined interval, more than one VInt in a frame, or an
+  identity mismatch.
+
 ### Capturing a pinned complete-audio raw stream
 
 The production-owned S2/S3K audio validation path uses a separate, closed raw

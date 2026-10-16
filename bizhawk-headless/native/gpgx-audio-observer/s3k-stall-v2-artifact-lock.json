@@ -1,0 +1,64 @@
+{
+  "schema": "openggf.gpgx-s3k-stall-v2-artifact-lock.v1",
+  "publication": "DIAGNOSTIC_68000_CPU_LEDGER_ONLY",
+  "production_lock_eligible": false,
+  "note": "Recorded output provenance of the stall ABI v2 build (build-s3k-stall-v2-observer.sh --series v2), not a build gate. The published s3k-stall-artifact-lock.json, s3k-parity-artifact-lock.json, s3k-pcm-artifact-lock.json and artifact-lock.json are unchanged.",
+  "source": {
+    "bizhawk_commit": "427556b5ef3ac437eba754d90c5e7e9096c9a8df",
+    "gpgx_commit": "051d430d3d1b54625f9900c8f152d7f232e06daf",
+    "gpgx_tree": "1bb96ca74d660d383e70d9cd56b88906a0773519",
+    "musl_commit": "2063abc4e16c84218757b1db10d3cdf9f36ef3f8",
+    "verified": "git object ids"
+  },
+  "toolchain": {
+    "clang_sha256": "bb6556bdcdeb00dca0c758da9966a9982542a23ddcaffa784a2de9344ede3fc0",
+    "ld_lld_sha256": "f8d0601bf957a1b063e29c3c43613a5b76482f6c14664b9fcac4d596871e14df",
+    "sysroot_file_digest_sha256": "cc9c53a8e10a7c637c0c63b95471d025b04631ee64eab22eb7d787ebcf05d1e0",
+    "zstd_sha256": "2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885",
+    "zstd_threads": 1
+  },
+  "patches": {
+    "0001-buffer-z80-audio-events.patch": "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b",
+    "0002-s3k-audio-parity-events.patch": "749576761e4d209eecc2e9f800147f2562df04fd24896ca93ca2edd91e4379d6",
+    "0003-s3k-chip-pcm-events.patch": "d6f9926e8e68755492388929ab46c7ad8ef642dcd676f6231a6580c1ed78a14c",
+    "0004-m68k-stall-counters.patch": "a1ac61e6c690ddc17a9626edb1cb583562f878500f92e1721ee1161e54df5f41",
+    "0005-m68k-cpu-ledger-v2.patch": "667e74dad070808ebb3c4cb93f7aaa7ea03801437cbf5aa1d6598c07a9132327"
+  },
+  "builder_sha256": "2a2864e76b2ac312c659cf41f62098b8fbc6d2b521ecfe8da4e33a8f07eff9a6",
+  "selftests": {
+    "m68k-stall2-run.sh": "a436a83ab94b64703b216fa107c3a4e12568dc8ccc65a79a2ba0ab23c0c04005",
+    "m68k_stall2_harness.c": "bc1c6876bcf78b4be7dc0894b82b069f1ece72ea8190acd0817bf2fbf831b890"
+  },
+  "core": {
+    "decompressed_size": 43718792,
+    "decompressed_sha256": "de82599ebcb841c2bf3586c956d4e6fe2ad81c5b4727c74d938619426d2a77ae",
+    "compressed_size": 431204,
+    "compressed_sha256": "f584d70ca0cc21f841e918cdfe755dafb70aa0983419cc8ceb91935b6131e7e2",
+    "build_id": "f82de8d7da325330",
+    "native_selftest_log_sha256": "58e72a81bc3231a5817ad0308a02d78d60b9e98825a7c3b18a1354a6507d3b9b",
+    "invisible_section_bytes": 4084952
+  },
+  "stall_abi_v2": {
+    "version": 2,
+    "slot_bytes": 12,
+    "accept_bytes": 32,
+    "bank_bytes": 176,
+    "frame_bytes": 40,
+    "slots_per_bank": 6144,
+    "max_load": 4608,
+    "banks": 3,
+    "ring": 512,
+    "frames_tracked": 8,
+    "exports": [
+      "gpgx_m68k_stall2_abi_version",
+      "gpgx_m68k_stall2_layout",
+      "gpgx_m68k_stall2_enable",
+      "gpgx_m68k_stall2_read_frame",
+      "gpgx_m68k_stall2_take_accepts",
+      "gpgx_m68k_stall2_take_bank",
+      "gpgx_m68k_stall2_disable"
+    ],
+    "state_section": ".invis",
+    "invisible_section_limit_bytes": 4194304
+  }
+}

@@ -1245,6 +1245,14 @@ namespace BizHawk.Headless.Gpgx
                         "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED_DURABLY");
                     return 0;
                 }
+                if (M68kLedgerWindowRunner.IsRequested(args))
+                {
+                    FinalPcmWindowRunner.RejectDuplicateFlags(args);
+                    string ledgerTracechaserRoot, ledgerInputRoot, ledgerFixtureRoot;
+                    string[] ledgerArgs = ExtractBoundaryArguments(args, out ledgerTracechaserRoot, out ledgerInputRoot, out ledgerFixtureRoot);
+                    ValidateProducerBoundary(ledgerArgs, ledgerTracechaserRoot, ledgerInputRoot, ledgerFixtureRoot);
+                    return M68kLedgerWindowRunner.Run(ledgerArgs, Console.Out);
+                }
                 if (FinalPcmWindowRunner.IsRequested(args))
                 {
                     FinalPcmWindowRunner.RejectDuplicateFlags(args);

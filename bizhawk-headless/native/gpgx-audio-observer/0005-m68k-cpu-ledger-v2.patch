@@ -1,0 +1,768 @@
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+index 488cab1e50b7aa1ffd8793078a25bf3076c4f4a4..0c28e1ec7a39443b56f27402e27cb3a003fc21c9 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+@@ -5,6 +5,7 @@
+ extern int vdp_68k_irq_ack(int int_level);
+ 
+ #define m68ki_cpu m68k
++#define GPGX_M68K_STALL2_MAIN_CPU 1
+ #define MUL (7)
+ 
+ /* ======================================================================== */
+@@ -238,13 +239,16 @@ void m68k_set_irq_delay(unsigned int int_level)
+     {
+       /* Finish executing current instruction */
+       USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_inline_close());
+ 
+       /* One instruction delay before interrupt */
+       irq_latency = 1;
+       m68ki_trace_t1() /* auto-disable (see m68kcpu.h) */
+       m68ki_use_data_space() /* auto-disable (see m68kcpu.h) */
+       GPGX_AUDIO_TRACE_INSTRUCTION(GPGX_AUDIO_TRACE_CPU_M68K, REG_PC);
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+       REG_IR = m68ki_read_imm_16();
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_inline_begin(REG_IR, REG_SP));
+       m68ki_instruction_jump_table[REG_IR]();
+       m68ki_exception_if_trace() /* auto-disable (see m68kcpu.h) */
+       irq_latency = 0;
+@@ -277,6 +281,7 @@ void m68k_run(unsigned int cycles)
+   /* Make sure we're not stopped */
+   if (CPU_STOPPED)
+   {
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_STOPPED, m68k.cycles, cycles));
+     m68k.cycles = cycles;
+     return;
+   }
+@@ -297,15 +302,19 @@ void m68k_run(unsigned int cycles)
+ #ifdef HOOK_CPU
+       if (UNLIKELY(cpu_hook)) cpu_hook(HOOK_M68K_E, 0, REG_PC, 0);
+ #endif
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+       REG_IR = m68ki_read_imm_16();
+       if (m68k.cycles >= m68k.refresh_cycles)
+       {
+         m68k.refresh_cycles = m68k.cycles + (128*7);
+         m68k.cycles += (2*7);
+         GPGX_M68K_STALL_COUNT_REFRESH();
++        GPGX_M68K_STALL2(gpgx_m68k_stall2_refresh());
+       }
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_begin(REG_IR, REG_SP));
+       m68ki_instruction_jump_table[REG_IR]();
+       USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_end());
+       m68ki_exception_if_trace();
+     }
+     return;
+@@ -336,6 +345,7 @@ void m68k_run(unsigned int cycles)
+     GPGX_AUDIO_TRACE_INSTRUCTION_ENABLED(GPGX_AUDIO_TRACE_CPU_M68K, REG_PC);
+ 
+     /* Decode next instruction */
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+     REG_IR = m68ki_read_imm_16();
+ 
+     /* 68K bus access refresh delay (Mega Drive / Genesis specific) */
+@@ -344,11 +354,14 @@ void m68k_run(unsigned int cycles)
+       m68k.refresh_cycles = m68k.cycles + (128*7);
+       m68k.cycles += (2*7);
+       GPGX_M68K_STALL_COUNT_REFRESH();
++      GPGX_M68K_STALL2(gpgx_m68k_stall2_refresh());
+     }
+ 
+     /* Execute instruction */
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_begin(REG_IR, REG_SP));
+     m68ki_instruction_jump_table[REG_IR]();
+     USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_end());
+ 
+     /* Trace m68k_exception, if necessary */
+     m68ki_exception_if_trace(); /* auto-disable (see m68kcpu.h) */
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
+index da20b21499ffc6c7fbdf49ac804ea96de2ad94d2..585fcfd76fdf396ab524b8f7cff6a7ed219de21f 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
+@@ -1245,11 +1245,22 @@ INLINE uint m68ki_init_exception(void)
+   return sr;
+ }
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++/* OpenGGF stall ABI v2 (0005): main-CPU-only observation hooks; declared here because audio_trace.h follows. */
++extern volatile unsigned char gpgx_m68k_stall2_enabled;
++void gpgx_m68k_stall2_frame_pushed(unsigned int sp);
++void gpgx_m68k_stall2_bus_error(void);
++void gpgx_m68k_stall2_note_return(unsigned int pc);
++void gpgx_m68k_stall2_accept(unsigned int level, unsigned int table_index, unsigned int cost_mclk);
++#endif
+ /* 3 word stack frame (68000 only) */
+ INLINE void m68ki_stack_frame_3word(uint pc, uint sr)
+ {
+   m68ki_push_32(pc);
+   m68ki_push_16(sr);
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  if (gpgx_m68k_stall2_enabled) gpgx_m68k_stall2_frame_pushed(REG_SP);
++#endif
+ }
+ 
+ #if M68K_EMULATE_ADDRESS_ERROR
+@@ -1259,6 +1270,9 @@ INLINE void m68ki_stack_frame_buserr(uint sr)
+ {
+   m68ki_push_32(REG_PC);
+   m68ki_push_16(sr);
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  if (gpgx_m68k_stall2_enabled) gpgx_m68k_stall2_bus_error();
++#endif
+   m68ki_push_16(REG_IR);
+   m68ki_push_32(m68ki_cpu.aerr_address);  /* access address */
+   /* 0 0 0 0 0 0 0 0 0 0 0 R/W I/N FC
+@@ -1441,11 +1455,17 @@ INLINE void m68ki_exception_interrupt(uint int_level)
+     new_pc = m68ki_read_32((EXCEPTION_UNINITIALIZED_INTERRUPT<<2));
+ 
+   /* Generate a stack frame */
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  if (gpgx_m68k_stall2_enabled) gpgx_m68k_stall2_note_return(REG_PC);
++#endif
+   m68ki_stack_frame_3word(REG_PC, sr);
+ 
+   m68ki_jump(new_pc);
+ 
+   /* Update cycle count now */
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  if (gpgx_m68k_stall2_enabled) gpgx_m68k_stall2_accept(int_level, (m68ki_cpu.cycles / MUL) % 10, m68ki_cycle_interrupts[(m68ki_cpu.cycles / MUL) % 10]);
++#endif
+   USE_CYCLES(m68ki_cycle_interrupts[(m68ki_cpu.cycles / MUL) % 10]);
+ }
+ 
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/mem68k.c b/waterbox/gpgx/Genesis-Plus-GX/core/mem68k.c
+index 88037211c1af2f758b5351b146d0ca193979ba75..751cdd5905d83302e5b757a4e7647dd4e3fae437 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/mem68k.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/mem68k.c
+@@ -38,6 +38,7 @@
+  ****************************************************************************************/
+ 
+ #include "shared.h"
++#include "audio_trace.h"
+ 
+ /*--------------------------------------------------------------------------*/
+ /* Unused areas (return open bus data, i.e prefetched instruction word)     */
+@@ -89,6 +90,7 @@ void m68k_lockup_w_8 (unsigned int address, unsigned int data)
+   if (!config.force_dtack)
+   {
+     m68k_pulse_halt();
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_LOCKUP, m68k.cycles, m68k.cycle_end));
+     m68k.cycles = m68k.cycle_end;
+   }
+ }
+@@ -101,6 +103,7 @@ void m68k_lockup_w_16 (unsigned int address, unsigned int data)
+   if (!config.force_dtack)
+   {
+     m68k_pulse_halt();
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_LOCKUP, m68k.cycles, m68k.cycle_end));
+     m68k.cycles = m68k.cycle_end;
+   }
+ }
+@@ -113,6 +116,7 @@ unsigned int m68k_lockup_r_8 (unsigned int address)
+   if (!config.force_dtack)
+   {
+     m68k_pulse_halt();
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_LOCKUP, m68k.cycles, m68k.cycle_end));
+     m68k.cycles = m68k.cycle_end;
+   }
+   address = m68k.pc | (address & 1);
+@@ -127,6 +131,7 @@ unsigned int m68k_lockup_r_16 (unsigned int address)
+   if (!config.force_dtack)
+   {
+     m68k_pulse_halt();
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_LOCKUP, m68k.cycles, m68k.cycle_end));
+     m68k.cycles = m68k.cycle_end;
+   }
+   address = m68k.pc;
+@@ -142,6 +147,7 @@ unsigned int z80_read_byte(unsigned int address)
+ {
+   /* Z80 bus access latency */
+   m68k.cycles += 1 * 7;
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_classify(GPGX_M68K_STALL2_Z80_AREA, 7));
+ 
+   switch ((address >> 13) & 3)
+   {
+@@ -177,6 +183,7 @@ void z80_write_byte(unsigned int address, unsigned int data)
+ {
+   /* Z80 bus access latency (fixes Pacman 2: New Adventures sound engine crashes & Puyo Puyo 2 crash when exiting option menu) */
+   m68k.cycles += 1 * 7;
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_classify(GPGX_M68K_STALL2_Z80_AREA, 7));
+ 
+   switch ((address >> 13) & 3)
+   {
+@@ -244,6 +251,7 @@ static void m68k_poll_detect(unsigned int reg_mask)
+ #ifdef LOG_SCD
+           error("m68k stopped from %d cycles\n", m68k.cycles);
+ #endif
++          GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_STOPPED, m68k.cycles, m68k.cycle_end));
+           m68k.cycles = m68k.cycle_end;
+           m68k.stopped = reg_mask;
+         }
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c b/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
+index 7829a74631edbf2d93381c4dcc92aafe141c02c8..22af808ce6c8ee429187b34504bb1d117f37fd22 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
+@@ -115,6 +115,7 @@ static void z80_request_68k_bus_access(void)
+   m68k.cycles += (((Z80.cycles % 7) + 72)/7)*7;
+   /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+   if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_z80_bus((((Z80.cycles % 7) + 72)/7)*7);
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_classify(GPGX_M68K_STALL2_Z80_BUS, (((Z80.cycles % 7) + 72)/7)*7));
+ 
+   /* average Z80 wait-states when accessing 68k bus (cf https://docs.google.com/document/d/1ST9GbFfPnIjLT5loytFCm3pB0kWQ1Oe34DCBBV8saY8) */
+   Z80.cycles += (3 * 15);
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/system.c b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
+index d543a649366606ea4934171f962d678382eeeb1b..8d71a5a42bcb2dc54b38cebe977896bc94102520 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/system.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
+@@ -351,6 +351,7 @@ void system_reset(void)
+ 
+ void system_frame_gen(int do_skip)
+ {
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_frame_begin(m68k.cycles, m68k.refresh_cycles, m68k.pc, Z80.cycles));
+   /* line counters */
+   int start, end, line;
+ 
+@@ -691,10 +692,12 @@ void system_frame_gen(int do_skip)
+   dma_endCycles = 0;
+   /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+   if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_frame_end(mcycles_vdp, m68k.cycles, m68k.refresh_cycles, m68k.pc, Z80.cycles));
+ }
+ 
+ void system_frame_scd(int do_skip)
+ {
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_frame_begin(m68k.cycles, m68k.refresh_cycles, m68k.pc, Z80.cycles));
+   /* line counters */
+   int start, end, line;
+ 
+@@ -1021,6 +1024,7 @@ void system_frame_scd(int do_skip)
+   dma_endCycles = 0;
+   /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+   if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_frame_end(mcycles_vdp, m68k.cycles, m68k.refresh_cycles, m68k.pc, Z80.cycles));
+ }
+ 
+ void system_frame_sms(int do_skip)
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c b/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
+index 1fdd4362476a5c24c482c3a1b174180e95791108..d194c419d0705d998a79f131916214bad0ac575d 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
+@@ -690,6 +690,7 @@ void vdp_dma_update(unsigned int cycles)
+     /* 68K is waiting during DMA from 68k bus */
+     /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+     if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_dma(m68k.cycles, dma_endCycles);
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_dma(m68k.cycles, dma_endCycles));
+     m68k.cycles = dma_endCycles;
+ #ifdef LOGVDP
+     error("-->68K CPU waiting for %d cycles\n", dma_cycles);
+@@ -2309,6 +2310,7 @@ static void vdp_68k_data_w_m4(unsigned int data)
+         /* FIFO is full, 68k waits until oldest FIFO entry is processed (Chaos Engine / Soldiers of Fortune, Double Clutch, Titan Overdrive Demo) */
+         /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+         if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_fifo(m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7));
++        GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_FIFO, m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7)));
+         m68k.cycles = (((fifo_cycles[fifo_idx] + 6) / 7) * 7);
+       }
+ 
+@@ -2405,6 +2407,7 @@ static void vdp_68k_data_w_m5(unsigned int data)
+         /* FIFO is full, 68k waits until oldest FIFO entry is processed (Chaos Engine / Soldiers of Fortune, Double Clutch, Titan Overdrive Demo) */
+         /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
+         if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_fifo(m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7));
++        GPGX_M68K_STALL2(gpgx_m68k_stall2_jump(GPGX_M68K_STALL2_FIFO, m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7)));
+         m68k.cycles = (((fifo_cycles[fifo_idx] + 6) / 7) * 7);
+       }
+ 
+diff --git a/waterbox/gpgx/cinterface/audio_trace.c b/waterbox/gpgx/cinterface/audio_trace.c
+index 6a1546b11d081b1b4d31001b517903e99d38e3ed..c0ea67a1cfd87cf83fd53a8da5357bc87c4263bc 100644
+--- a/waterbox/gpgx/cinterface/audio_trace.c
++++ b/waterbox/gpgx/cinterface/audio_trace.c
+@@ -2448,6 +2448,351 @@ ECL_EXPORT int32_t gpgx_m68k_stall_disable(void)
+   return 0;
+ }
+ 
++/* ---- Observation-only 68000 CPU ledger, stall ABI v2 (0005). See audio_trace.h. ---- */
++ECL_INVISIBLE volatile uint8_t gpgx_m68k_stall2_enabled;
++ECL_INVISIBLE static struct gpgx_m68k_stall2_slot stall2_slots[GPGX_M68K_STALL2_BANKS][GPGX_M68K_STALL2_SLOTS];
++ECL_INVISIBLE static struct gpgx_m68k_stall2_bank stall2_bank[GPGX_M68K_STALL2_BANKS];
++ECL_INVISIBLE static uint8_t stall2_bank_state[GPGX_M68K_STALL2_BANKS];   /* 0 free, 1 open, 2 closed */
++ECL_INVISIBLE static struct gpgx_m68k_stall2_accept stall2_ring[GPGX_M68K_STALL2_RING];
++ECL_INVISIBLE static struct
++{
++  uint32_t flags, frame_ordinal, open, next_sequence, ring_count, accepts, vint_accepts;
++  uint64_t frame_base;
++  uint32_t fetch_pc, cur_active, cur_pc, cur_context, cur_start, cur_inside, cur_carry;
++  uint32_t ret_pc, frame_pending, depth, irq_depth;
++  uint32_t frame_sp[GPGX_M68K_STALL2_FRAMES];
++  uint8_t frame_irq[GPGX_M68K_STALL2_FRAMES];
++  uint32_t fp_valid, fp_cycles, fp_refresh, fp_pc, fp_z80;
++} stall2;
++STATIC_ASSERT(m68k_stall2_slot_size, sizeof(struct gpgx_m68k_stall2_slot) == 12);
++STATIC_ASSERT(m68k_stall2_accept_size, sizeof(struct gpgx_m68k_stall2_accept) == 32);
++STATIC_ASSERT(m68k_stall2_bank_size, sizeof(struct gpgx_m68k_stall2_bank) == 176);
++STATIC_ASSERT(m68k_stall2_frame_size, sizeof(struct gpgx_m68k_stall2_frame) == 40);
++
++static uint64_t stall2_stamp(void) { return stall2.frame_base + (uint32_t)m68k.cycles; }
++
++static void stall2_open_bank(uint32_t opened_by_vint, uint32_t accept_ordinal)
++{
++  uint32_t b;
++  for (b = 0; b < GPGX_M68K_STALL2_BANKS && stall2_bank_state[b] != 0; b++) {}
++  if (b == GPGX_M68K_STALL2_BANKS)
++  {
++    /* both other banks are closed and unread: the interval would be lost */
++    stall2.flags |= GPGX_M68K_STALL2_FLAG_BANK_OVERRUN;
++    b = stall2.open;   /* keep counting into the current bank; every read now fails closed */
++    stall2_bank_state[b] = 1;
++    return;
++  }
++  memset(stall2_slots[b], 0, sizeof(stall2_slots[b]));
++  memset(&stall2_bank[b], 0, sizeof(stall2_bank[b]));
++  stall2_bank[b].opened_by_vint = (uint8_t)opened_by_vint;
++  stall2_bank[b].open_accept_ordinal = opened_by_vint ? accept_ordinal : 0xFFFFFFFFu;
++  stall2_bank[b].close_accept_ordinal = 0xFFFFFFFFu;
++  stall2_bank[b].straddle_pc = 0xFFFFFFFFu;
++  stall2_bank[b].carry_pc = 0xFFFFFFFFu;
++  stall2_bank[b].open_stamp_mclk = stall2_stamp();
++  stall2_bank_state[b] = 1;
++  stall2.open = b;
++}
++
++static struct gpgx_m68k_stall2_slot *stall2_slot(uint32_t pc, uint32_t context)
++{
++  struct gpgx_m68k_stall2_bank *bank = &stall2_bank[stall2.open];
++  uint32_t key = (pc & 0xFFFFFFu) | (context << 24) | 0x80000000u;
++  uint32_t h = ((key * 2654435761u) >> 16) % GPGX_M68K_STALL2_SLOTS, probe;
++  for (probe = 0; probe < GPGX_M68K_STALL2_MAX_PROBE; probe++)
++  {
++    struct gpgx_m68k_stall2_slot *slot = &stall2_slots[stall2.open][(h + probe) % GPGX_M68K_STALL2_SLOTS];
++    if (slot->key == key) return slot;
++    if (slot->key == 0)
++    {
++      if (bank->entries >= GPGX_M68K_STALL2_MAX_LOAD) break;
++      slot->key = key;
++      bank->entries++;
++      return slot;
++    }
++  }
++  stall2.flags |= GPGX_M68K_STALL2_FLAG_BANK_OVERFLOW;
++  return NULL;
++}
++
++static void stall2_add_mclk(uint32_t pc, uint32_t context, uint32_t mclk)
++{
++  struct gpgx_m68k_stall2_slot *slot = stall2_slot(pc, context);
++  if (!slot) return;
++  if (slot->mclk > 0xFFFFFFFFu - mclk) { stall2.flags |= GPGX_M68K_STALL2_FLAG_ACCOUNTING; return; }
++  slot->mclk += mclk;
++}
++
++void gpgx_m68k_stall2_fetch(uint32_t pc) { stall2.fetch_pc = pc & 0xFFFFFFu; }
++
++static void stall2_rte(uint32_t sp)
++{
++  struct gpgx_m68k_stall2_bank *bank = &stall2_bank[stall2.open];
++  /* frames whose stacked words lie below the current SP were unwound without an RTE */
++  while (stall2.depth && stall2.frame_sp[stall2.depth - 1] < sp)
++  {
++    stall2.depth--;
++    if (stall2.frame_irq[stall2.depth]) stall2.irq_depth--;
++    bank->abandoned_frames++;
++  }
++  if (stall2.depth && stall2.frame_sp[stall2.depth - 1] == sp)
++  {
++    stall2.depth--;
++    if (stall2.frame_irq[stall2.depth]) stall2.irq_depth--;
++  }
++  else
++    bank->synthetic_rte++;   /* an RTE through a frame no exception pushed (e.g. a software resume) */
++}
++
++static void stall2_start(uint32_t pc, uint32_t ir, uint32_t sp)
++{
++  struct gpgx_m68k_stall2_slot *slot;
++  if (stall2.cur_active) stall2.flags |= GPGX_M68K_STALL2_FLAG_ACCOUNTING;
++  stall2.cur_active = 1;
++  stall2.cur_pc = pc;
++  stall2.cur_context = stall2.irq_depth ? 1u : 0u;
++  stall2.cur_start = (uint32_t)m68k.cycles;
++  stall2.cur_inside = 0;
++  stall2.cur_carry = 0;
++  slot = stall2_slot(pc, stall2.cur_context);
++  if (slot) slot->count++;
++  stall2_bank[stall2.open].executed++;
++  if (ir == 0x4E73u) stall2_rte(sp);   /* the RTE itself belongs to the context it returns from */
++}
++
++void gpgx_m68k_stall2_begin(uint32_t ir, uint32_t sp) { stall2_start(stall2.fetch_pc, ir, sp); }
++
++void gpgx_m68k_stall2_end(void)
++{
++  uint32_t delta;
++  if (!stall2.cur_active) { stall2.flags |= GPGX_M68K_STALL2_FLAG_ACCOUNTING; return; }
++  delta = (uint32_t)m68k.cycles - stall2.cur_start - stall2.cur_inside;
++  if (stall2.cur_carry)
++    stall2_bank[stall2.open].carry_mclk += delta;
++  else
++    stall2_add_mclk(stall2.cur_pc, stall2.cur_context, delta);
++  stall2.cur_active = 0;
++}
++
++/* m68k_set_irq_delay finishes the current instruction early and executes the next one inline */
++void gpgx_m68k_stall2_inline_close(void) { gpgx_m68k_stall2_end(); }
++
++void gpgx_m68k_stall2_inline_begin(uint32_t ir, uint32_t sp)
++{
++  stall2_bank[stall2.open].irq_delay_inline++;
++  stall2_start(stall2.fetch_pc, ir, sp);
++}
++
++void gpgx_m68k_stall2_classify(uint32_t kind, uint32_t mclk)
++{
++  if (kind >= GPGX_M68K_STALL2_KINDS) { stall2.flags |= GPGX_M68K_STALL2_FLAG_ACCOUNTING; return; }
++  stall2_bank[stall2.open].kind_mclk[kind] += mclk;
++  if (stall2.cur_active) stall2.cur_inside += kind == GPGX_M68K_STALL2_DMA_REWIND ? (uint32_t)-mclk : mclk;
++}
++
++void gpgx_m68k_stall2_dma(uint32_t before, uint32_t after)
++{
++  if (after >= before) gpgx_m68k_stall2_classify(GPGX_M68K_STALL2_DMA, after - before);
++  else gpgx_m68k_stall2_classify(GPGX_M68K_STALL2_DMA_REWIND, before - after);
++}
++
++void gpgx_m68k_stall2_note_return(uint32_t pc) { stall2.ret_pc = pc & 0xFFFFFFu; stall2.frame_pending = 1; }
++
++/* Every 3-word exception frame; it is an interrupt frame only when m68ki_exception_interrupt announced it. */
++void gpgx_m68k_stall2_frame_pushed(uint32_t sp)
++{
++  uint32_t interrupt = stall2.frame_pending;
++  stall2.frame_pending = 0;
++  if (stall2.depth == GPGX_M68K_STALL2_FRAMES) { stall2.flags |= GPGX_M68K_STALL2_FLAG_FRAME_STACK; return; }
++  stall2.frame_sp[stall2.depth] = sp;
++  stall2.frame_irq[stall2.depth] = (uint8_t)(interrupt != 0);
++  stall2.depth++;
++  if (interrupt) stall2.irq_depth++;
++}
++
++void gpgx_m68k_stall2_refresh(void) { stall2_bank[stall2.open].refresh_events++; }
++
++/* A direct jump of m68k.cycles to a later instant (lockup, stopped CPU); a backward jump is an accounting failure. */
++void gpgx_m68k_stall2_jump(uint32_t kind, uint32_t before, uint32_t after)
++{
++  if (after < before) { stall2.flags |= GPGX_M68K_STALL2_FLAG_ACCOUNTING; return; }
++  gpgx_m68k_stall2_classify(kind, after - before);
++}
++
++void gpgx_m68k_stall2_bus_error(void) { stall2.flags |= GPGX_M68K_STALL2_FLAG_BUS_ERROR; }
++
++void gpgx_m68k_stall2_accept(uint32_t level, uint32_t table_index, uint32_t cost_mclk)
++{
++  struct gpgx_m68k_stall2_accept *rec;
++  uint32_t ordinal = stall2.accepts++, closed = 0xFFFFFFFFu;
++  if (level == 6)
++  {
++    /* close the VInt-to-VInt interval at the acceptance instant */
++    struct gpgx_m68k_stall2_bank *old = &stall2_bank[stall2.open];
++    stall2.vint_accepts++;
++    if (stall2.cur_active)
++    {
++      uint32_t partial = (uint32_t)m68k.cycles - stall2.cur_start - stall2.cur_inside;
++      if (!stall2.cur_carry) stall2_add_mclk(stall2.cur_pc, stall2.cur_context, partial);
++      else old->carry_mclk += partial;
++      old->straddle_pc = stall2.cur_pc;
++      old->straddle_context = stall2.cur_context;
++      old->straddle_mclk = partial;
++    }
++    old->close_accept_ordinal = ordinal;
++    old->close_stamp_mclk = stall2_stamp();
++    old->sequence = stall2.next_sequence++;
++    closed = old->sequence;
++    stall2_bank_state[stall2.open] = 2;
++    stall2_open_bank(1, ordinal);
++    if (stall2.cur_active)
++    {
++      stall2_bank[stall2.open].carry_pc = stall2.cur_pc;
++      stall2.cur_start = (uint32_t)m68k.cycles;
++      stall2.cur_inside = 0;
++      stall2.cur_carry = 1;
++    }
++  }
++  if (stall2.ring_count < GPGX_M68K_STALL2_RING)
++  {
++    rec = &stall2_ring[stall2.ring_count++];
++    rec->ordinal = ordinal;
++    rec->level = (uint8_t)level;
++    rec->inside_instruction = (uint8_t)(stall2.cur_active != 0);
++    rec->table_index = (uint8_t)table_index;
++    rec->cycles = (uint8_t)(cost_mclk / 7);
++    rec->return_pc = stall2.ret_pc;
++    rec->frame_ordinal = stall2.frame_ordinal;
++    rec->stamp_mclk = stall2_stamp();
++    rec->closes_bank_sequence = closed;
++    rec->reserved = 0;
++  }
++  else
++    stall2.flags |= GPGX_M68K_STALL2_FLAG_RING_OVERFLOW;
++  gpgx_m68k_stall2_classify(level == 6 ? GPGX_M68K_STALL2_ACCEPT_VINT
++    : level == 4 ? GPGX_M68K_STALL2_ACCEPT_HINT : GPGX_M68K_STALL2_ACCEPT_OTHER, cost_mclk);
++  stall2_bank[stall2.open].accept_counts[level == 6 ? 0 : level == 4 ? 1 : 2]++;
++}
++
++void gpgx_m68k_stall2_frame_begin(uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80)
++{
++  /* Between frames nothing may change the CPU timing state; a mismatch is a loadstate or external edit. */
++  if (stall2.fp_valid && (cycles != stall2.fp_cycles || refresh != stall2.fp_refresh || pc != stall2.fp_pc
++      || z80 != stall2.fp_z80))
++    stall2.flags |= GPGX_M68K_STALL2_FLAG_DISCONTINUITY;
++}
++
++void gpgx_m68k_stall2_frame_end(uint32_t mcycles, uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80)
++{
++  stall2.frame_ordinal++;
++  stall2.frame_base += mcycles;
++  stall2.fp_valid = 1;
++  stall2.fp_cycles = cycles;
++  stall2.fp_refresh = refresh;
++  stall2.fp_pc = pc;
++  stall2.fp_z80 = z80;
++}
++
++void gpgx_m68k_stall2_reset(void) { stall2.flags |= GPGX_M68K_STALL2_FLAG_RESET; }
++
++static int32_t stall2_status(void)
++{
++  if (!gpgx_m68k_stall2_enabled) return -1;
++  if (stall2.flags & 0xFF00u) return -4;
++  if (stall2.flags) return -3;
++  return 0;
++}
++
++ECL_EXPORT uint32_t gpgx_m68k_stall2_abi_version(void) { return GPGX_M68K_STALL2_ABI_VERSION; }
++
++/* out: slot size, accept size, bank size, frame size, slots per bank, max load, banks, ring capacity */
++ECL_EXPORT int32_t gpgx_m68k_stall2_layout(uint32_t *out, uint32_t count)
++{
++  if (!out || count != 8) return -2;
++  out[0] = sizeof(struct gpgx_m68k_stall2_slot);
++  out[1] = sizeof(struct gpgx_m68k_stall2_accept);
++  out[2] = sizeof(struct gpgx_m68k_stall2_bank);
++  out[3] = sizeof(struct gpgx_m68k_stall2_frame);
++  out[4] = GPGX_M68K_STALL2_SLOTS;
++  out[5] = GPGX_M68K_STALL2_MAX_LOAD;
++  out[6] = GPGX_M68K_STALL2_BANKS;
++  out[7] = GPGX_M68K_STALL2_RING;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall2_enable(uint32_t abi_version)
++{
++  if (abi_version != GPGX_M68K_STALL2_ABI_VERSION) return -2;
++  gpgx_m68k_stall2_enabled = 0;
++  memset(&stall2, 0, sizeof(stall2));
++  memset(stall2_bank_state, 0, sizeof(stall2_bank_state));
++  stall2_open_bank(0, 0);
++  gpgx_m68k_stall2_enabled = 1;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall2_read_frame(struct gpgx_m68k_stall2_frame *out, uint32_t size)
++{
++  uint32_t b, closed = 0;
++  if (!out || size != sizeof(struct gpgx_m68k_stall2_frame)) return -2;
++  if (!gpgx_m68k_stall2_enabled) return -1;
++  for (b = 0; b < GPGX_M68K_STALL2_BANKS; b++) closed += stall2_bank_state[b] == 2;
++  out->abi_version = GPGX_M68K_STALL2_ABI_VERSION;
++  out->flags = stall2.flags;
++  out->frame_ordinal = stall2.frame_ordinal;
++  out->vint_accepts = stall2.vint_accepts;
++  out->ring_pending = stall2.ring_count;
++  out->closed_banks = closed;
++  out->open_bank_sequence = stall2.next_sequence;
++  out->context = stall2.irq_depth ? 1u : 0u;
++  out->stamp_mclk = stall2_stamp();
++  return 0;   /* the frame record reports sticky flags; the take calls refuse data while any is set */
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall2_take_accepts(struct gpgx_m68k_stall2_accept *out, uint32_t size,
++  uint32_t capacity, uint32_t *count)
++{
++  int32_t status;
++  if (!out || !count || size != sizeof(struct gpgx_m68k_stall2_accept)) return -2;
++  status = stall2_status();
++  if (status) return status;
++  if (capacity < stall2.ring_count) return -2;
++  memcpy(out, stall2_ring, stall2.ring_count * sizeof(struct gpgx_m68k_stall2_accept));
++  *count = stall2.ring_count;
++  stall2.ring_count = 0;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall2_take_bank(struct gpgx_m68k_stall2_bank *header, uint32_t header_size,
++  struct gpgx_m68k_stall2_slot *slots, uint32_t slot_size, uint32_t capacity, uint32_t *available)
++{
++  uint32_t b, best = GPGX_M68K_STALL2_BANKS, i, n = 0;
++  int32_t status;
++  if (!header || !slots || !available || header_size != sizeof(struct gpgx_m68k_stall2_bank)
++      || slot_size != sizeof(struct gpgx_m68k_stall2_slot) || capacity < GPGX_M68K_STALL2_MAX_LOAD) return -2;
++  status = stall2_status();
++  if (status) return status;
++  for (b = 0; b < GPGX_M68K_STALL2_BANKS; b++)
++    if (stall2_bank_state[b] == 2 && (best == GPGX_M68K_STALL2_BANKS || stall2_bank[b].sequence < stall2_bank[best].sequence))
++      best = b;
++  *available = 0;
++  if (best == GPGX_M68K_STALL2_BANKS) return 0;
++  *header = stall2_bank[best];
++  for (i = 0; i < GPGX_M68K_STALL2_SLOTS; i++)
++    if (stall2_slots[best][i].key) slots[n++] = stall2_slots[best][i];
++  if (n != stall2_bank[best].entries) return -3;
++  stall2_bank_state[best] = 0;
++  *available = 1;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall2_disable(void)
++{
++  gpgx_m68k_stall2_enabled = 0;
++  return 0;
++}
++
+ ECL_EXPORT uint32_t gpgx_s3k_pcm_abi_version(void)
+ { return GPGX_S3K_PCM_ABI_VERSION; }
+ 
+diff --git a/waterbox/gpgx/cinterface/audio_trace.h b/waterbox/gpgx/cinterface/audio_trace.h
+index 55d257b85d17f52b2ef434c790647aead7b6cef1..9b9b8e9cc627fa90c5e889059721eafc39aa6541 100644
+--- a/waterbox/gpgx/cinterface/audio_trace.h
++++ b/waterbox/gpgx/cinterface/audio_trace.h
+@@ -259,6 +259,119 @@ void gpgx_m68k_stall_frame_wrap(uint32_t mcycles);
+   do { if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_refresh_events++; } while (0)
+ 
+ 
++/* Observation-only 68000 CPU ledger, stall ABI v2 (OpenGGF, 0005). Independent of every other ABI, including v1.
++   State is ECL_INVISIBLE (never savestated). Every core hook is one branch on gpgx_m68k_stall2_enabled and only reads
++   values the core already computed. Read only between frames. Return codes: 0 ok, -1 not enabled, -2 ABI/size
++   mismatch, -3 sticky capacity or accounting failure, -4 sticky discontinuity (reset, loadstate, bus/address error). */
++#define GPGX_M68K_STALL2_ABI_VERSION 2u
++#define GPGX_M68K_STALL2_SLOTS 6144u            /* per bank */
++#define GPGX_M68K_STALL2_MAX_LOAD 4608u         /* 75% load: a bank beyond this fails closed */
++#define GPGX_M68K_STALL2_MAX_PROBE 64u
++#define GPGX_M68K_STALL2_BANKS 3u               /* one open, up to two closed and unread */
++#define GPGX_M68K_STALL2_RING 512u              /* acceptance records between two reads (>= one per line + VInt) */
++#define GPGX_M68K_STALL2_FRAMES 8u              /* nested exception frames tracked for context */
++
++enum gpgx_m68k_stall2_kind
++{
++  GPGX_M68K_STALL2_Z80_BUS = 0,    /* memz80.c z80_request_68k_bus_access */
++  GPGX_M68K_STALL2_FIFO = 1,       /* vdp_ctrl.c FIFO-full wait */
++  GPGX_M68K_STALL2_DMA = 2,        /* vdp_ctrl.c 68k-bus DMA freeze, forward */
++  GPGX_M68K_STALL2_DMA_REWIND = 3, /* same site when dma_endCycles < m68k.cycles (subtracted) */
++  GPGX_M68K_STALL2_Z80_AREA = 4,   /* mem68k.c Z80-window access latency */
++  GPGX_M68K_STALL2_LOCKUP = 5,     /* mem68k.c illegal-area lockup jump to cycle_end */
++  GPGX_M68K_STALL2_STOPPED = 6,    /* m68kcpu.c stopped CPU skips to the slice end */
++  GPGX_M68K_STALL2_ACCEPT_VINT = 7,
++  GPGX_M68K_STALL2_ACCEPT_HINT = 8,
++  GPGX_M68K_STALL2_ACCEPT_OTHER = 9,
++  GPGX_M68K_STALL2_KINDS = 10
++};
++
++#define GPGX_M68K_STALL2_FLAG_RING_OVERFLOW 0x01u
++#define GPGX_M68K_STALL2_FLAG_BANK_OVERFLOW 0x02u
++#define GPGX_M68K_STALL2_FLAG_BANK_OVERRUN 0x04u
++#define GPGX_M68K_STALL2_FLAG_FRAME_STACK 0x08u
++#define GPGX_M68K_STALL2_FLAG_ACCOUNTING 0x10u   /* begin while active, end without begin, slot overflow */
++#define GPGX_M68K_STALL2_FLAG_DISCONTINUITY 0x100u
++#define GPGX_M68K_STALL2_FLAG_RESET 0x200u
++#define GPGX_M68K_STALL2_FLAG_BUS_ERROR 0x400u
++
++struct gpgx_m68k_stall2_slot      /* key: pc[23:0] | context << 24 | 1 << 31 */
++{
++  uint32_t key;
++  uint32_t count;                 /* instruction starts at pc in this context */
++  uint32_t mclk;                  /* instruction MCLK excluding refresh and every classified stall */
++};
++
++struct gpgx_m68k_stall2_accept    /* one per accepted interrupt */
++{
++  uint32_t ordinal;               /* acceptances since enable */
++  uint8_t level;
++  uint8_t inside_instruction;     /* 1 when accepted inside an instruction (SR change or irq-delay path) */
++  uint8_t table_index;            /* (m68k.cycles / 7) % 10 */
++  uint8_t cycles;                 /* m68ki_cycle_interrupts[table_index] / 7 */
++  uint32_t return_pc;             /* stacked PC */
++  uint32_t frame_ordinal;
++  uint64_t stamp_mclk;            /* monotonic: frame base + m68k.cycles at acceptance start */
++  uint32_t closes_bank_sequence;  /* sequence of the bank this VInt closed, else 0xFFFFFFFF */
++  uint32_t reserved;
++};
++
++struct gpgx_m68k_stall2_bank
++{
++  uint32_t sequence;              /* closes in order from 0 after enable */
++  uint8_t opened_by_vint;         /* 0: opened by enable (partial, never an interval) */
++  uint8_t reserved0[3];
++  uint32_t open_accept_ordinal;   /* 0xFFFFFFFF when opened by enable */
++  uint32_t close_accept_ordinal;
++  uint32_t entries;
++  uint32_t straddle_pc;           /* instruction in flight at the closing acceptance, else 0xFFFFFFFF */
++  uint32_t straddle_context;
++  uint32_t straddle_mclk;         /* its MCLK before the acceptance, already included in its slot */
++  uint32_t carry_pc;              /* instruction in flight at the opening acceptance, else 0xFFFFFFFF */
++  uint32_t carry_mclk;            /* its MCLK after that acceptance; not in any slot of this bank */
++  uint32_t refresh_events;
++  uint32_t accept_counts[3];      /* VInt, HInt, other levels */
++  uint32_t irq_delay_inline;      /* instructions executed inside m68k_set_irq_delay */
++  uint32_t synthetic_rte;         /* RTE with no matching tracked frame (context unchanged) */
++  uint32_t abandoned_frames;      /* tracked frames unwound without RTE */
++  uint32_t reserved1;
++  uint64_t executed;              /* instruction starts counted */
++  uint64_t open_stamp_mclk;
++  uint64_t close_stamp_mclk;
++  uint64_t kind_mclk[GPGX_M68K_STALL2_KINDS];
++};
++
++struct gpgx_m68k_stall2_frame     /* state between FrameAdvance calls */
++{
++  uint32_t abi_version;
++  uint32_t flags;                 /* sticky GPGX_M68K_STALL2_FLAG_* */
++  uint32_t frame_ordinal;
++  uint32_t vint_accepts;          /* level-6 acceptances since enable */
++  uint32_t ring_pending;
++  uint32_t closed_banks;
++  uint32_t open_bank_sequence;
++  uint32_t context;               /* 0 main, 1 interrupt, at the frame boundary */
++  uint64_t stamp_mclk;            /* frame base + m68k.cycles now */
++};
++
++extern volatile uint8_t gpgx_m68k_stall2_enabled;
++void gpgx_m68k_stall2_fetch(uint32_t pc);
++void gpgx_m68k_stall2_begin(uint32_t ir, uint32_t sp);
++void gpgx_m68k_stall2_end(void);
++void gpgx_m68k_stall2_inline_close(void);
++void gpgx_m68k_stall2_inline_begin(uint32_t ir, uint32_t sp);
++void gpgx_m68k_stall2_classify(uint32_t kind, uint32_t mclk);
++void gpgx_m68k_stall2_dma(uint32_t before, uint32_t after);
++void gpgx_m68k_stall2_note_return(uint32_t pc);
++void gpgx_m68k_stall2_frame_pushed(uint32_t sp);
++void gpgx_m68k_stall2_refresh(void);
++void gpgx_m68k_stall2_jump(uint32_t kind, uint32_t before, uint32_t after);
++void gpgx_m68k_stall2_bus_error(void);
++void gpgx_m68k_stall2_accept(uint32_t level, uint32_t table_index, uint32_t cost_mclk);
++void gpgx_m68k_stall2_frame_begin(uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80);
++void gpgx_m68k_stall2_frame_end(uint32_t mcycles, uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80);
++void gpgx_m68k_stall2_reset(void);
++#define GPGX_M68K_STALL2(call) do { if (gpgx_m68k_stall2_enabled) call; } while (0)
+ uint8_t gpgx_audio_trace_enter_cpu(uint8_t cpu);
+ void gpgx_audio_trace_leave_cpu(uint8_t previous);
+ void gpgx_audio_trace_s2_request_callback_begin(uint32_t pc);
+diff --git a/waterbox/gpgx/cinterface/cinterface.c b/waterbox/gpgx/cinterface/cinterface.c
+index bc115997afa00965b5c942b86b1ce1c302dfcdd2..d063b69c7cf7f371dc09b6410a3c4fc2f60c7b1f 100644
+--- a/waterbox/gpgx/cinterface/cinterface.c
++++ b/waterbox/gpgx/cinterface/cinterface.c
+@@ -1020,6 +1020,7 @@ GPGX_EX void gpgx_clear_deepfreeze_list()
+ 
+ GPGX_EX void gpgx_reset(int hard)
+ {
++	GPGX_M68K_STALL2(gpgx_m68k_stall2_reset());
+ 	gpgx_audio_trace_reset_begin((uint8_t)!!hard);
+ 	if (hard)
+ 		system_reset();

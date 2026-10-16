@@ -24,6 +24,10 @@ namespace OpenGGF.BizHawk.Headless
                 new List<ExecuteCallbackRegistration>();
         private Exception pendingExecuteCallbackException;
         private bool disposed;
+
+        /// <summary>Counts savestate loads, so observers whose native state is not savestated can refuse a span
+        /// that crossed one (stall ABI v2 binding).</summary>
+        internal long LoadGeneration { get; private set; }
         private readonly GpgxVideoCaptureGeneration videoCaptureGeneration = new GpgxVideoCaptureGeneration();
         internal int LastCheckpointVideoLength { get; private set; }
         internal int LastCheckpointAudioFrames { get; private set; }
@@ -177,6 +181,7 @@ namespace OpenGGF.BizHawk.Headless
         internal void LoadSavestate(byte[] state)
         {
             if (disposed) throw new ObjectDisposedException("GpgxHost");
+            LoadGeneration++;
             videoCaptureGeneration.Invalidate();
             ((IStatable)core).LoadStateBinary(state);
             soundProvider.DiscardSamples();
