@@ -158,6 +158,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             };
             BootstrapTests.Register(tests);
             Bk2ReaderTests.Register(tests);
+            FinalPcmWindowRunnerTests.Register(tests);
             DynamicArtRomProfileTests.Register(tests);
             DynamicArtTransferStateTests.Register(tests);
             S1DynamicArtObserverTests.Register(tests);

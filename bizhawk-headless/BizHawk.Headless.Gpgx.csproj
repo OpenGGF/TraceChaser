@@ -72,6 +72,7 @@
     <Compile Include="src/Audio/CompleteRunAudioObserver.cs" />
     <Compile Include="src/Audio/S1CompleteRunAudioReferenceCapture.cs" />
     <Compile Include="src/Audio/S2AudioObserverProfile.cs" />
+    <Compile Include="src/Audio/FinalPcmWindowRunner.cs" />
     <Compile Include="src/Audio/S3kAudioObserverProfile.cs" />
     <Compile Include="src/Audio/S3kPreconsumptionRequestProfile.cs" />
     <Compile Include="src/Audio/S3kSubmissionAudioObserverProfile.cs" />
