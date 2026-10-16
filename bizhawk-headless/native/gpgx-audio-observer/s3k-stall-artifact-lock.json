@@ -1,0 +1,62 @@
+{
+  "schema": "openggf.gpgx-s3k-stall-artifact-lock.v1",
+  "publication": "DIAGNOSTIC_68000_STALL_ONLY",
+  "production_lock_eligible": false,
+  "note": "Declared pair built by build-s3k-stall-observer.sh from identical pinned source, toolchain and flags; only 0004 differs. Recorded output provenance, not a build gate. s3k-parity-artifact-lock.json and s3k-pcm-artifact-lock.json are unchanged and describe a different (0001@ea3498e) lineage.",
+  "source": {
+    "bizhawk_commit": "427556b5ef3ac437eba754d90c5e7e9096c9a8df",
+    "gpgx_commit": "051d430d3d1b54625f9900c8f152d7f232e06daf",
+    "gpgx_tree": "1bb96ca74d660d383e70d9cd56b88906a0773519",
+    "musl_commit": "2063abc4e16c84218757b1db10d3cdf9f36ef3f8",
+    "verified": "git object ids"
+  },
+  "toolchain": {
+    "clang_sha256": "bb6556bdcdeb00dca0c758da9966a9982542a23ddcaffa784a2de9344ede3fc0",
+    "ld_lld_sha256": "f8d0601bf957a1b063e29c3c43613a5b76482f6c14664b9fcac4d596871e14df",
+    "sysroot_file_digest_sha256": "cc9c53a8e10a7c637c0c63b95471d025b04631ee64eab22eb7d787ebcf05d1e0",
+    "zstd_sha256": "2448569ed7664f1cebb2c108cfd670d8f38ff167b0dd0006043310bc63244885",
+    "zstd_threads": 1
+  },
+  "patches": {
+    "0001-buffer-z80-audio-events.patch": "2e1d1e59175f7e544558088bae48c4f45ee78401dbf808a494182c2575767a0b",
+    "0002-s3k-audio-parity-events.patch": "749576761e4d209eecc2e9f800147f2562df04fd24896ca93ca2edd91e4379d6",
+    "0003-s3k-chip-pcm-events.patch": "d6f9926e8e68755492388929ab46c7ad8ef642dcd676f6231a6580c1ed78a14c",
+    "0004-m68k-stall-counters.patch": "a1ac61e6c690ddc17a9626edb1cb583562f878500f92e1721ee1161e54df5f41"
+  },
+  "builder_sha256": "244d61e6004e84cbceb0440a48fe18c82cb0f09dd480fe59978125f9003746af",
+  "selftests": {
+    "m68k-stall-run.sh": "e8cb9da133cbfbb0103f80687169d88f561574ec379f1dce290aad0cee329c48",
+    "m68k_stall_harness.c": "19defd288eed29aa73934de5f67d0e224f5a97a981ef4df55c5b38729c88196f",
+    "shared.h": "3a0edbe5c2e879df41f545e9aa0405cc8eec7e6296a8d40795db0ea68ab16d47"
+  },
+  "baseline": {
+    "decompressed_size": 43475976,
+    "decompressed_sha256": "3f30ff51487b1a68831700a34dc2e2a9fab741b86eb2e3e9176f36c1605629f5",
+    "compressed_size": 427487,
+    "compressed_sha256": "8c7d03584154aa491c347dd667f641fb9e3bba4d8256adbc4cfaa289920630ac",
+    "build_id": "05cc52590128f212",
+    "native_selftest_log_sha256": "813e9e843e86d98cca7ae1361bb80ff0ff67b55cb96ae3b984da275f0671d722",
+    "selftest_runner": "s3k-pcm-run.sh"
+  },
+  "candidate": {
+    "decompressed_size": 43476360,
+    "decompressed_sha256": "d1d447e02f7d8bb9946f6c2d12e2f0c3ff1128d672b53a7704c40186e0449f62",
+    "compressed_size": 428111,
+    "compressed_sha256": "2cceee19bfe6f41596b3b443a87e16a5b7bbf6a96d875affd4d0b6ccfb5b223d",
+    "build_id": "269ed6092a85f733",
+    "native_selftest_log_sha256": "1e5b425c4bce88e8ce1c521c5ce226fcd12f0255d957a8a17a82e961db035702",
+    "selftest_runner": "m68k-stall-run.sh"
+  },
+  "stall_abi": {
+    "version": 1,
+    "snapshot_size": 80,
+    "exports": [
+      "gpgx_m68k_stall_abi_version",
+      "gpgx_m68k_stall_snapshot_size",
+      "gpgx_m68k_stall_enable",
+      "gpgx_m68k_stall_read",
+      "gpgx_m68k_stall_disable"
+    ],
+    "state_section": ".invis"
+  }
+}

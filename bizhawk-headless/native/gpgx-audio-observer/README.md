@@ -192,3 +192,33 @@ To run the native selftests alone against an already-patched tree:
 ```
 
 Seven harnesses run, ending with `snapshot-at-pc-harness`. Any failure aborts.
+
+## Observation-only 68000 stall counters (0004, stall ABI v1)
+
+`0004-m68k-stall-counters.patch` applies after 0001-0003 and adds cumulative counters for the 68000 time GPGX
+adds outside instruction execution, which per-PC execute histograms cannot see:
+
+| Counter | GPGX site (051d430d) |
+|---|---|
+| Z80 accesses to the 68000 bus, and the MCLK each adds | `memz80.c` `z80_request_68k_bus_access` |
+| VDP FIFO-full waits | `vdp_ctrl.c` `vdp_68k_data_w_m4`/`_m5` |
+| Bus refresh delays (2 cycles per 128 at an instruction fetch) | `m68kcpu.c` `m68k_run`, both loops |
+| 68000-bus DMA freezes | `vdp_ctrl.c` `vdp_dma_update` |
+| Frame rebase (base + `m68k.cycles` is a monotonic stamp) | `system.c` `system_frame_gen`/`_scd` |
+
+Every insertion only reads the value the core already computed, behind a single `gpgx_m68k_stall_enabled` branch; no
+emulated cycle, callback order, input or savestate content changes. The other GPGX writes to `m68k.cycles` are
+reset, illegal-address lockup, Sega CD polling and the stopped-CPU fast path, none of which counts as a stall here.
+
+The ABI is independent of the audio-trace, S3K parity and S3K PCM ABIs: `gpgx_m68k_stall_abi_version` (1),
+`_snapshot_size` (80), `_enable(abi)`, `_read(out, size)` and `_disable`. A read before enable returns -1 and a size
+mismatch -2; there is no silent zero. State lives in the Waterbox invisible section and is not savestated, so a
+loadstate inside a measured span invalidates that span. The managed binding is `GpgxM68kStallNative.Bind(host)`,
+which throws when the loaded core lacks the exports. It is a diagnostic surface only: no capture, profile or
+fixture consumes it, and its values never feed emulation or a replay.
+
+`build-s3k-stall-observer.sh --series baseline|candidate` builds 0001-0003 or 0001-0004 with the same flags,
+after verifying that every consumed source path reproduces its pinned git object id and that clang/ld.lld match
+the `prepare-toolchain.sh` pins. It runs `selftest/s3k-pcm-run.sh` (baseline) or `selftest/m68k-stall-run.sh`
+(candidate: the three existing runners plus `m68k_stall_harness.c`), and writes `identity.json` beside the build.
+It never rewrites a lock in this directory.

@@ -1,0 +1,239 @@
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+index c78366cd1f0f1aec8ca37a4fbb7eb20bb367fecd..488cab1e50b7aa1ffd8793078a25bf3076c4f4a4 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+@@ -302,6 +302,7 @@ void m68k_run(unsigned int cycles)
+       {
+         m68k.refresh_cycles = m68k.cycles + (128*7);
+         m68k.cycles += (2*7);
++        GPGX_M68K_STALL_COUNT_REFRESH();
+       }
+       m68ki_instruction_jump_table[REG_IR]();
+       USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
+@@ -342,6 +343,7 @@ void m68k_run(unsigned int cycles)
+     {
+       m68k.refresh_cycles = m68k.cycles + (128*7);
+       m68k.cycles += (2*7);
++      GPGX_M68K_STALL_COUNT_REFRESH();
+     }
+ 
+     /* Execute instruction */
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c b/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
+index bdd876a6feef9d2e51e5739dd086128b6ba5870c..7829a74631edbf2d93381c4dcc92aafe141c02c8 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/memz80.c
+@@ -40,6 +40,7 @@
+  ****************************************************************************************/
+ 
+ #include "shared.h"
++#include "audio_trace.h"
+ 
+ 
+ /*--------------------------------------------------------------------------*/
+@@ -112,6 +113,8 @@ static void z80_request_68k_bus_access(void)
+   /* value is adjusted to get ride of graphical glitches in Rick Dangerous 2 title screen when bus refresh delays are also emulated and still get */
+   /* "M68K DELAY ON Z80 ROM READ" test "passed" in Ti_'s test ROM (misc_test.bin), although the measured delay value is still slightly too high. */
+   m68k.cycles += (((Z80.cycles % 7) + 72)/7)*7;
++  /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++  if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_z80_bus((((Z80.cycles % 7) + 72)/7)*7);
+ 
+   /* average Z80 wait-states when accessing 68k bus (cf https://docs.google.com/document/d/1ST9GbFfPnIjLT5loytFCm3pB0kWQ1Oe34DCBBV8saY8) */
+   Z80.cycles += (3 * 15);
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/system.c b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
+index 93ff6b88adae76cc21b58f3cd9cdf774f8f8efa0..d543a649366606ea4934171f962d678382eeeb1b 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/system.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
+@@ -42,6 +42,7 @@
+ #include "shared.h"
+ #include "yx5200.h"
+ #include "eq.h"
++#include "audio_trace.h"
+ 
+ /* Global variables */
+ t_bitmap bitmap;
+@@ -688,6 +689,8 @@ void system_frame_gen(int do_skip)
+   m68k.cycles -= mcycles_vdp;
+   Z80.cycles -= mcycles_vdp;
+   dma_endCycles = 0;
++  /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++  if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
+ }
+ 
+ void system_frame_scd(int do_skip)
+@@ -1016,6 +1019,8 @@ void system_frame_scd(int do_skip)
+   m68k.cycles -= mcycles_vdp;
+   Z80.cycles -= mcycles_vdp;
+   dma_endCycles = 0;
++  /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++  if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
+ }
+ 
+ void system_frame_sms(int do_skip)
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c b/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
+index e99ab3d6a4d183d16914fecaee48a64ac76106bd..1fdd4362476a5c24c482c3a1b174180e95791108 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/vdp_ctrl.c
+@@ -41,6 +41,7 @@
+ 
+ #include "shared.h"
+ #include "hvc.h"
++#include "audio_trace.h"
+ 
+ /* Mark a pattern as modified */
+ #define MARK_BG_DIRTY(addr)                         \
+@@ -687,6 +688,8 @@ void vdp_dma_update(unsigned int cycles)
+   if (dma_type < 2)
+   {
+     /* 68K is waiting during DMA from 68k bus */
++    /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++    if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_dma(m68k.cycles, dma_endCycles);
+     m68k.cycles = dma_endCycles;
+ #ifdef LOGVDP
+     error("-->68K CPU waiting for %d cycles\n", dma_cycles);
+@@ -2304,6 +2307,8 @@ static void vdp_68k_data_w_m4(unsigned int data)
+       if (cycles < fifo_cycles[fifo_idx])
+       {
+         /* FIFO is full, 68k waits until oldest FIFO entry is processed (Chaos Engine / Soldiers of Fortune, Double Clutch, Titan Overdrive Demo) */
++        /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++        if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_fifo(m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7));
+         m68k.cycles = (((fifo_cycles[fifo_idx] + 6) / 7) * 7);
+       }
+ 
+@@ -2398,6 +2403,8 @@ static void vdp_68k_data_w_m5(unsigned int data)
+       if (cycles < fifo_cycles[fifo_idx])
+       {
+         /* FIFO is full, 68k waits until oldest FIFO entry is processed (Chaos Engine / Soldiers of Fortune, Double Clutch, Titan Overdrive Demo) */
++        /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
++        if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_fifo(m68k.cycles, (((fifo_cycles[fifo_idx] + 6) / 7) * 7));
+         m68k.cycles = (((fifo_cycles[fifo_idx] + 6) / 7) * 7);
+       }
+ 
+diff --git a/waterbox/gpgx/cinterface/audio_trace.c b/waterbox/gpgx/cinterface/audio_trace.c
+index 7579cef808e47121761d0306ff8b06c9a9381be5..6a1546b11d081b1b4d31001b517903e99d38e3ed 100644
+--- a/waterbox/gpgx/cinterface/audio_trace.c
++++ b/waterbox/gpgx/cinterface/audio_trace.c
+@@ -2377,6 +2377,77 @@ ECL_EXPORT int32_t gpgx_s3k_audio_parity_disable(void)
+   return TRACE_OK;
+ }
+ 
++/* Observation-only 68000 stall counters: integer increments on invisible (non-savestated) memory. They never change
++   m68k/Z80/VDP cycles, callback order, inputs or snapshots. Reading before enable fails; there is no silent zero. */
++ECL_INVISIBLE volatile uint8_t gpgx_m68k_stall_enabled;
++ECL_INVISIBLE uint64_t gpgx_m68k_stall_refresh_events;
++ECL_INVISIBLE static struct gpgx_m68k_stall_snapshot_v1 m68k_stall;
++STATIC_ASSERT(m68k_stall_snapshot_v1_size, sizeof(struct gpgx_m68k_stall_snapshot_v1) == 80);
++STATIC_ASSERT(m68k_stall_snapshot_v1_base, offsetof(struct gpgx_m68k_stall_snapshot_v1, frame_base_mclk) == 16);
++
++void gpgx_m68k_stall_z80_bus(uint32_t mclk)
++{
++  m68k_stall.z80_bus_access_count++;
++  m68k_stall.z80_bus_mclk += mclk;
++}
++
++void gpgx_m68k_stall_fifo(uint32_t before, uint32_t after)
++{
++  if (after > before)
++  {
++    m68k_stall.fifo_wait_count++;
++    m68k_stall.fifo_wait_mclk += after - before;
++  }
++}
++
++void gpgx_m68k_stall_dma(uint32_t before, uint32_t after)
++{
++  if (after > before)
++  {
++    m68k_stall.dma_freeze_count++;
++    m68k_stall.dma_freeze_mclk += after - before;
++  }
++}
++
++void gpgx_m68k_stall_frame_wrap(uint32_t mcycles)
++{
++  m68k_stall.frame_ordinal++;
++  m68k_stall.frame_base_mclk += mcycles;
++}
++
++ECL_EXPORT uint32_t gpgx_m68k_stall_abi_version(void)
++{ return GPGX_M68K_STALL_ABI_VERSION; }
++
++ECL_EXPORT uint32_t gpgx_m68k_stall_snapshot_size(void)
++{ return (uint32_t)sizeof(struct gpgx_m68k_stall_snapshot_v1); }
++
++ECL_EXPORT int32_t gpgx_m68k_stall_enable(uint32_t abi_version)
++{
++  if (abi_version != GPGX_M68K_STALL_ABI_VERSION) return -1;
++  memset(&m68k_stall, 0, sizeof(m68k_stall));
++  gpgx_m68k_stall_refresh_events = 0;
++  gpgx_m68k_stall_enabled = 1;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall_read(struct gpgx_m68k_stall_snapshot_v1 *out, uint32_t size)
++{
++  if (!out || size != sizeof(struct gpgx_m68k_stall_snapshot_v1)) return -2;
++  if (!gpgx_m68k_stall_enabled) return -1;
++  *out = m68k_stall;
++  out->abi_version = GPGX_M68K_STALL_ABI_VERSION;
++  out->struct_size = (uint32_t)sizeof(struct gpgx_m68k_stall_snapshot_v1);
++  out->m68k_cycles = (uint32_t)m68k.cycles;
++  out->refresh_events = gpgx_m68k_stall_refresh_events;
++  return 0;
++}
++
++ECL_EXPORT int32_t gpgx_m68k_stall_disable(void)
++{
++  gpgx_m68k_stall_enabled = 0;
++  return 0;
++}
++
+ ECL_EXPORT uint32_t gpgx_s3k_pcm_abi_version(void)
+ { return GPGX_S3K_PCM_ABI_VERSION; }
+ 
+diff --git a/waterbox/gpgx/cinterface/audio_trace.h b/waterbox/gpgx/cinterface/audio_trace.h
+index d3595f40bd6d679ae86385b6abbd5159c56f4ea7..55d257b85d17f52b2ef434c790647aead7b6cef1 100644
+--- a/waterbox/gpgx/cinterface/audio_trace.h
++++ b/waterbox/gpgx/cinterface/audio_trace.h
+@@ -12,6 +12,9 @@
+ #define GPGX_S3K_AUDIO_PARITY_MAX_DESCRIPTORS 64u
+ 
+ #define GPGX_S3K_PCM_ABI_VERSION 1u
++
++/* Observation-only 68000 stall counters (OpenGGF S3K Kos CPU-budget closure); independent of every other ABI. */
++#define GPGX_M68K_STALL_ABI_VERSION 1u
+ #define GPGX_S3K_PCM_EVENT_CAPACITY 16384u
+ #define GPGX_S3K_PCM_TAP_YM2612_MIX_STEREO 1u
+ #define GPGX_S3K_PCM_TAP_PSG_STEREO_NATIVE 2u
+@@ -229,6 +232,32 @@ extern uint32_t trace_z80_instruction_pc;
+ extern uint32_t trace_m68k_instruction_pc;
+ extern volatile uint8_t gpgx_s3k_audio_parity_enabled;
+ extern volatile uint8_t gpgx_s3k_pcm_enabled;
++/* Cumulative since gpgx_m68k_stall_enable; MCLK units (7 MCLK = one 68000 cycle). */
++struct gpgx_m68k_stall_snapshot_v1
++{
++  uint32_t abi_version;          /* GPGX_M68K_STALL_ABI_VERSION */
++  uint32_t struct_size;          /* sizeof(struct gpgx_m68k_stall_snapshot_v1) == 80 */
++  uint32_t frame_ordinal;        /* frame-end timing rebases (system.c) since enable */
++  uint32_t m68k_cycles;          /* m68k.cycles when read: MCLK from the current frame start */
++  uint64_t frame_base_mclk;      /* sum of mcycles_vdp over those rebases; base + m68k_cycles is monotonic */
++  uint64_t z80_bus_access_count; /* memz80.c z80_request_68k_bus_access calls */
++  uint64_t z80_bus_mclk;         /* MCLK those calls added to m68k.cycles */
++  uint64_t fifo_wait_count;      /* VDP data-port writes that waited for a full FIFO */
++  uint64_t fifo_wait_mclk;       /* MCLK added by those waits */
++  uint64_t refresh_events;       /* m68k_run bus refresh delays (2*7 MCLK each) */
++  uint64_t dma_freeze_count;     /* 68k-bus DMA freezes */
++  uint64_t dma_freeze_mclk;      /* MCLK added by those freezes */
++};
++
++extern volatile uint8_t gpgx_m68k_stall_enabled;
++extern uint64_t gpgx_m68k_stall_refresh_events;
++void gpgx_m68k_stall_z80_bus(uint32_t mclk);
++void gpgx_m68k_stall_fifo(uint32_t before, uint32_t after);
++void gpgx_m68k_stall_dma(uint32_t before, uint32_t after);
++void gpgx_m68k_stall_frame_wrap(uint32_t mcycles);
++#define GPGX_M68K_STALL_COUNT_REFRESH() \
++  do { if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_refresh_events++; } while (0)
++
+ 
+ uint8_t gpgx_audio_trace_enter_cpu(uint8_t cpu);
+ void gpgx_audio_trace_leave_cpu(uint8_t previous);

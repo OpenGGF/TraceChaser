@@ -77,6 +77,7 @@
     <Compile Include="src/Audio/S3kSubmissionAudioObserverProfile.cs" />
     <Compile Include="src/Core/GpgxHost.cs" />
     <Compile Include="src/Core/GpgxS3kAudioParityDepartures.cs" />
+    <Compile Include="src/Core/GpgxM68kStallNative.cs" />
     <Compile Include="src/Core/GpgxHost.AudioObserver.cs" />
     <Compile Include="src/Core/GpgxAudioObserverAdapter.cs" />
     <Compile Include="src/Core/IGpgxHost.cs" />
