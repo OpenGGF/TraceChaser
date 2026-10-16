@@ -158,6 +158,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             };
             BootstrapTests.Register(tests);
             Bk2ReaderTests.Register(tests);
+            FinalPcmWindowRunnerTests.Register(tests);
             DynamicArtRomProfileTests.Register(tests);
             DynamicArtTransferStateTests.Register(tests);
             S1DynamicArtObserverTests.Register(tests);
@@ -178,6 +179,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             RegisterSerial(tests, GpgxZ80AudioCapabilityTests.Register);
             RegisterSerial(tests, GpgxYmWriteTimingLabTests.Register);
             RegisterSerial(tests, GpgxS3kAudioParityManifestTests.Register);
+            RegisterSerial(tests, GpgxM68kStallNativeTests.Register);
             RegisterSerial(tests, S3kSfxLifecycleReferenceCaptureTests.Register);
             RegisterSerial(tests, S2AudioObserverProfileTests.Register);
             RegisterSerial(tests, S2CompleteAudioCaptureRunnerTests.Register);

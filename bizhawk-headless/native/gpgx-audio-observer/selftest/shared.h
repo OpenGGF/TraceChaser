@@ -2,7 +2,7 @@
 #define GPGX_AUDIO_TRACE_SELFTEST_SHARED_H
 #include <stdint.h>
 typedef struct { uint8_t *base; void *read8; void *read16; } cpu_memory_map;
-struct selftest_m68k { cpu_memory_map memory_map[256]; };
+struct selftest_m68k { cpu_memory_map memory_map[256]; unsigned int cycles; };
 extern struct selftest_m68k m68k;
 extern uint8_t zram[0x2000];
 extern uint8_t work_ram[0x10000];

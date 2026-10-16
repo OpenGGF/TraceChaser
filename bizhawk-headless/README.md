@@ -246,6 +246,54 @@ Output is published all-or-nothing: files are staged and only linked into
 `--output` once the whole capture succeeds, so a failed run never leaves a
 half-written trace behind.
 
+### Capturing a diagnostic final-PCM window
+
+`--final-pcm-window` records the sync sound provider's final 44.1 kHz PCM for
+the first `--frames` rows of one movie, under that movie's own SyncSettings
+(FM chip and audio filter included). It applies each row, advances with sound
+enabled and drains the frame's samples. It registers no callbacks and writes no
+emulator state. It is comparison evidence for OpenGGF's opt-in
+native-compatible PCM stage, not a fixture publisher.
+
+```bash
+BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64 bash -c \
+  'source bizhawk-headless/common-env.sh && exec mono bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe \
+     --final-pcm-window --rom /absolute/s3k.gen --movie /absolute/movie.bk2 \
+     --output /absolute/scratch/window --frames 2400 \
+     --tracechaser-root /absolute/TraceChaser --input-repository-root /absolute/OpenGGF \
+     --fixture-root /absolute/OpenGGF/src/test/resources/traces'
+```
+
+The three root flags are required and go through the same producer boundary as
+the other capture paths: after symlink resolution, `--output` must lie outside
+both checkouts (so never under the fixture root), and the fixture root must
+belong to the consumer checkout. Every flag may appear once. `--output` must be
+absent or an empty real directory, never a symbolic link.
+
+It receives `pcm.s16` (interleaved little-endian stereo), `frames.tsv` (row,
+lag flag, stereo frames, cumulative) and, last, `metadata.json`.
+
+`metadata.json` is the completion marker:
+- it is written only after both data files are flushed to disk and closed;
+- `pcm.s16` is then re-hashed from disk and must match the streamed digest and
+  the expected length;
+- it is published by temporary file and rename, and the success line
+  (`FINAL_PCM_WINDOW … pcm_sha256= core_sha256=`) is printed after it.
+
+A directory without `metadata.json` is an incomplete run, whatever else it holds.
+Failures can leave partial data files but never a marker.
+
+The marker records:
+- ROM SHA-1 and movie SHA-256;
+- the recorded FM chip and filter settings, and counts;
+- `pcm_sha256` and `frames_tsv_sha256`;
+- the core file WaterboxHost actually loads (`gpgx.wbx.zst` when present, else
+  `gpgx.wbx`, under the validated `BIZHAWK_HOME/dll`) with its size and SHA-256,
+  which must be unchanged at the end of the run;
+- the managed BizHawk version and the `BizHawk.Emulation.Cores.dll` SHA-256.
+
+These record input identity. They are not a host attestation.
+
 ### Capturing a pinned complete-audio raw stream
 
 The production-owned S2/S3K audio validation path uses a separate, closed raw
