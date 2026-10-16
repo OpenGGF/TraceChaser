@@ -1247,8 +1247,11 @@ namespace BizHawk.Headless.Gpgx
                 }
                 if (FinalPcmWindowRunner.IsRequested(args))
                 {
-                    return FinalPcmWindowRunner.Run(args, Console.Out, Path.GetFullPath(
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..")));
+                    FinalPcmWindowRunner.RejectDuplicateFlags(args);
+                    string pcmTracechaserRoot, pcmInputRoot, pcmFixtureRoot;
+                    string[] pcmArgs = ExtractBoundaryArguments(args, out pcmTracechaserRoot, out pcmInputRoot, out pcmFixtureRoot);
+                    ValidateProducerBoundary(pcmArgs, pcmTracechaserRoot, pcmInputRoot, pcmFixtureRoot);
+                    return FinalPcmWindowRunner.Run(pcmArgs, Console.Out);
                 }
                 if (RequestWindowCommandOptions.IsRequested(args))
                 {
