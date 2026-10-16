@@ -1245,6 +1245,11 @@ namespace BizHawk.Headless.Gpgx
                         "OVERRIDE_RESUME_FIRST_DIVERGENCE_PUBLISHED_DURABLY");
                     return 0;
                 }
+                if (FinalPcmWindowRunner.IsRequested(args))
+                {
+                    return FinalPcmWindowRunner.Run(args, Console.Out, Path.GetFullPath(
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..")));
+                }
                 if (RequestWindowCommandOptions.IsRequested(args))
                 {
                     return RunRequestWindow(args, Console.Out, Console.Error);

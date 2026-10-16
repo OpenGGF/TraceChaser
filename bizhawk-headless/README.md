@@ -246,6 +246,27 @@ Output is published all-or-nothing: files are staged and only linked into
 `--output` once the whole capture succeeds, so a failed run never leaves a
 half-written trace behind.
 
+### Capturing a diagnostic final-PCM window
+
+`--final-pcm-window` records the sync sound provider's final 44.1 kHz PCM for
+the first `--frames` rows of one movie, under that movie's own SyncSettings
+(FM chip and audio filter included). It applies each row, advances with sound
+enabled and drains the frame's samples. It registers no callbacks and writes no
+emulator state. It is comparison evidence for OpenGGF's opt-in
+native-compatible PCM stage, not a fixture publisher.
+
+```bash
+BIZHAWK_HOME=/absolute/BizHawk-2.11-linux-x64 bash -c \
+  'source bizhawk-headless/common-env.sh && exec mono bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe \
+     --final-pcm-window --rom /absolute/s3k.gen --movie /absolute/movie.bk2 \
+     --output /absolute/scratch/window --frames 2400'
+```
+
+`--output` must be absent or empty and outside this checkout. It receives
+`pcm.s16` (interleaved little-endian stereo), `frames.tsv` (row, lag flag,
+stereo frames, cumulative) and `metadata.json` (ROM SHA-1, movie SHA-256,
+recorded FM chip and filter settings, counts, PCM SHA-256).
+
 ### Capturing a pinned complete-audio raw stream
 
 The production-owned S2/S3K audio validation path uses a separate, closed raw

@@ -55,6 +55,7 @@
     <Compile Include="tests/GpgxAudioTraceNativeTests.cs" />
     <Compile Include="tests/CompleteRunAudioObserverTests.cs" />
     <Compile Include="tests/S1CompleteRunAudioReferenceCaptureTests.cs" />
+    <Compile Include="tests/FinalPcmWindowRunnerTests.cs" />
     <Compile Include="tests/S3kAudioObserverProfileTests.cs" />
     <Compile Include="tests/S3kCompleteAudioCaptureRunnerTests.cs" />
     <Compile Include="tests/S3kCompleteAudioRawSinkTests.cs" />
