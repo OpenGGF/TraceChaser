@@ -76,9 +76,11 @@ hook-driven debugging (see below).
    the installed files must be the exact gated native output with no hand edits.
 3. **C# 7.x only.** Mono 6.12 + `xbuild`, non-SDK `.csproj`. Newer syntax will
    not compile.
-4. **Every new `.cs` file must be hand-added to BOTH
-   `bizhawk-headless/BizHawk.Headless.Gpgx.csproj` and
-   `bizhawk-headless/BizHawk.Headless.Gpgx.Tests.csproj`.** There is no globbing.
+4. **Hand-add each new `.cs` file to its owning project.** Production source
+   belongs in `bizhawk-headless/BizHawk.Headless.Gpgx.csproj`; test source belongs
+   in `bizhawk-headless/BizHawk.Headless.Gpgx.Tests.csproj`. There is no globbing.
+   The test project references the production project: do not compile production
+   source a second time in the test assembly.
 5. **Every new test class must be registered in `TestMain.BuildRegistry()`.** The
    runner is a plain registry, not NUnit — an unregistered test silently never
    runs, and the suite still reports green.
@@ -213,7 +215,7 @@ them, and that is a decision rather than a gap —
 and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
 Do not "helpfully" add general M68K exec/memory-write callback support. Five fixed,
-address-filtered observers are permitted exceptions, and nothing else is.
+address-filtered observers are the permitted recorder exceptions.
 
 The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001B46`,
 immediately after `Process_Kos_Module_Queue` returns from `Queue_Kos`. It may mirror or
@@ -268,6 +270,16 @@ a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and
 corrected-candidate differentials gate these exceptions.
+
+Separately, `StockKosLiveClockReader` is a dormant managed diagnostic adapter,
+preserved from the 2026-10-17 S3K native-clock identity/access investigation.
+It may wrap the existing owning-host execute callback only at explicit instruction
+PCs authenticated and reviewed by its diagnostic caller. Its only observations
+are raw CPU cycles, refresh deadline and encoded interrupt level. It adds no
+recorder, CLI, fixture, host-interface, gameplay or timing/readiness wiring, and
+is not permission to add general callback capabilities. Bind-only identity access
+does not qualify scalar observations, callbacks, phase origin, SR/IRQ semantics
+or a hardware kernel. See [usage and limits](bizhawk-headless/README.md#stock-native-clock-diagnostic-adapter).
 
 Native observer builds are **not host-attested**. `build-observer.sh` pins the source
 commits, the clang packages, and the patch; it makes no claim about the identity of the

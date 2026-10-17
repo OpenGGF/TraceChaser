@@ -83,6 +83,7 @@
     <Compile Include="src/Recording/M68kLedgerWindowRunner.cs" />
     <Compile Include="src/Core/GpgxHost.AudioObserver.cs" />
     <Compile Include="src/Core/GpgxAudioObserverAdapter.cs" />
+    <Compile Include="src/Core/StockKosLiveClockReader.cs" />
     <Compile Include="src/Core/IGpgxHost.cs" />
     <Compile Include="src/Core/IMainRamWriter.cs" />
     <Compile Include="src/Core/MutableController.cs" />

@@ -225,6 +225,48 @@ qualified. Actual-native interrupted service and independent head/end observatio
 must corroborate a profile publication; pure test vectors alone do not grant a
 cost. No measurement stream is a canonical trace fixture or replay input.
 
+## Stock native-clock diagnostic adapter
+
+[`StockKosLiveClockReader`](src/Core/StockKosLiveClockReader.cs) preserves the
+2026-10-17 S3K ending6+46/fdf stock-core identity/access investigation. It is a
+managed diagnostic helper in the harness assembly, with no CLI, recorder,
+fixture, host-interface, gameplay or timing/readiness integration. The source
+body is unchanged from reviewed prototype SHA256
+`f4f2fbc81b2c7e0680b1596fab14f2795308ade5ca005a2926710f0da2c6ee5b`.
+
+The diagnostic caller must supply an absolute BizHawk 2.11 DLL directory, the
+hash-pinned decompressed stock GPGX ELF and a separately reviewed SHA256 for the
+actual harness assembly. On one owning thread, call `Guard.BeforeOpen` immediately
+before the existing `GpgxHost.Open`, then `BindAfterOpen` immediately after Open
+and before any Advance. Keep the guard and owning host alive. Optional `ObserveAt`
+registrations require explicit instruction PCs whose source and bytes the caller
+has authenticated and reviewed; there are no default PCs or scene selectors.
+Keep copied rows provisional until `VerifyAfterObservations` succeeds after the
+last observation. Dispose the reader before the host and guard. No state restore,
+concurrent owner/mapping/mount/filesystem mutation or asynchronous access is
+supported. The helper does not open a core or drive a run for its caller.
+
+The supported identity contract is Linux x64/little-endian with the reviewed
+Mono 6.12.0.206 handle semantics. Pinned artifacts, exact managed owner shapes and
+raw resolver anchors are checked. The existing held native-library descriptor's
+kernel-exposed device/inode must match both loaded native anchors and every
+executable byte range. Same-stream hashes bracket complete native RX equality;
+immutable GPGX PT_LOAD bytes are compared under the owning monitor. Inaccessible
+or inconsistent identities refuse; there is no map_files/pathname fallback in
+the held-FD algorithm. Device/inode equivalence is not kernel `struct file`
+pointer equality. Native RW/GOT and complete consumed GPGX ELF equality are not
+attested. This diagnostic pin does not change the native observer build policy.
+
+The original external prototype passed a zero-frame bind-only identity check
+(request88245) against its reviewed old host: zero advances, callbacks and scalar
+observations. That is historical identity-access evidence, not verification of
+the maintained assembly. The three raw outputs are signed `cycles`, signed
+`refresh_cycles` and unsigned encoded `int_level`, plus the declared callback PC.
+No raw-scalar/callback correctness, cumulative clock, phase origin, SR, decoded
+IRQ, bus events, kernel initialization or readiness authority is established.
+Counters can cross frame rebases; never clamp them or infer a zero origin.
+A later caller must independently qualify its context and missing semantic inputs.
+
 ## Capturing a trace
 
 ```bash
@@ -617,7 +659,7 @@ fixtures/         Small synthetic inputs for unit tests
 ## Contributing
 
 Read the [root agent guidance](../CLAUDE.md) before changing anything here — it
-carries the constraints that are expensive to discover by trial: the two
-`.csproj` files that both need editing, the test registry that silently drops
+carries the constraints that are expensive to discover by trial: the owning
+`.csproj` source lists and production project reference, the test registry that silently drops
 unregistered classes, the ignored dependency/build roots that must not receive
 source files, and which kinds of test cannot run beside anything else.
