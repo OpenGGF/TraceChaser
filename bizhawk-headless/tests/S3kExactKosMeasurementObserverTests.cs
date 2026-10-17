@@ -19,6 +19,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
    tests.Add(new TestMain.TestCase("ExactKosMeasurement caller opcode check precedes registration",CallerRevision));
    tests.Add(new TestMain.TestCase("ExactKosMeasurement interrupted head preserves descriptor",Interrupted));
    tests.Add(new TestMain.TestCase("ExactKosMeasurement missing or malformed capture identity registers nothing",Identity));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement service-time descriptor change reports frame, hook, caller and FIFO",ServiceFailureContext));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement retirement-time tail change reports frame, hook and FIFO",RetirementFailureContext));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement failed load-time v2 capture publishes neither file",FailedCapturePublishesNothing));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement head bookmarked after both EndReached stores resumes",BookmarkedAfterBothStores));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement head bookmarked after the EndReached source store resumes",BookmarkedAfterSourceStore));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement enqueue while the head is bookmarked in EndReached",SubmittedWhileBookmarked));
+   tests.Add(new TestMain.TestCase("ExactKosMeasurement bookmarked head accepts only its own EndReached cursors",BookmarkedNegativeControls));
   }
   static byte[] Rom()
   {
@@ -46,6 +53,110 @@ namespace OpenGGF.BizHawk.Headless.Tests
   static void Revision(){var rom=Rom();rom[0x1CE4]=0;var h=Host();var w=new StringWriter();AssertEx.Throws<InvalidDataException>(()=>Observer(w,rom).Attach(h,()=>0),"hook mismatch");AssertEx.Equal(null,h.ExecuteCallbackAddress);}
   static void CallerRevision(){var rom=Rom();rom[0x6516]=0;var h=Host();var w=new StringWriter();AssertEx.Throws<InvalidDataException>(()=>Observer(w,rom).Attach(h,()=>0),"hook mismatch");AssertEx.Equal(null,h.ExecuteCallbackAddress);}
   static void Interrupted(){var h=Host();var w=new StringWriter();using(Observer(w).Attach(h,()=>0)){Stage(h,0,0x100);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);h.SetU16(0xFF0E,0x8001);h.SetU32(0xFF40,0x102);AssertEx.Throws<InvalidDataException>(()=>h.FireExecuteCallback(0x1C1A),"descriptor changed");h.SetU32(0xFF40,0x100);h.FireExecuteCallback(0x1C1A);Retire(h,0,0x100);}AssertEx.Equal(2,(int)Row(w)["service_opportunities"]);}
+
+  // A FIFO entry rewritten outside the observed enqueue/retirement path must still fail closed, and the failure
+  // must name the exact raw frame, hook, caller, live count and the expected (ledger) and actual (RAM) entries.
+  static void ServiceFailureContext()
+  {
+   var h=Host();var w=new StringWriter();int frame=4321;
+   using(Observer(w).Attach(h,()=>frame))
+   {
+    Stage(h,0,0x100);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+    h.SetU32(0xFF40,0x200);                       // descriptor rewritten without a retirement
+    var e=Catch(()=>h.FireExecuteCallback(0x1C1A));
+    foreach(string part in new[]{"descriptor changed","raw_frame 4321","hook $1C1A","caller $00651C","count 1",
+      "expected[0] 00000100>FFFF8000","actual[0] 00000200>FFFF8000"})
+     if(e.Message.IndexOf(part,StringComparison.Ordinal)<0)throw new InvalidOperationException("missing <"+part+"> in: "+e.Message);
+   }
+   AssertEx.Equal("",w.ToString());
+  }
+
+  static void RetirementFailureContext()
+  {
+   var h=Host();var w=new StringWriter();int frame=77;
+   using(Observer(w).Attach(h,()=>frame))
+   {
+    Stage(h,0,0x100);Stage(h,1,0x200);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+    h.SetU32(0xFF48,0x300);                       // queued tail entry rewritten before the head retires
+    h.SetU32(0xFF40,0x108);h.SetU32(0xFF44,0xFFFF8003);h.SetU16(0xFF0E,1);
+    var e=Catch(()=>h.FireExecuteCallback(0x1CE4));
+    foreach(string part in new[]{"descriptor changed","raw_frame 77","hook $1CE4","count 1","expected[1] 00000200>FFFF8000",
+      "actual[1] 00000300>FFFF8000"})
+     if(e.Message.IndexOf(part,StringComparison.Ordinal)<0)throw new InvalidOperationException("missing <"+part+"> in: "+e.Message);
+   }
+   AssertEx.Equal("",w.ToString());
+  }
+
+  static InvalidDataException Catch(Action action)
+  {
+   try{action();}catch(InvalidDataException e){return e;}
+   throw new InvalidOperationException("Expected the exact observer to fail closed.");
+  }
+
+  // The load-time capture publishes v1 and v2 as one staged set: an exception inside the capture publishes neither.
+  static void FailedCapturePublishesNothing()
+  {
+   string root=TestScratch.CreateRootPath("exact-kos-failed");
+   Directory.CreateDirectory(root);
+   try
+   {
+    string output=Path.Combine(root,"out");
+    int code=global::BizHawk.Headless.Gpgx.Program.RunTraceCapture<object>(output,TextWriter.Null,TextWriter.Null,
+     ()=>new NoDisposal(),()=>Host(),
+     (host,writers)=>{writers[0].Write("{\"v1\":1}\n");writers[1].Write("{\"v2\":1}\n");throw new InvalidDataException("Exact Kos FIFO descriptor changed before committed retirement.");},
+     ignored=>"",new NoReplacePublisher(),new[]{"load_time_measurements.jsonl","load_time_measurements_v2.jsonl"});
+    if(code==0)throw new InvalidOperationException("A failed capture reported success.");
+    AssertEx.Equal(false,File.Exists(Path.Combine(output,"load_time_measurements.jsonl")));
+    AssertEx.Equal(false,File.Exists(Path.Combine(output,"load_time_measurements_v2.jsonl")));
+   }
+   finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+  }
+
+  sealed class NoDisposal:IDisposable{public void Dispose(){}}
+
+  // Process_Kos_Queue_EndReached stores the source cursor (1CD2), then the destination cursor (1CD6), before the
+  // andi at 1CDA clears the busy bit. Set_Kos_Bookmark saves any rte address in [1C26,1CFA) while that bit is set,
+  // so a V-int at 1CD6 or 1CDA leaves the head holding its own end cursors until Restore_Kos_Bookmark resumes from
+  // the next 1C1A. The test ROM's job at 0x100 ends at 0x108>FFFF8003. Knux raw frame 27718 hit the 1CDA case.
+  static void Bookmark(FakeS1Host h,uint destination,int count){h.SetU32(0xFF40,0x108);h.SetU32(0xFF44,destination);h.SetU16(0xFF0E,(ushort)(0x8000|count));}
+  static void BookmarkedAfterBothStores()
+  {
+   var h=Host();var w=new StringWriter();
+   using(Observer(w).Attach(h,()=>0)){Stage(h,0,0x100);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+    Bookmark(h,0xFFFF8003,1);h.FireExecuteCallback(0x1C1A);Retire(h,0,0x100);}
+   AssertEx.Equal(2,(int)Row(w)["service_opportunities"]);AssertEx.Equal(0x100,(int)Row(w)["source"]);
+  }
+  static void BookmarkedAfterSourceStore()
+  {
+   var h=Host();var w=new StringWriter();
+   using(Observer(w).Attach(h,()=>0)){Stage(h,0,0x100);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+    Bookmark(h,0xFFFF8000,1);h.FireExecuteCallback(0x1C1A);Retire(h,0,0x100);}
+   AssertEx.Equal(2,(int)Row(w)["service_opportunities"]);
+  }
+  // Backup_Kos_Registers returns to the main loop, so Queue_Kos can append behind a bookmarked head that same frame.
+  static void SubmittedWhileBookmarked()
+  {
+   var h=Host();var w=new StringWriter();
+   using(Observer(w).Attach(h,()=>0)){Stage(h,0,0x100);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+    Bookmark(h,0xFFFF8003,1);h.SetU32(0xFF48,0x200);h.SetU32(0xFF4C,0xFFFF8000);h.SetU16(0xFF0E,0x8002);h.FireExecuteCallback(0x1B46);
+    h.FireExecuteCallback(0x1C1A);Retire(h,1,0x100);Stage(h,0,0x200);h.FireExecuteCallback(0x1C1A);Retire(h,0,0x200);}
+   AssertEx.Equal(2,(int)Row(w)["service_opportunities"]);AssertEx.Equal(0x200,(int)Row(w,1)["source"]);AssertEx.Equal(0x1B46,(int)Row(w,1)["submission_pc"]);
+  }
+  static void BookmarkedNegativeControls()
+  {
+   // wrong destination cursor; busy bit clear; destination stored before source; a non-head entry at its own end.
+   foreach(Action<FakeS1Host> corrupt in new Action<FakeS1Host>[]{
+     h=>Bookmark(h,0xFFFF8004,2),
+     h=>{Bookmark(h,0xFFFF8003,2);h.SetU16(0xFF0E,2);},
+     h=>{Bookmark(h,0xFFFF8003,2);h.SetU32(0xFF40,0x100);},
+     h=>{h.SetU32(0xFF48,0x208);h.SetU32(0xFF4C,0xFFFF8003);h.SetU16(0xFF0E,0x8002);}})
+   {
+    var h=Host();var w=new StringWriter();
+    using(Observer(w).Attach(h,()=>0)){Stage(h,0,0x100);Stage(h,1,0x200);h.FireExecuteCallback(0x1B46);h.FireExecuteCallback(0x1C1A);
+     corrupt(h);AssertEx.Throws<InvalidDataException>(()=>h.FireExecuteCallback(0x1C1A),"descriptor changed");}
+    AssertEx.Equal("",w.ToString());
+   }
+  }
 
   static void Identity()
   {

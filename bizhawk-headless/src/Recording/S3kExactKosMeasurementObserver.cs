@@ -34,6 +34,7 @@ namespace OpenGGF.BizHawk.Headless
         private readonly List<Job> queue = new List<Job>();
         private long ordinal;
         private int epoch, lastRawFrame = -1, sequence;
+        private Func<int> diagnosticClock;
 
         public S3kExactKosMeasurementObserver(byte[] rom, TextWriter output,
             string fixture, string movieSha256, string romSha1)
@@ -74,21 +75,22 @@ namespace OpenGGF.BizHawk.Headless
             RequireOpcode(TitleCardLoopReturn - 6, new byte[] { 0x4E,0xB9,0x00,0x00,0x1C,0x1A });
             if (includeDirectSubmissions)
                 RequireOpcode(DirectSubmissionPc, new byte[] { 0x4E,0x75,0x4A,0x78,0xFF,0x0E });
+            diagnosticClock = rawFrame;
             var callbacks = new List<IDisposable>();
             try
             {
                 callbacks.Add(host.RegisterExecuteCallback(ModuleSubmissionPc,
-                    () => Submitted(host, ModuleSubmissionPc)));
+                    () => Guard(host, cpu, ModuleSubmissionPc, () => Submitted(host, ModuleSubmissionPc))));
                 callbacks.Add(host.RegisterExecuteCallback(HeadServicePc,
-                    () => Served(host, cpu)));
+                    () => Guard(host, cpu, HeadServicePc, () => Served(host, cpu))));
                 callbacks.Add(host.RegisterExecuteCallback(HeadRetirementPc,
-                    () => Retired(host, rawFrame())));
+                    () => Guard(host, cpu, HeadRetirementPc, () => Retired(host, rawFrame()))));
                 if (includeDirectSubmissions)
-                    callbacks.Add(host.RegisterExecuteCallback(DirectSubmissionPc, () =>
+                    callbacks.Add(host.RegisterExecuteCallback(DirectSubmissionPc, () => Guard(host, cpu, DirectSubmissionPc, () =>
                     {
                         if (ReturnAddress(host, cpu) != ModuleSubmissionPc)
                             Submitted(host, DirectSubmissionPc);
-                    }));
+                    })));
                 return new Scope(callbacks);
             }
             catch
@@ -96,6 +98,47 @@ namespace OpenGGF.BizHawk.Headless
                 foreach (var callback in callbacks) callback.Dispose();
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Runs one hook. A fail-closed check stays fail-closed: it is re-raised as InvalidDataException with the
+        /// exact diagnostic context, read only from the observer's own surface (FIFO, count, caller, Game_mode).
+        /// </summary>
+        private void Guard(IGpgxHost host, ICpuRegisterReader cpu, uint hook, Action body)
+        {
+            try
+            {
+                body();
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new InvalidDataException(exception.Message + " " + Context(host, cpu, hook), exception);
+            }
+        }
+
+        private string Context(IGpgxHost host, ICpuRegisterReader cpu, uint hook)
+        {
+            var text = new System.Text.StringBuilder("[");
+            int frame;
+            try { frame = diagnosticClock(); } catch (Exception) { frame = -1; }
+            text.Append("raw_frame ").Append(frame).Append(", hook $").Append(hook.ToString("X4"));
+            try { text.Append(", caller $").Append(ReturnAddress(host, cpu).ToString("X6")); }
+            catch (InvalidDataException) { text.Append(", caller ?"); }
+            int word = S3KRam.U16(host, S3KRam.KosDecompQueueCount);
+            text.Append(", game_mode $").Append(S3KRam.U8(host, S3KRam.GameMode).ToString("X2"))
+                .Append(", count ").Append(word & 0x7FFF).Append(" (word $").Append(word.ToString("X4")).Append(")")
+                .Append(", epoch ").Append(epoch).Append(", ledger ").Append(queue.Count);
+            for (int i = 0; i < queue.Count; i++)
+                text.Append(", expected[").Append(i).Append("] ").Append(queue[i].Source.ToString("X8")).Append('>')
+                    .Append(queue[i].Destination.ToString("X8")).Append(" ord ").Append(queue[i].Ordinal)
+                    .Append(" pc $").Append(queue[i].SubmissionPc.ToString("X4"));
+            for (int i = 0; i < S3KRam.KosDecompQueueCapacity; i++)
+            {
+                int entry = S3KRam.KosDecompQueue + i * S3KRam.KosDecompQueueEntrySize;
+                text.Append(", actual[").Append(i).Append("] ").Append(S3KRam.U32(host, entry).ToString("X8")).Append('>')
+                    .Append(S3KRam.U32(host, entry + 4).ToString("X8"));
+            }
+            return text.Append(']').ToString();
         }
 
         public void Reset()
@@ -178,8 +221,21 @@ namespace OpenGGF.BizHawk.Headless
         private static void RequireEntry(IGpgxHost host, int index, Job job)
         {
             int entry = S3KRam.KosDecompQueue + index * S3KRam.KosDecompQueueEntrySize;
-            if (S3KRam.U32(host, entry) != job.Source || S3KRam.U32(host, entry + 4) != job.Destination)
-                throw new InvalidDataException("Exact Kos FIFO descriptor changed before committed retirement.");
+            uint source = S3KRam.U32(host, entry), destination = S3KRam.U32(host, entry + 4);
+            if (source == job.Source && destination == job.Destination) return;
+            // Process_Kos_Queue_EndReached stores the head's end cursors in order, source ($1CD2) then destination
+            // ($1CD6), before the andi at $1CDA clears the busy bit. Set_Kos_Bookmark ($1BF0) saves any V-int rte
+            // address in [Process_Kos_Queue_Main $1C26, Process_Kos_Queue_Done $1CFA) while that bit is set, so a
+            // V-int at $1CD6 or $1CDA leaves the uncommitted head at its own end cursors until Restore_Kos_Bookmark
+            // ($1CFC) resumes it from a later $1C1A; Queue_Kos may append behind it meanwhile. No other ROM
+            // instruction writes the head: the shift runs after the commit and the mode clears zero the count.
+            // The v1 engine recognises the same state by the same ROM-derived shape (HeadRetirementWriteInFlight).
+            if (index == 0 && (S3KRam.U16(host, S3KRam.KosDecompQueueCount) & 0x8000) != 0
+                && source == job.Source + (uint)job.Shape.CompressedLength
+                && (destination == job.Destination
+                    || destination == job.Destination + (uint)job.Shape.DestinationLength))
+                return;
+            throw new InvalidDataException("Exact Kos FIFO descriptor changed before committed retirement.");
         }
         private static uint ReturnAddress(IGpgxHost host, ICpuRegisterReader cpu)
         {

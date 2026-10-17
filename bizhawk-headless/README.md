@@ -189,7 +189,11 @@ from there to `$1B46` is skipped so a module child is not observed twice. Only
 normal Level mode service returning to `$651C` or title-card service returning
 to `$62D8` is classified, and both caller JSR opcodes are verified from supplied
 ROM bytes. Any other service caller contaminates its head sample. Waiting jobs
-receive no units. Resumed heads retain their original source/destination; consumed
+receive no units. Resumed heads retain their original source/destination, with one
+ROM-owned exception: a V-int bookmarked inside `Process_Kos_Queue_EndReached` after its
+`$1CD2`/`$1CD6` stores leaves the still-busy head at its own end cursors (source, then
+destination, from its ROM Kosinski shape) until a later `$1C1A` resumes it. Only that head,
+only with the busy bit set, and only those two cursor states are accepted; consumed
 cursors and decremented count are verified at retirement. Unobserved submissions
 are labeled `head_service_censored` and cannot supply a runtime profile cost.
 
@@ -208,9 +212,13 @@ actual session/reset boundary: pending samples abort rather than emit a cost.
 Snapshots, gameplay RAM, controllers, VDP domains and trace sync points are never
 written by this observer. Caller PC, source/fingerprint and exact FIFO facts own
 classification; scene, fixture name and frame number cannot select behavior.
+A fail-closed observer error still aborts the capture; its message adds the raw frame,
+hook PC, caller, `Game_mode`, count word and the expected (ledger) and actual (RAM) FIFO
+entries, read from the observer's existing surface.
 
 The registered `--filter ExactKosMeasurement --jobs 1` checks exercise same-frame
-service, waiting, interrupted descriptor retention, consumed cursors, caller/hook
+service, waiting, interrupted descriptor retention, bookmarked EndReached heads and
+their negative controls, consumed cursors, caller/hook
 revision gates, aborts, contamination and provenance validation. Existing
 `--filter HardwareTiming --jobs 1` controls keep legacy behavior separately
 qualified. Actual-native interrupted service and independent head/end observation
