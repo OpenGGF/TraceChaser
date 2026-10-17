@@ -234,3 +234,78 @@ after verifying that every consumed source path reproduces its pinned git object
 the `prepare-toolchain.sh` pins. It runs `selftest/s3k-pcm-run.sh` (baseline) or `selftest/m68k-stall-run.sh`
 (candidate: the three existing runners plus `m68k_stall_harness.c`), and writes `identity.json` beside the build.
 It never rewrites a lock in this directory.
+
+## Observation-only 68000 CPU ledger (0005, stall ABI v2)
+
+`0005-m68k-cpu-ledger-v2.patch` applies after 0001-0004 and keeps an exact CPU-time ledger natively. Its scope is
+the Mega Drive cartridge path. It classifies the `m68k.cycles` writes that path makes between instructions, and
+it fails closed on the paths it does not model:
+- any Sega CD frame (`scd.c` restarts `m68k.cycles` outside these hooks): sticky `UNSUPPORTED`;
+- any `m68k_pulse_reset`, which covers power-on, `gpgx_reset`, `system_reset` and cartridge-mapper resets: sticky
+  `RESET`;
+- a bus/address-error frame: sticky `BUS_ERROR`.
+
+Trace exceptions are compiled out (`M68K_EMULATE_TRACE OPT_OFF`). No callback is registered, no caller selects an address or
+range, and no emulated state is written. v1 stays exported and unchanged.
+
+- **Per-instruction time.** The fetch and begin/end hooks sit in both `m68k_run` loops. The begin hook comes after
+  the refresh check; the end hook comes after `USE_CYCLES`. Each instruction's MCLK, minus every classified stall
+  that happened inside it, is accumulated per (PC, context) in a bounded open-addressing bank:
+  - capacity 6,144 slots, 75% load limit, 64 probes;
+  - context is main (0) or interrupt (1).
+
+  `m68k_set_irq_delay` finishes one instruction early and executes the next one inline. The ledger closes the outer
+  instruction after its early `USE_CYCLES` and opens the inline one. Any outer handler work after the VDP write is
+  charged to the inline PC, and so is the inline instruction's base cost, which GPGX charges after
+  `m68k_set_irq_delay` returns. A VInt accepted there is therefore inside the inline instruction, with its base
+  cost as next-interval carry. This follows GPGX's timeline, not program order.
+- **Classified stalls**, each counted per interval:
+  - Z80 accesses to the 68000 bus;
+  - VDP FIFO waits;
+  - 68000-bus DMA freezes, forward and rewind;
+  - Z80-window access latency;
+  - illegal-area lockups;
+  - the stopped-CPU fast path (`STOPPED`);
+  - refresh (counted per event);
+  - interrupt acceptance by level, using the exact `m68ki_cycle_interrupts` value.
+- **Intervals** are VInt to VInt. A level-6 acceptance closes the open bank at the acceptance instant, so the
+  interrupt's own cost belongs to the next interval. An instruction in flight at that instant is split: its time
+  before the acceptance stays in its slot (`straddle_*`), and its remainder is the next interval's carry
+  (`carry_*`). There are three banks: one open and up to two closed but unread.
+- **Acceptance ring.** Each acceptance is recorded with its level, table index, cycles, stacked PC, an
+  inside-instruction flag and a monotonic stamp. The ring holds 512 records per read, more than one per line plus
+  the VInt.
+- **Context** comes from a stack of exception frames. Every 3-word frame push is recorded; it counts as an
+  interrupt frame only when `m68ki_exception_interrupt` announced it, so a TRAP does not switch context.
+  - An RTE whose stack pointer matches the top frame pops it.
+  - An RTE with no matching frame is counted as `synthetic_rte` and leaves the context unchanged; S3K's Kos
+    bookmark resume is one.
+  - Frames unwound past without an RTE are counted as `abandoned_frames`.
+  - These hooks are compiled only into the main CPU (`GPGX_M68K_STALL2_MAIN_CPU`), never into the Sega CD
+    sub-CPU.
+- **Fail closed.** The following failures are sticky:
+  - −3 for capacity or accounting: ring overflow, bank overflow or overrun, frame-stack overflow, begin while
+    active, end without begin, slot overflow;
+  - −4 for a discontinuity or unsupported path: any `m68k_pulse_reset` (including `gpgx_reset`), a bus/address
+    error frame, a Sega CD frame, or a change to the CPU timing state between frames (`m68k.cycles`,
+    `refresh_cycles`, PC, `Z80.cycles`). A loadstate causes the last of these. The check is heuristic: a load whose
+    boundary fields match is not seen, which is why the managed binding also tracks host loads.
+
+  `read_frame` always reports the flags; `take_accepts` and `take_bank` refuse data while any flag is set. The
+  managed binding also refuses reads after a host savestate load (`GpgxHost.LoadGeneration`).
+- **Coverage limits.** The first live proof covered 44 NTSC intervals from a declared-setup S3K ending ingress.
+  The r2 proof repeated those intervals and added 44 PAL intervals.
+  - Both live runs exercised only Z80-bus, in-instruction DMA, refresh and boundary level-6 VInt acceptance.
+  - Straddle/carry, the inline irq-delay split and Z80-window latency have synthetic assertions in
+    `m68k_stall2_harness.c`, which reproduces 0005's call order rather than running the core itself. Neither live
+    run exercised them.
+  - FIFO waits, DMA rewind, lockup and the stopped path have no test. Other interrupt levels also lack interval
+    accounting assertions; the harness uses level 4 only as ring-overflow filler.
+  - SMS/GG frames have no ledger hook or unsupported flag. They produce no intervals and are outside this Mega
+    Drive diagnostic contract; a completion marker alone does not certify valid interval data.
+- **State and size.** All state is in `.invis`. Built with 0001-0005 it is 4,084,952 bytes, under the 4 MiB limit
+  that `build-s3k-stall-v2-observer.sh` enforces.
+
+`build-s3k-stall-v2-observer.sh --series v2` is the published builder plus the v2 series. It is a separate file so
+the hash in `s3k-stall-artifact-lock.json` stays valid. It runs `selftest/m68k-stall2-run.sh`: every earlier runner,
+then `m68k_stall2_harness.c`. Its output provenance is in `s3k-stall-v2-artifact-lock.json`.

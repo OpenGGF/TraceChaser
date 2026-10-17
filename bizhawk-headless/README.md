@@ -193,6 +193,15 @@ receive no units. Resumed heads retain their original source/destination; consum
 cursors and decremented count are verified at retirement. Unobserved submissions
 are labeled `head_service_censored` and cannot supply a runtime profile cost.
 
+`--mode load-time --exact-kos-v2` attaches this observer to the same whole-movie
+load-time run, with direct-submission provenance on, and publishes its stream as
+`load_time_measurements_v2.jsonl` beside `load_time_measurements.jsonl`. Both files go
+through the existing staged, no-replace publication set (a failed capture publishes
+neither), with the same ordinary-exception behaviour as the other text outputs; it is
+not a crash-atomic or durable multi-file guarantee. The switch adds no hook or RAM range beyond the
+observer's fixed set and changes nothing in the v1 stream. It is rejected in every
+other mode, and is diagnostic input for context recovery, not a runtime budget.
+
 Supply explicit ROM/movie SHA identities, fixture name and raw hardware-frame
 clock; dispose the returned registration scope. Call `Reset()` only for the
 actual session/reset boundary: pending samples abort rather than emit a cost.
@@ -293,6 +302,30 @@ The marker records:
 - the managed BizHawk version and the `BizHawk.Emulation.Cores.dll` SHA-256.
 
 These record input identity. They are not a host attestation.
+
+### Draining the 68000 CPU ledger (stall ABI v2)
+
+`--m68k-ledger-window` needs a core built with 0001-0005. It starts from an explicit ingress savestate and its
+provenance JSON (`--ingress-state`, `--ingress-provenance`), advances `--frames` frames with no input, and drains the
+native ledger only between FrameAdvance calls.
+
+- **Ingress.** The provenance must match the ROM, the loaded core, the movie and the state's SHA-256. Its region
+  (`ntsc` or `pal`) is applied the way the producer applied it: `pal` forces Europe on the movie's SyncSettings.
+  `ingress_kind` must be `declared_setup`, the only kind accepted until an authentic ingress producer exists. The
+  ingress is produced outside TraceChaser; authentic movie-only coverage is a separate campaign.
+- **Durability.** Every output stream and savestate is flushed to disk before the completion marker. The marker
+  records each file's SHA-256 and the running host's SHA-256.
+- **Options.** `--ledger off` gives the non-perturbation control. On the S3K ROM only, two options use
+  `Level_frame_counter` as a frame label: `--save-state-when-label-exceeds` and `--audio-label-window`.
+- **Boundary.** The three root flags and the output rules are the same as `--final-pcm-window`.
+- **Outputs:**
+  - `intervals.jsonl`: one row per closed VInt-to-VInt interval. The first row is the partial interval opened by
+    enable and is marked `complete: false`;
+  - `interval-slots.csv`: per-PC count and MCLK by context;
+  - `accepts.jsonl`, `frames.jsonl`, `audio-window.s16` and savestates;
+  - `metadata.json`, written last as the completion marker.
+- **Fails closed** on any native flag, a gap, an empty or unjoined interval, more than one VInt in a frame, or an
+  input-identity mismatch. MCLK conservation is checked separately by the external checker.
 
 ### Capturing a pinned complete-audio raw stream
 
