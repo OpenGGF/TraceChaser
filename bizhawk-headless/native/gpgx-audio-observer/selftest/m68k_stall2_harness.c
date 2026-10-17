@@ -213,6 +213,59 @@ int main(void)
   gpgx_m68k_stall2_end();
   assert(take(&bank, &available) == -3);
 
+  /* m68k_set_irq_delay, in 0005's call order: the outer VDP-control MOVE is finished early (USE_CYCLES then
+     inline_close), the next instruction runs inline (fetch, inline_begin, handler), a VInt is accepted inside it by
+     the trailing m68ki_check_interrupts, the outer handler's remaining work runs, then the loop charges the inline
+     instruction's CYC_INSTRUCTION and calls end. GPGX charges that base after the acceptance, so it is carry. */
+  m68k.cycles = 70000;
+  sp = 0xFFFE00;
+  assert(gpgx_m68k_stall2_enable(2) == 0);
+  instruction(0x6FFC, 0x4E71, 4, 0, 0);
+  accept_between(6, 0x6FFE);                       /* closes the partial bank 0 */
+  handler_return(0x0640);
+  assert(take(&bank, &available) == 0 && available == 1 && bank.sequence == 0);
+  gpgx_m68k_stall2_fetch(0x7000);
+  gpgx_m68k_stall2_begin(0x33C0, sp);              /* move.w d0,(VDP control).l */
+  m68k.cycles += 8 * 7;                            /* handler work up to the VDP write */
+  m68k.cycles += 12 * 7;                           /* USE_CYCLES(CYC_INSTRUCTION[outer]) inside set_irq_delay */
+  gpgx_m68k_stall2_inline_close();
+  gpgx_m68k_stall2_fetch(0x7006);
+  gpgx_m68k_stall2_inline_begin(0x4E71, sp);
+  m68k.cycles += 6 * 7;                            /* inline handler */
+  {
+    uint32_t index = (m68k.cycles / 7) % 10, cost = (index ? 60 - index : 50) * 7;
+    gpgx_m68k_stall2_note_return(0x7008);
+    sp -= 6;
+    gpgx_m68k_stall2_frame_pushed(sp);
+    gpgx_m68k_stall2_accept(6, index, cost);       /* inside the inline instruction */
+    m68k.cycles += cost;
+  }
+  m68k.cycles += 2 * 7;                            /* outer handler work after the VDP write */
+  m68k.cycles += 4 * 7;                            /* loop USE_CYCLES(CYC_INSTRUCTION[inline]) */
+  gpgx_m68k_stall2_end();
+  assert(take(&bank, &available) == 0 && available == 1 && bank.sequence == 1);
+  assert(bank.irq_delay_inline == 1);
+  assert(find(slots, bank.entries, 0x7000, 0, &mclk) == 1 && mclk == (8 + 12) * 7);
+  assert(find(slots, bank.entries, 0x7006, 0, &mclk) == 1 && mclk == 6 * 7);
+  assert(bank.straddle_pc == 0x7006 && bank.straddle_mclk == 6 * 7);
+  handler_return(0x0650);
+  accept_between(6, 0x700A);
+  assert(take(&bank, &available) == 0 && available == 1 && bank.sequence == 2);
+  assert(bank.carry_pc == 0x7006 && bank.carry_mclk == (2 + 4) * 7);
+  assert(gpgx_m68k_stall2_take_accepts(ring, sizeof(ring[0]), GPGX_M68K_STALL2_RING, &count) == 0);
+  assert(count == 3 && ring[1].inside_instruction == 1 && ring[1].return_pc == 0x7008 && ring[1].closes_bank_sequence == 1);
+
+  /* an inline close outside any instruction (no active begin) is an accounting failure */
+  assert(gpgx_m68k_stall2_enable(2) == 0);
+  gpgx_m68k_stall2_inline_close();
+  assert(take(&bank, &available) == -3);
+
+  /* the MD cartridge path only: a Sega CD frame fails the session closed */
+  assert(gpgx_m68k_stall2_enable(2) == 0);
+  gpgx_m68k_stall2_unsupported();
+  assert(take(&bank, &available) == -4);
+  assert(gpgx_m68k_stall2_read_frame(&frame, sizeof(frame)) == 0 && (frame.flags & GPGX_M68K_STALL2_FLAG_UNSUPPORTED));
+
   assert(gpgx_m68k_stall2_disable() == 0);
   assert(gpgx_m68k_stall2_read_frame(&frame, sizeof(frame)) == -1);
   puts("m68k-stall2-harness: ok");

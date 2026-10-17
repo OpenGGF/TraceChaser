@@ -237,8 +237,15 @@ It never rewrites a lock in this directory.
 
 ## Observation-only 68000 CPU ledger (0005, stall ABI v2)
 
-`0005-m68k-cpu-ledger-v2.patch` applies after 0001-0004 and keeps an exact CPU-time ledger natively. It covers
-every write GPGX makes to `m68k.cycles` while enabled. No callback is registered, no caller selects an address or
+`0005-m68k-cpu-ledger-v2.patch` applies after 0001-0004 and keeps an exact CPU-time ledger natively. Its scope is
+the Mega Drive cartridge path. It classifies the `m68k.cycles` writes that path makes between instructions, and
+it fails closed on the paths it does not model:
+- any Sega CD frame (`scd.c` restarts `m68k.cycles` outside these hooks): sticky `UNSUPPORTED`;
+- any `m68k_pulse_reset`, which covers power-on, `gpgx_reset`, `system_reset` and cartridge-mapper resets: sticky
+  `RESET`;
+- a bus/address-error frame: sticky `BUS_ERROR`.
+
+Trace exceptions are compiled out (`M68K_EMULATE_TRACE OPT_OFF`). No callback is registered, no caller selects an address or
 range, and no emulated state is written. v1 stays exported and unchanged.
 
 - **Per-instruction time.** The fetch and begin/end hooks sit in both `m68k_run` loops. The begin hook comes after
@@ -247,15 +254,18 @@ range, and no emulated state is written. v1 stays exported and unchanged.
   - capacity 6,144 slots, 75% load limit, 64 probes;
   - context is main (0) or interrupt (1).
 
-  `m68k_set_irq_delay` finishes one instruction early and executes the next one inline; it is split into those two
-  instructions.
+  `m68k_set_irq_delay` finishes one instruction early and executes the next one inline. The ledger closes the outer
+  instruction after its early `USE_CYCLES` and opens the inline one. Any outer handler work after the VDP write is
+  charged to the inline PC, and so is the inline instruction's base cost, which GPGX charges after
+  `m68k_set_irq_delay` returns. A VInt accepted there is therefore inside the inline instruction, with its base
+  cost as next-interval carry. This follows GPGX's timeline, not program order.
 - **Classified stalls**, each counted per interval:
   - Z80 accesses to the 68000 bus;
   - VDP FIFO waits;
   - 68000-bus DMA freezes, forward and rewind;
   - Z80-window access latency;
   - illegal-area lockups;
-  - the stopped-CPU fast path and Sega CD polling;
+  - the stopped-CPU fast path (`STOPPED`);
   - refresh (counted per event);
   - interrupt acceptance by level, using the exact `m68ki_cycle_interrupts` value.
 - **Intervals** are VInt to VInt. A level-6 acceptance closes the open bank at the acceptance instant, so the
@@ -276,11 +286,19 @@ range, and no emulated state is written. v1 stays exported and unchanged.
 - **Fail closed.** The following failures are sticky:
   - −3 for capacity or accounting: ring overflow, bank overflow or overrun, frame-stack overflow, begin while
     active, end without begin, slot overflow;
-  - −4 for a discontinuity: `gpgx_reset`, a bus/address error frame, or a change to the CPU timing state between
-    frames (`m68k.cycles`, `refresh_cycles`, PC, `Z80.cycles`), which a loadstate causes.
+  - −4 for a discontinuity or unsupported path: any `m68k_pulse_reset` (including `gpgx_reset`), a bus/address
+    error frame, a Sega CD frame, or a change to the CPU timing state between frames (`m68k.cycles`,
+    `refresh_cycles`, PC, `Z80.cycles`). A loadstate causes the last of these. The check is heuristic: a load whose
+    boundary fields match is not seen, which is why the managed binding also tracks host loads.
 
   `read_frame` always reports the flags; `take_accepts` and `take_bank` refuse data while any flag is set. The
   managed binding also refuses reads after a host savestate load (`GpgxHost.LoadGeneration`).
+- **Coverage limits.** The first live proof covered 44 NTSC intervals from a declared-setup S3K ending ingress.
+  - It exercised only Z80-bus, in-instruction DMA, refresh and boundary VInt acceptance.
+  - It did not exercise straddle/carry, HInt or other levels, the inline irq-delay split, FIFO waits, DMA rewind,
+    Z80-window latency, lockup or the stopped path.
+  - Those are covered only by `m68k_stall2_harness.c`, which reproduces 0005's call order rather than the core
+    itself.
 - **State and size.** All state is in `.invis`. Built with 0001-0005 it is 4,084,952 bytes, under the 4 MiB limit
   that `build-s3k-stall-v2-observer.sh` enforces.
 

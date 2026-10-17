@@ -307,9 +307,12 @@ These record input identity. They are not a host attestation.
 provenance JSON (`--ingress-state`, `--ingress-provenance`), advances `--frames` frames with no input, and drains the
 native ledger only between FrameAdvance calls.
 
-- **Ingress.** The provenance must declare `ingress_kind` and match the ROM, the loaded core and the state's
-  SHA-256. The ingress is produced outside TraceChaser. For OpenGGF's S3K ending research it is a declared-setup
-  state with the label `declared_setup`; authentic movie-only coverage is a separate campaign.
+- **Ingress.** The provenance must match the ROM, the loaded core, the movie and the state's SHA-256. Its region
+  (`ntsc` or `pal`) is applied the way the producer applied it: `pal` forces Europe on the movie's SyncSettings.
+  `ingress_kind` must be `declared_setup`, the only kind accepted until an authentic ingress producer exists. The
+  ingress is produced outside TraceChaser; authentic movie-only coverage is a separate campaign.
+- **Durability.** Every output stream and savestate is flushed to disk before the completion marker. The marker
+  records each file's SHA-256 and the running host's SHA-256.
 - **Options.** `--ledger off` gives the non-perturbation control. On the S3K ROM only, two options use
   `Level_frame_counter` as a frame label: `--save-state-when-label-exceeds` and `--audio-label-window`.
 - **Boundary.** The three root flags and the output rules are the same as `--final-pcm-window`.

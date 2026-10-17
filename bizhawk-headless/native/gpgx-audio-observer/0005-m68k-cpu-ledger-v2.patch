@@ -1,5 +1,5 @@
 diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
-index 488cab1e50b7aa1ffd8793078a25bf3076c4f4a4..0c28e1ec7a39443b56f27402e27cb3a003fc21c9 100644
+index 488cab1e50b7aa1ffd8793078a25bf3076c4f4a4..3c9c04f6b3766be53bc0598ada9dbe9b62263fc6 100644
 --- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
 +++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
 @@ -5,6 +5,7 @@
@@ -78,6 +78,14 @@ index 488cab1e50b7aa1ffd8793078a25bf3076c4f4a4..0c28e1ec7a39443b56f27402e27cb3a0
  
      /* Trace m68k_exception, if necessary */
      m68ki_exception_if_trace(); /* auto-disable (see m68kcpu.h) */
+@@ -395,6 +408,7 @@ void m68k_init(void)
+ /* Pulse the RESET line on the CPU */
+ void m68k_pulse_reset(void)
+ {
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_reset());   /* power-on, gpgx_reset, system_reset and cartridge-mapper resets */
+   /* Clear all stop levels */
+   CPU_STOPPED = 0;
+ #if M68K_EMULATE_ADDRESS_ERROR
 diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
 index da20b21499ffc6c7fbdf49ac804ea96de2ad94d2..585fcfd76fdf396ab524b8f7cff6a7ed219de21f 100644
 --- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
@@ -214,7 +222,7 @@ index 7829a74631edbf2d93381c4dcc92aafe141c02c8..22af808ce6c8ee429187b34504bb1d11
    /* average Z80 wait-states when accessing 68k bus (cf https://docs.google.com/document/d/1ST9GbFfPnIjLT5loytFCm3pB0kWQ1Oe34DCBBV8saY8) */
    Z80.cycles += (3 * 15);
 diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/system.c b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
-index d543a649366606ea4934171f962d678382eeeb1b..8d71a5a42bcb2dc54b38cebe977896bc94102520 100644
+index d543a649366606ea4934171f962d678382eeeb1b..a00b68f904a83308051a13b0078ada2056d57baa 100644
 --- a/waterbox/gpgx/Genesis-Plus-GX/core/system.c
 +++ b/waterbox/gpgx/Genesis-Plus-GX/core/system.c
 @@ -351,6 +351,7 @@ void system_reset(void)
@@ -225,7 +233,7 @@ index d543a649366606ea4934171f962d678382eeeb1b..8d71a5a42bcb2dc54b38cebe977896bc
    /* line counters */
    int start, end, line;
  
-@@ -691,10 +692,12 @@ void system_frame_gen(int do_skip)
+@@ -691,10 +692,13 @@ void system_frame_gen(int do_skip)
    dma_endCycles = 0;
    /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
    if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
@@ -234,11 +242,12 @@ index d543a649366606ea4934171f962d678382eeeb1b..8d71a5a42bcb2dc54b38cebe977896bc
  
  void system_frame_scd(int do_skip)
  {
++  GPGX_M68K_STALL2(gpgx_m68k_stall2_unsupported());
 +  GPGX_M68K_STALL2(gpgx_m68k_stall2_frame_begin(m68k.cycles, m68k.refresh_cycles, m68k.pc, Z80.cycles));
    /* line counters */
    int start, end, line;
  
-@@ -1021,6 +1024,7 @@ void system_frame_scd(int do_skip)
+@@ -1021,6 +1025,7 @@ void system_frame_scd(int do_skip)
    dma_endCycles = 0;
    /* observation only (OpenGGF 68000 stall counters): no emulated-state change */
    if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_frame_wrap(mcycles_vdp);
@@ -275,10 +284,10 @@ index 1fdd4362476a5c24c482c3a1b174180e95791108..d194c419d0705d998a79f131916214ba
        }
  
 diff --git a/waterbox/gpgx/cinterface/audio_trace.c b/waterbox/gpgx/cinterface/audio_trace.c
-index 6a1546b11d081b1b4d31001b517903e99d38e3ed..c0ea67a1cfd87cf83fd53a8da5357bc87c4263bc 100644
+index 6a1546b11d081b1b4d31001b517903e99d38e3ed..c4df1a55674fba96473a6f2e7b419c0d36f05527 100644
 --- a/waterbox/gpgx/cinterface/audio_trace.c
 +++ b/waterbox/gpgx/cinterface/audio_trace.c
-@@ -2448,6 +2448,351 @@ ECL_EXPORT int32_t gpgx_m68k_stall_disable(void)
+@@ -2448,6 +2448,354 @@ ECL_EXPORT int32_t gpgx_m68k_stall_disable(void)
    return 0;
  }
  
@@ -530,6 +539,9 @@ index 6a1546b11d081b1b4d31001b517903e99d38e3ed..c0ea67a1cfd87cf83fd53a8da5357bc8
 +
 +void gpgx_m68k_stall2_reset(void) { stall2.flags |= GPGX_M68K_STALL2_FLAG_RESET; }
 +
++/* The ledger supports the MD cartridge path only; a Sega CD frame fails the session closed. */
++void gpgx_m68k_stall2_unsupported(void) { stall2.flags |= GPGX_M68K_STALL2_FLAG_UNSUPPORTED; }
++
 +static int32_t stall2_status(void)
 +{
 +  if (!gpgx_m68k_stall2_enabled) return -1;
@@ -631,10 +643,10 @@ index 6a1546b11d081b1b4d31001b517903e99d38e3ed..c0ea67a1cfd87cf83fd53a8da5357bc8
  { return GPGX_S3K_PCM_ABI_VERSION; }
  
 diff --git a/waterbox/gpgx/cinterface/audio_trace.h b/waterbox/gpgx/cinterface/audio_trace.h
-index 55d257b85d17f52b2ef434c790647aead7b6cef1..9b9b8e9cc627fa90c5e889059721eafc39aa6541 100644
+index 55d257b85d17f52b2ef434c790647aead7b6cef1..cdb7c359d6ee226ad7a0f7a724362385c7c52d09 100644
 --- a/waterbox/gpgx/cinterface/audio_trace.h
 +++ b/waterbox/gpgx/cinterface/audio_trace.h
-@@ -259,6 +259,119 @@ void gpgx_m68k_stall_frame_wrap(uint32_t mcycles);
+@@ -259,6 +259,121 @@ void gpgx_m68k_stall_frame_wrap(uint32_t mcycles);
    do { if (gpgx_m68k_stall_enabled) gpgx_m68k_stall_refresh_events++; } while (0)
  
  
@@ -673,6 +685,7 @@ index 55d257b85d17f52b2ef434c790647aead7b6cef1..9b9b8e9cc627fa90c5e889059721eafc
 +#define GPGX_M68K_STALL2_FLAG_DISCONTINUITY 0x100u
 +#define GPGX_M68K_STALL2_FLAG_RESET 0x200u
 +#define GPGX_M68K_STALL2_FLAG_BUS_ERROR 0x400u
++#define GPGX_M68K_STALL2_FLAG_UNSUPPORTED 0x800u  /* Sega CD frame: scd.c restarts m68k.cycles outside these hooks */
 +
 +struct gpgx_m68k_stall2_slot      /* key: pc[23:0] | context << 24 | 1 << 31 */
 +{
@@ -750,6 +763,7 @@ index 55d257b85d17f52b2ef434c790647aead7b6cef1..9b9b8e9cc627fa90c5e889059721eafc
 +void gpgx_m68k_stall2_frame_begin(uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80);
 +void gpgx_m68k_stall2_frame_end(uint32_t mcycles, uint32_t cycles, uint32_t refresh, uint32_t pc, uint32_t z80);
 +void gpgx_m68k_stall2_reset(void);
++void gpgx_m68k_stall2_unsupported(void);
 +#define GPGX_M68K_STALL2(call) do { if (gpgx_m68k_stall2_enabled) call; } while (0)
  uint8_t gpgx_audio_trace_enter_cpu(uint8_t cpu);
  void gpgx_audio_trace_leave_cpu(uint8_t previous);

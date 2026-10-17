@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json.Linq;
 using OpenGGF.BizHawk.Headless;
 
 namespace OpenGGF.BizHawk.Headless.Tests
@@ -16,6 +17,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase("GpgxM68kStall2NativeTests pin stall ABI v2 layouts", PinsLayouts));
             tests.Add(new TestMain.TestCase("GpgxM68kStall2NativeTests join only complete consecutive intervals", JoinsIntervals));
             tests.Add(new TestMain.TestCase("GpgxM68kStall2NativeTests ledger runner arguments are explicit and unique", ParsesArguments));
+            tests.Add(new TestMain.TestCase("GpgxM68kStall2NativeTests ingress provenance binds kind, inputs and region", ValidatesIngress));
             string expect = Environment.GetEnvironmentVariable("OPENGGF_GPGX_STALL2_EXPECT");
             if (expect == "present")
                 tests.Add(new TestMain.TestCase("GpgxM68kStall2NativeTests live intervals join and a loadstate invalidates the span",
@@ -91,6 +93,30 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "--ingress-state", "s.bin", "--ingress-provenance", "/s.json", "--output", "/o", "--frames", "4" }));
             Expect(() => M68kLedgerWindowRunner.Parse(new[] { M68kLedgerWindowRunner.Flag, "--rom", "/r.gen", "--movie", "/m.bk2",
                 "--ingress-state", "/s.bin", "--ingress-provenance", "/s.json", "--output", "/o", "--frames", "4", "--ledger", "maybe" }));
+        }
+
+        private static JObject Provenance(string kind, string region)
+        {
+            var p = new JObject { ["state_sha256"] = "s", ["core_sha256"] = "c", ["rom_sha1"] = "r", ["movie_sha256"] = "m" };
+            if (kind != null) p["ingress_kind"] = kind;
+            if (region != null) p["region"] = region;
+            return p;
+        }
+
+        private static void ValidatesIngress()
+        {
+            AssertEx.Equal("ntsc", M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "ntsc"), "s", "c", "r", "m"));
+            AssertEx.Equal("pal", M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "pal"), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(null, "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance(null, "ntsc"), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("authentic_movie", "ntsc"), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("", "ntsc"), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", null), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "autodetect"), "s", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "ntsc"), "x", "c", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "ntsc"), "s", "x", "r", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "ntsc"), "s", "c", "x", "m"));
+            Expect(() => M68kLedgerWindowRunner.ValidateIngress(Provenance("declared_setup", "ntsc"), "s", "c", "r", "x"));
         }
 
         private static GpgxHost OpenS3k()

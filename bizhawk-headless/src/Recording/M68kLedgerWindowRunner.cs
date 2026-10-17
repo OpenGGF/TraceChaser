@@ -30,6 +30,39 @@ namespace OpenGGF.BizHawk.Headless
         private const string S3kRomSha1 = "cfbf98c36c776677290a872547ac47c53d2761d6";
         private const int S3kLevelFrameCounter = 0xFE04;   // Level_frame_counter, a frame label only
 
+        /// <summary>The only ingress kind accepted until an authentic (movie-only) ingress producer exists.</summary>
+        internal const string DeclaredSetupIngress = "declared_setup";
+
+        /// <summary>
+        /// Checks the ingress provenance against the actual inputs and returns the region the state was produced
+        /// under ("ntsc" keeps the movie's SyncSettings region; "pal" forces Europe, exactly as the producer did).
+        /// </summary>
+        internal static string ValidateIngress(JObject provenance, string stateSha256, string coreSha256,
+            string romSha1, string movieSha256)
+        {
+            if (provenance == null) throw new InvalidDataException("Ingress provenance is missing.");
+            string kind = (string)provenance["ingress_kind"];
+            if (kind != DeclaredSetupIngress)
+                throw new InvalidDataException("Ingress kind " + (kind ?? "(absent)") + " is not accepted; only "
+                    + DeclaredSetupIngress + " ingress exists.");
+            if ((string)provenance["state_sha256"] != stateSha256) throw new InvalidDataException("Ingress state SHA-256 differs from its provenance.");
+            if ((string)provenance["core_sha256"] != coreSha256) throw new InvalidDataException("Ingress state was produced on another core.");
+            if ((string)provenance["rom_sha1"] != romSha1) throw new InvalidDataException("Ingress state was produced from another ROM.");
+            if ((string)provenance["movie_sha256"] != movieSha256) throw new InvalidDataException("Ingress state was produced from another movie.");
+            string region = (string)provenance["region"];
+            if (region != "ntsc" && region != "pal") throw new InvalidDataException("Ingress provenance region must be ntsc or pal.");
+            return region;
+        }
+
+        private static void WriteDurable(string path, byte[] bytes)
+        {
+            using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+            {
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(true);
+            }
+        }
+
         internal static bool IsRequested(string[] args)
         {
             return args != null && args.Length > 0 && args[0] == Flag;
@@ -140,13 +173,14 @@ namespace OpenGGF.BizHawk.Headless
             byte[] state = File.ReadAllBytes(o.IngressState);
             string stateSha256 = Hex(SHA256.Create().ComputeHash(state));
             JObject provenance = JObject.Parse(File.ReadAllText(o.IngressProvenance));
-            string ingressKind = (string)provenance["ingress_kind"];
-            if (string.IsNullOrEmpty(ingressKind)) throw new InvalidDataException("Ingress provenance must declare ingress_kind.");
-            if ((string)provenance["state_sha256"] != stateSha256) throw new InvalidDataException("Ingress state SHA-256 differs from its provenance.");
-            if ((string)provenance["core_sha256"] != core.Sha256) throw new InvalidDataException("Ingress state was produced on another core.");
-            if ((string)provenance["rom_sha1"] != romSha1) throw new InvalidDataException("Ingress state was produced from another ROM.");
+            string movieSha256 = FinalPcmWindowRunner.Sha256File(o.MoviePath);
+            string region = ValidateIngress(provenance, stateSha256, core.Sha256, romSha1, movieSha256);
+            string ingressKind = DeclaredSetupIngress;
+            string hostSha256 = FinalPcmWindowRunner.Sha256File(typeof(M68kLedgerWindowRunner).Assembly.Location);
             bool s3k = romSha1 == S3kRomSha1;
             Bk2Movie movie = Bk2Reader.Read(o.MoviePath);
+            if (region == "pal")
+                movie.SyncSettings.Region = global::BizHawk.Emulation.Cores.Consoles.Sega.gpgx.LibGPGX.Region.Europe;
             Directory.CreateDirectory(o.OutputDirectory);
             string dir = o.OutputDirectory;
             uint expectedSequence = 0, intervals = 0, accepts = 0;
@@ -181,7 +215,7 @@ namespace OpenGGF.BizHawk.Headless
                         if (o.AudioLabelLo >= 0 && label >= o.AudioLabelLo && label <= o.AudioLabelHi) audioWindow.Write(pcm, 0, pcm.Length);
                         if (o.SaveStateWhenLabelExceeds >= 0 && !saved && label > o.SaveStateWhenLabelExceeds)
                         {
-                            File.WriteAllBytes(Path.Combine(dir, "state-after-label.bin"), host.CloneSavestate());
+                            WriteDurable(Path.Combine(dir, "state-after-label.bin"), host.CloneSavestate());
                             saved = true;
                         }
                         string frameRow = "{\"frame\": " + f + ", \"completed_frame\": " + host.CompletedFrame + ", \"label\": " + label;
@@ -218,13 +252,17 @@ namespace OpenGGF.BizHawk.Headless
                         frames.Write(frameRow + "}\n");
                     }
                     if (o.SaveStateWhenLabelExceeds >= 0 && !saved) throw new InvalidDataException("The label never exceeded the save threshold.");
-                    File.WriteAllBytes(Path.Combine(dir, "state-end.bin"), host.CloneSavestate());
+                    WriteDurable(Path.Combine(dir, "state-end.bin"), host.CloneSavestate());
                     if (o.Ledger)
                     {
                         if (host.LoadGeneration != 1) throw new InvalidDataException("A savestate was loaded during the window.");
                         ledger.Disable();
                     }
-                    foreach (var w in new TextWriter[] { frames, intervalOut, slotOut, acceptOut }) w.Flush();
+                    foreach (var w in new StreamWriter[] { frames, intervalOut, slotOut, acceptOut })
+                    {
+                        w.Flush();
+                        ((FileStream)w.BaseStream).Flush(true);
+                    }
                     audioWindow.Flush(true);
                 }
                 audioHash.TransformFinalBlock(new byte[0], 0, 0);
@@ -238,8 +276,10 @@ namespace OpenGGF.BizHawk.Headless
                 ["ingress_kind"] = ingressKind,
                 ["ingress_state_sha256"] = stateSha256,
                 ["ingress_provenance"] = provenance,
+                ["region"] = region,
+                ["host_sha256"] = hostSha256,
                 ["rom_sha1"] = romSha1,
-                ["movie_sha256"] = FinalPcmWindowRunner.Sha256File(o.MoviePath),
+                ["movie_sha256"] = movieSha256,
                 ["frames"] = o.Frames,
                 ["ledger"] = o.Ledger,
                 ["intervals_complete"] = intervals,
