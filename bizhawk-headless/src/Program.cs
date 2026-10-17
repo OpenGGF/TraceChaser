@@ -52,6 +52,12 @@ namespace BizHawk.Headless.Gpgx
         internal const string RunManifestFileName = "run_manifest.json";
         internal const string LoadTimeFileName = "load_time_measurements.jsonl";
 
+        /// <summary>
+        /// Optional schema-2 exact Kos service stream written beside the v1
+        /// file by --exact-kos-v2 (load-time mode only).
+        /// </summary>
+        internal const string LoadTimeV2FileName = "load_time_measurements_v2.jsonl";
+
         private CommandLineOptions(
             CaptureMode mode,
             string romPath,
@@ -130,6 +136,14 @@ namespace BizHawk.Headless.Gpgx
         /// ignores this value because PLC and player-DPLC audit is mandatory.
         /// </summary>
         public bool LoadQueueState { get; private set; }
+
+        /// <summary>
+        /// Load-time mode only: also attach the existing
+        /// S3kExactKosMeasurementObserver (its fixed hooks and caller checks,
+        /// direct-submission provenance on) and publish its schema-2 stream as
+        /// load_time_measurements_v2.jsonl. The v1 stream is unchanged.
+        /// </summary>
+        public bool ExactKosV2 { get; private set; }
 
         /// <summary>
         /// Trace-mode payload compression, ON by default: physics.csv and
@@ -230,6 +244,11 @@ namespace BizHawk.Headless.Gpgx
             string romPath = Required(values, "--rom");
             string outputDirectory = Required(values, "--output");
             CaptureMode mode = ParseMode(values);
+            if (values.ContainsKey("--exact-kos-v2") && mode != CaptureMode.LoadTime)
+            {
+                throw new ArgumentException(
+                    "Argument --exact-kos-v2 is only supported in load-time mode.");
+            }
             if (mode == CaptureMode.Trace)
             {
                 string traceMoviePath;
@@ -342,7 +361,16 @@ namespace BizHawk.Headless.Gpgx
                     "Final output already exists and will not be replaced: "
                     + finalPath);
             }
-            return new CommandLineOptions(
+            bool exactKosV2 = values.ContainsKey("--exact-kos-v2");
+            string finalV2Path = Path.Combine(
+                fullOutputDirectory, LoadTimeV2FileName);
+            if (exactKosV2 && LinuxPathEntry.Exists(finalV2Path))
+            {
+                throw new IOException(
+                    "Final output already exists and will not be replaced: "
+                    + finalV2Path);
+            }
+            var loadTime = new CommandLineOptions(
                 CaptureMode.LoadTime,
                 Path.GetFullPath(romPath),
                 Path.GetFullPath(moviePath),
@@ -350,6 +378,8 @@ namespace BizHawk.Headless.Gpgx
                 0, 0, null, null, null, 0, false,
                 false,
                 TracePayloadCompressor.DefaultThresholdBytes);
+            loadTime.ExactKosV2 = exactKosV2;
+            return loadTime;
         }
 
         private static CommandLineOptions ParseTrace(
@@ -709,6 +739,7 @@ namespace BizHawk.Headless.Gpgx
         private static bool IsSupportedArgument(string name)
         {
             return name == "--rom"
+                || name == "--exact-kos-v2"
                 || name == "--movie"
                 || name == "--output"
                 || name == "--mode"
@@ -730,7 +761,7 @@ namespace BizHawk.Headless.Gpgx
         private static bool IsValuelessArgument(string name)
         {
             return name == "--compress" || name == "--no-compress"
-                || name == "--load-queue-state";
+                || name == "--load-queue-state" || name == "--exact-kos-v2";
         }
 
         private static string Required(
@@ -1766,7 +1797,7 @@ namespace BizHawk.Headless.Gpgx
                 {
                     LoadTimeMeasurementCaptureRunner.Capture(
                         movie, host, rom, fixture, movieSha256, romSha1,
-                        writers[0]);
+                        writers[0], options.ExactKosV2 ? writers[1] : null);
                     return movie;
                 },
                 ignored =>
@@ -1774,9 +1805,15 @@ namespace BizHawk.Headless.Gpgx
                     + "ROM SHA-1: " + romSha1 + "\n"
                     + "Movie frames: " + movie.FrameCount.ToString(
                         CultureInfo.InvariantCulture) + "\n"
-                    + "Measurements: " + outputPath + "\n",
+                    + "Measurements: " + outputPath + "\n"
+                    + (options.ExactKosV2
+                        ? "Exact Kos v2: " + Path.Combine(options.OutputDirectory,
+                            CommandLineOptions.LoadTimeV2FileName) + "\n"
+                        : string.Empty),
                 new NoReplacePublisher(),
-                new[] { CommandLineOptions.LoadTimeFileName });
+                options.ExactKosV2
+                    ? new[] { CommandLineOptions.LoadTimeFileName, CommandLineOptions.LoadTimeV2FileName }
+                    : new[] { CommandLineOptions.LoadTimeFileName });
         }
 
         private static string ComputeSha256(string path)

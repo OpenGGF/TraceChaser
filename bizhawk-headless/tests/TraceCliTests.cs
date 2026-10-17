@@ -33,6 +33,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TraceCli rejects unknown mode values",
                 RejectsUnknownModeValues));
             tests.Add(new TestMain.TestCase(
+                "TraceCli load-time --exact-kos-v2 is an opt-in load-time switch",
+                LoadTimeExactKosV2IsOptInLoadTimeSwitch));
+            tests.Add(new TestMain.TestCase(
                 "TraceCli complete-audio uses only the pinned games and absolute create-new inputs",
                 CompleteAudioUsesOnlyPinnedGamesAndAbsoluteCreateNewInputs));
             tests.Add(new TestMain.TestCase(
@@ -2557,6 +2560,24 @@ namespace OpenGGF.BizHawk.Headless.Tests
                             "--output", output
                         });
                     AssertEx.Equal(CaptureMode.LoadTime, loadTime.Mode);
+                });
+        }
+
+        private static void LoadTimeExactKosV2IsOptInLoadTimeSwitch()
+        {
+            WithUnusedOutput(
+                output =>
+                {
+                    string[] loadTime = { "--mode", "load-time", "--rom", "game.gen", "--movie", "movie.bk2",
+                        "--output", output };
+                    AssertEx.Equal(false, CommandLineOptions.Parse(loadTime).ExactKosV2);
+                    AssertEx.Equal(true, CommandLineOptions.Parse(Append(loadTime, "--exact-kos-v2")).ExactKosV2);
+                    AssertEx.Throws<ArgumentException>(
+                        () => CommandLineOptions.Parse(Append(Append(loadTime, "--exact-kos-v2"), "--exact-kos-v2")),
+                        "Duplicate argument: --exact-kos-v2");
+                    AssertEx.Throws<ArgumentException>(
+                        () => CommandLineOptions.Parse(Append(TraceArguments(output), "--exact-kos-v2")),
+                        "--exact-kos-v2 is only supported in load-time mode");
                 });
         }
 

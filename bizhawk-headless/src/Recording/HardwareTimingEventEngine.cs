@@ -1522,6 +1522,26 @@ namespace OpenGGF.BizHawk.Headless
             string romSha1,
             TextWriter output)
         {
+            Capture(movie, host, rom, fixture, movieSha256, romSha1, output, null);
+        }
+
+        /// <summary>
+        /// With <paramref name="exactKosV2"/> set, the existing
+        /// S3kExactKosMeasurementObserver also runs over the same movie
+        /// (its fixed hooks and caller checks, direct-submission provenance on)
+        /// and writes its schema-2 stream there. It only reads, so the v1
+        /// stream written to <paramref name="output"/> is unchanged.
+        /// </summary>
+        public static void Capture(
+            Bk2Movie movie,
+            IGpgxHost host,
+            byte[] rom,
+            string fixture,
+            string movieSha256,
+            string romSha1,
+            TextWriter output,
+            TextWriter exactKosV2)
+        {
             if (movie == null) throw new ArgumentNullException("movie");
             if (host == null) throw new ArgumentNullException("host");
             if (rom == null) throw new ArgumentNullException("rom");
@@ -1530,9 +1550,13 @@ namespace OpenGGF.BizHawk.Headless
             var engine = new HardwareTimingEventEngine(
                 rom, output, fixture, movieSha256, romSha1);
             int rawFrame = 0;
+            S3kExactKosMeasurementObserver exact = exactKosV2 == null ? null
+                : new S3kExactKosMeasurementObserver(rom, exactKosV2, fixture, movieSha256, romSha1);
             using (IDisposable observer = host.RegisterExecuteCallback(
                 HardwareTimingEventEngine.ModuleChildSubmissionPc,
                 () => engine.ObserveDirectSubmissions(rawFrame, host)))
+            using (IDisposable exactScope = exact == null ? null
+                : exact.Attach(host, () => rawFrame, includeDirectSubmissions: true))
             using (IEnumerator<Bk2Frame> frames =
                 movie.OpenFrameStream().GetEnumerator())
             {
@@ -1542,6 +1566,7 @@ namespace OpenGGF.BizHawk.Headless
                     if (frame.Power || frame.Reset)
                     {
                         engine.Reset();
+                        if (exact != null) exact.Reset();
                     }
                     ApplyFrame(frame, host);
                     host.Advance();

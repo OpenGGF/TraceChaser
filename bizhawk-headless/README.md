@@ -193,6 +193,13 @@ receive no units. Resumed heads retain their original source/destination; consum
 cursors and decremented count are verified at retirement. Unobserved submissions
 are labeled `head_service_censored` and cannot supply a runtime profile cost.
 
+`--mode load-time --exact-kos-v2` attaches this observer to the same whole-movie
+load-time run, with direct-submission provenance on, and publishes its stream as
+`load_time_measurements_v2.jsonl` beside `load_time_measurements.jsonl`. Both files
+publish together or not at all. The switch adds no hook or RAM range beyond the
+observer's fixed set and changes nothing in the v1 stream. It is rejected in every
+other mode, and is diagnostic input for context recovery, not a runtime budget.
+
 Supply explicit ROM/movie SHA identities, fixture name and raw hardware-frame
 clock; dispose the returned registration scope. Call `Reset()` only for the
 actual session/reset boundary: pending samples abort rather than emit a cost.
