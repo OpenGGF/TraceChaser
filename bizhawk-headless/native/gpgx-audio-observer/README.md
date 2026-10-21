@@ -309,3 +309,97 @@ range, and no emulated state is written. v1 stays exported and unchanged.
 `build-s3k-stall-v2-observer.sh --series v2` is the published builder plus the v2 series. It is a separate file so
 the hash in `s3k-stall-artifact-lock.json` stays valid. It runs `selftest/m68k-stall2-run.sh`: every earlier runner,
 then `m68k_stall2_harness.c`. Its output provenance is in `s3k-stall-v2-artifact-lock.json`.
+
+
+## Constructor reset-prefix diagnostic (0006)
+
+This separately labelled, comparison-only mode adds `0006-constructor-reset-prefix.patch`
+after 0001–0005. Existing audio, PCM and stall ABI versions, source pins and published
+artifact locks are unchanged. The dedicated builder retains the pinned Git-object,
+clang/lld, invisible-section and export checks; build identity remains an output.
+The native observer never changes CPU, clock, IRQ, device or RAM values.
+
+At BizHawk `427556b5`, the managed constructor is in
+`src/BizHawk.Emulation.Cores/Consoles/Sega/gpgx64/GPGX.cs`, not `gpgx/GPGX.cs`.
+It creates Waterbox, calls `Core.gpgx_init`, seals the host and installs services;
+it does not call `FrameAdvance`/`gpgx_advance`. Native `gpgx_init` calls
+`system_init`, genuine `system_reset`, then `gpgx_clear_sram`. The patch records
+CPU reset entry/completion and native init completion inside those calls before
+any main-CPU fetch. A fetch before arm permanently disqualifies that boundary.
+Arming after construction does not perform another reset or claim that a reset
+button is power-on. Reset while armed still invalidates stall ABI v2.
+
+The initial supported profile is the locked-on S3K ROM, ordinary Mega Drive,
+autodetected USA/NTSC, BIOS off, two normal three-button controllers, no firmware,
+no save provider and fresh emulator SRAM (`gpgx_clear_sram`: FF when SRAM is on).
+The CLI does not read or write user saves. Native records expose actual hardware,
+region, geometry, controller systems/devices and SRAM on/detected/custom flags.
+Hard-reset work/Z80 RAM zeroing is a GPGX convention, not a statement about physical
+power-on RAM. Likewise SR is observed: fresh main-CPU BSS has `not_z_flag=0`, so
+reset preserves Z and this profile starts at **2704**, not an assumed 2700.
+
+`gen_reset` aligns its geometry-derived raw phase to seven MCLK and the Z80 phase
+to fifteen. Main `m68k_pulse_reset` reads ROM SSP/PC, charges the compiled reset
+exception table **40*7 = 280 MCLK**, then sets the refresh deadline to the next
+896-MCLK boundary. The observer records those values and the first actual opcode
+fetch, including its decoded IR, before the ordinary refresh test. Retirement
+snapshots follow execution and the normal opcode cycle charge. Data-access
+snapshots follow the mapped handler and report its actual returned/supplied value;
+a 32-bit access is one logical CPU access, not two invented bus timestamps.
+Immediate prefetch words are not a separate bus-cycle trace.
+
+Reset-prefix ABI v1 is independent: `abi_version`, `layout`, `enable`, `read`,
+`disable` under `gpgx_reset_prefix_*`. Layout is 40 uint32 words / 160 bytes,
+128 records maximum, little-endian. Reads copy the entire ordered prefix without
+draining it. Kind 1/2/3 are reset enter/reset complete/native init complete;
+4/5/6/7 are fetch/retire/data read/data write. Word layout:
+
+| Words | Meaning |
+| --- | --- |
+| 0–9 | Kind, ordinal, actual PC, raw MCLK, refresh deadline, SR, CPU IRQ level, Z80 MCLK, Z80 bus/reset state, Z80 bank |
+| 10–12 | Address/value/width for data accesses; for init, packed controller systems/devices and SRAM flags |
+| 13 | Knownness 1: actual reference-emulator value, not physical hardware certainty |
+| 14–29 | D0–D7, A0–A7 |
+| 30–38 | IR, system hardware, region, VDP PAL flag, lines/frame, hardware version, packed IO controls, BIOS mode, ROM size |
+| 39 | Compiled reset cost for kind 2; instruction-start PC for kinds 4–7; otherwise zero |
+
+Capacity or undersized reads fail sticky (-3), never truncate. Late/repeated arm,
+reset, mismatched pre-arm clock/PC, an exception/inline delayed IRQ or unsupported
+producer fails sticky (-4). The managed binding additionally rejects every host
+load, including an identical-state load and a load after capture completion.
+The diagnostic state is invisible and deliberately not savestated: it cannot
+resume a provenance capture after restore. Ordinary core restore/forward behavior
+is checked separately with observer-on/off controls.
+
+The bounded data grammar admits ROM reads, the cold-entry IO control/version
+tests and the first `C00004` word status read. Observation completes only after
+that instruction retires; the emulator continues its normal frame. Other RAM,
+Z80, BIOS/TMSS, write or unsupported device work refuses qualification. This is
+not a CPU bus-cycle model, title-duration/initial-Kos proof, AIZ/SSZ route proof,
+full CPU certification or native heap measurement.
+
+```bash
+observer=/absolute/TraceChaser/bizhawk-headless/native/gpgx-audio-observer
+"$observer/build-reset-prefix-observer.sh" --series reset-prefix \
+  --source /absolute/pinned-source --toolchain /absolute/pinned-toolchain \
+  --output /absolute/external/reset-prefix-build
+"$observer/install-reset-prefix-observer.sh" \
+  --build /absolute/external/reset-prefix-build \
+  --stock /absolute/BizHawk-2.11-linux-x64 --output /absolute/external/reset-prefix-home
+BIZHAWK_HOME=/absolute/external/reset-prefix-home \
+  /absolute/TraceChaser/bizhawk-headless/run.sh --native-reset-prefix \
+  --rom /absolute/S3K.gen --output /absolute/external/reset-prefix-on --observer on \
+  --tracechaser-root /absolute/TraceChaser --input-repository-root /absolute/OpenGGF \
+  --fixture-root /absolute/OpenGGF/src/test/resources/traces
+```
+
+Repeat with `--observer off` and a distinct output to compare exact savestate and
+RAM/register/video/audio checkpoint digests under the same one-frame neutral input
+and profile. `reset-prefix.json` carries all ordered words, source/build/input and
+managed-executable identities; the off report makes no prefix completion claim.
+Both commands require the usual three producer-boundary roots and validate the
+installed core against the current six-patch source.
+Use `OPENGGF_GPGX_RESET_PREFIX_EXPECT=present`, explicit `S3K_ROM_PATH`, and
+`test.sh --filter GpgxResetPrefixNative --jobs 1` for focused live/unit controls.
+The dedicated native builder runs all earlier observer selftests plus the real
+M68K reset-prefix harness. No canonical trace or historical result is updated.

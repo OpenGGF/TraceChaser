@@ -1255,6 +1255,14 @@ namespace BizHawk.Headless.Gpgx
         {
             try
             {
+                if (ResetPrefixRunner.IsRequested(args))
+                {
+                    FinalPcmWindowRunner.RejectDuplicateFlags(args);
+                    string prefixTracechaserRoot, prefixInputRoot, prefixFixtureRoot;
+                    string[] prefixArgs = ExtractBoundaryArguments(args, out prefixTracechaserRoot, out prefixInputRoot, out prefixFixtureRoot);
+                    ValidateProducerBoundary(prefixArgs, prefixTracechaserRoot, prefixInputRoot, prefixFixtureRoot);
+                    return ResetPrefixRunner.Run(prefixArgs, Console.Out);
+                }
                 if (OverrideResumePublisherCommandOptions.IsRequested(args))
                 {
                     OverrideResumePublisherCommandOptions options =

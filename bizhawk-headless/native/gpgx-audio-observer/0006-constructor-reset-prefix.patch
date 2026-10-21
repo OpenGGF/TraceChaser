@@ -1,0 +1,376 @@
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+index 3c9c04f..dae40c2 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.c
+@@ -6,6 +6,7 @@ extern int vdp_68k_irq_ack(int int_level);
+ 
+ #define m68ki_cpu m68k
+ #define GPGX_M68K_STALL2_MAIN_CPU 1
++#include "reset_prefix.h"
+ #define MUL (7)
+ 
+ /* ======================================================================== */
+@@ -239,6 +240,7 @@ void m68k_set_irq_delay(unsigned int int_level)
+     {
+       /* Finish executing current instruction */
+       USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++      gpgx_reset_prefix_unsupported();
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_inline_close());
+ 
+       /* One instruction delay before interrupt */
+@@ -246,8 +248,10 @@ void m68k_set_irq_delay(unsigned int int_level)
+       m68ki_trace_t1() /* auto-disable (see m68kcpu.h) */
+       m68ki_use_data_space() /* auto-disable (see m68kcpu.h) */
+       GPGX_AUDIO_TRACE_INSTRUCTION(GPGX_AUDIO_TRACE_CPU_M68K, REG_PC);
++      gpgx_reset_prefix_fetch();
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+       REG_IR = m68ki_read_imm_16();
++      gpgx_reset_prefix_decoded(REG_IR);
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_inline_begin(REG_IR, REG_SP));
+       m68ki_instruction_jump_table[REG_IR]();
+       m68ki_exception_if_trace() /* auto-disable (see m68kcpu.h) */
+@@ -302,8 +306,10 @@ void m68k_run(unsigned int cycles)
+ #ifdef HOOK_CPU
+       if (UNLIKELY(cpu_hook)) cpu_hook(HOOK_M68K_E, 0, REG_PC, 0);
+ #endif
++      gpgx_reset_prefix_fetch();
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+       REG_IR = m68ki_read_imm_16();
++      gpgx_reset_prefix_decoded(REG_IR);
+       if (m68k.cycles >= m68k.refresh_cycles)
+       {
+         m68k.refresh_cycles = m68k.cycles + (128*7);
+@@ -314,6 +320,7 @@ void m68k_run(unsigned int cycles)
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_begin(REG_IR, REG_SP));
+       m68ki_instruction_jump_table[REG_IR]();
+       USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++      gpgx_reset_prefix_retire();
+       GPGX_M68K_STALL2(gpgx_m68k_stall2_end());
+       m68ki_exception_if_trace();
+     }
+@@ -345,8 +352,10 @@ void m68k_run(unsigned int cycles)
+     GPGX_AUDIO_TRACE_INSTRUCTION_ENABLED(GPGX_AUDIO_TRACE_CPU_M68K, REG_PC);
+ 
+     /* Decode next instruction */
++    gpgx_reset_prefix_fetch();
+     GPGX_M68K_STALL2(gpgx_m68k_stall2_fetch(REG_PC));
+-    REG_IR = m68ki_read_imm_16();
++    REG_IR = m68ki_read_imm_16();
++    gpgx_reset_prefix_decoded(REG_IR);
+ 
+     /* 68K bus access refresh delay (Mega Drive / Genesis specific) */
+     if (m68k.cycles >= m68k.refresh_cycles)
+@@ -354,13 +363,14 @@ void m68k_run(unsigned int cycles)
+       m68k.refresh_cycles = m68k.cycles + (128*7);
+       m68k.cycles += (2*7);
+       GPGX_M68K_STALL_COUNT_REFRESH();
+-      GPGX_M68K_STALL2(gpgx_m68k_stall2_refresh());
++    GPGX_M68K_STALL2(gpgx_m68k_stall2_refresh());
+     }
+ 
+     /* Execute instruction */
+     GPGX_M68K_STALL2(gpgx_m68k_stall2_begin(REG_IR, REG_SP));
+     m68ki_instruction_jump_table[REG_IR]();
+     USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
++    gpgx_reset_prefix_retire();
+     GPGX_M68K_STALL2(gpgx_m68k_stall2_end());
+ 
+     /* Trace m68k_exception, if necessary */
+@@ -408,6 +418,7 @@ void m68k_init(void)
+ /* Pulse the RESET line on the CPU */
+ void m68k_pulse_reset(void)
+ {
++  gpgx_reset_prefix_reset_enter();
+   GPGX_M68K_STALL2(gpgx_m68k_stall2_reset());   /* power-on, gpgx_reset, system_reset and cartridge-mapper resets */
+   /* Clear all stop levels */
+   CPU_STOPPED = 0;
+@@ -447,6 +458,7 @@ void m68k_pulse_reset(void)
+ 
+   /* Synchronize 68k bus refresh mechanism (Mega Drive / Genesis specific) */
+   m68k.refresh_cycles = ((m68k.cycles / (128*7)) * (128*7)) + 128*7;
++  gpgx_reset_prefix_reset_leave(CYC_EXCEPTION[EXCEPTION_RESET]);
+ }
+ 
+ void m68k_pulse_halt(void)
+diff --git a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
+index 585fcfd..c53d4d7 100644
+--- a/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
++++ b/waterbox/gpgx/Genesis-Plus-GX/core/m68k/m68kcpu.h
+@@ -866,6 +866,9 @@ INLINE uint m68ki_read_8(uint address)
+     val = cpu_hook(HOOK_M68K_R, 1, address, val);
+ #endif
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,val,1,0);
++#endif
+   return val;
+ }
+ 
+@@ -886,6 +889,9 @@ INLINE uint m68ki_read_16(uint address)
+     val = cpu_hook(HOOK_M68K_R, 2, address, val);
+ #endif
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,val,2,0);
++#endif
+   return val;
+ }
+ 
+@@ -910,6 +916,9 @@ INLINE uint m68ki_read_32(uint address)
+     val = cpu_hook(HOOK_M68K_R, 4, address, val);
+ #endif
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,val,4,0);
++#endif
+   return val;
+ }
+ 
+@@ -928,6 +937,9 @@ INLINE void m68ki_write_8(uint address, uint value)
+   if (temp->write8) (*temp->write8)(ADDRESS_68K(address),value);
+   else WRITE_BYTE(temp->base, (address) & 0xffff, value);
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,value,1,1);
++#endif
+ #ifdef USE_RAM_DEEPFREEZE
+   if (UNLIKELY(deepfreeze_list_size))
+     for (int i = 0; i < deepfreeze_list_size; i++)
+@@ -951,6 +963,9 @@ INLINE void m68ki_write_16(uint address, uint value)
+   if (temp->write16) (*temp->write16)(ADDRESS_68K(address),value);
+   else *(uint16 *)(temp->base + ((address) & 0xffff)) = value;
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,value,2,1);
++#endif
+ #ifdef USE_RAM_DEEPFREEZE
+   if (UNLIKELY(deepfreeze_list_size))
+     for (int i = 0; i < deepfreeze_list_size; i++)
+@@ -978,6 +993,9 @@ INLINE void m68ki_write_32(uint address, uint value)
+   if (temp->write16) (*temp->write16)(ADDRESS_68K(address+2),value&0xffff);
+   else *(uint16 *)(temp->base + ((address + 2) & 0xffff)) = value;
+ 
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_bus(address,value,4,1);
++#endif
+ #ifdef USE_RAM_DEEPFREEZE
+   if (UNLIKELY(deepfreeze_list_size))
+     for (int i = 0; i < deepfreeze_list_size; i++)
+@@ -1231,7 +1249,10 @@ INLINE void m68ki_set_sr(uint value)
+ 
+ /* Initiate exception processing */
+ INLINE uint m68ki_init_exception(void)
+-{
++{
++#ifdef GPGX_M68K_STALL2_MAIN_CPU
++  gpgx_reset_prefix_unsupported();
++#endif
+   /* Save the old status register */
+   uint sr = m68ki_get_sr();
+ 
+diff --git a/waterbox/gpgx/Makefile b/waterbox/gpgx/Makefile
+index 2bbcd0c..befc18d 100644
+--- a/waterbox/gpgx/Makefile
++++ b/waterbox/gpgx/Makefile
+@@ -24,6 +24,7 @@ CCFLAGS := \
+ 	-DLSB_FIRST \
+ 	-DUSE_32BPP_RENDERING \
+ 	-DHOOK_CPU \
++	-DGPGX_RESET_PREFIX_ENABLED \
+ 	-DINLINE=static\ __inline__ \
+ 	-DcdStream=cdStream \
+ 	-DMAXROMSIZE=33554432 \
+@@ -88,6 +89,7 @@ SRCS = \
+ 	$(GPGX_DIR)/core/vdp_render.c \
+ 	$(GPGX_DIR)/core/z80/z80.c \
+ 	cinterface/cdStreamImpl.c \
++	cinterface/reset_prefix.c \
+ 	cinterface/audio_trace.c \
+ 	cinterface/cinterface.c \
+ 	util/scrc32.c
+diff --git a/waterbox/gpgx/cinterface/cinterface.c b/waterbox/gpgx/cinterface/cinterface.c
+index d063b69..7af1603 100644
+--- a/waterbox/gpgx/cinterface/cinterface.c
++++ b/waterbox/gpgx/cinterface/cinterface.c
+@@ -4,6 +4,7 @@
+ #include <emulibc.h>
+ #include "callbacks.h"
+ #include "audio_trace.h"
++#include "reset_prefix.h"
+ 
+ #include <shared.h>
+ #include <genesis.h>
+@@ -819,6 +820,7 @@ GPGX_EX int gpgx_init(const char* feromextension,
+ 	ECL_ENTRY int (*feload_archive_cb)(const char *filename, unsigned char *buffer, int maxsize),
+ 	struct InitSettings *settings)
+ {
++	gpgx_reset_prefix_init_begin();
+ 	fprintf(stderr, "Initializing GPGX native...\n");
+ 
+ 	cinterface_force_sram = settings->ForceSram;
+@@ -991,6 +993,7 @@ GPGX_EX int gpgx_init(const char* feromextension,
+ 
+ 	update_viewport();
+ 	gpgx_clear_sram();
++	gpgx_reset_prefix_init_end();
+ 
+ 	load_archive_cb = NULL; // don't hold onto load_archive_cb for longer than we need it for
+ 
+diff --git a/waterbox/gpgx/cinterface/reset_prefix.c b/waterbox/gpgx/cinterface/reset_prefix.c
+new file mode 100644
+index 0000000..8e46ae2
+--- /dev/null
++++ b/waterbox/gpgx/cinterface/reset_prefix.c
+@@ -0,0 +1,118 @@
++/* Constructor-reset-to-first-VDP-status observation, native-reset-prefix-20261021.
++ * Inputs: pinned GPGX live state only. Outputs: bounded ordered comparison records.
++ * The observer never supplies values to the CPU, bus, devices, RAM or clocks.
++ */
++#include <stdint.h>
++#include <string.h>
++#include "m68kconf.h"
++#include "shared.h"
++#include "emulibc.h"
++#define GPGX_RESET_PREFIX_ENABLED 1
++#include "reset_prefix.h"
++#define RP_EX ECL_EXPORT
++#define RP_I ECL_INVISIBLE
++RP_I static uint32_t rp_records[GPGX_RESET_PREFIX_CAPACITY][GPGX_RESET_PREFIX_WORDS];
++RP_I static uint32_t rp_count, rp_init, rp_ready, rp_seen_fetch, rp_armed, rp_ever_armed;
++RP_I static uint32_t rp_active, rp_stop, rp_complete, rp_fault, rp_fetch_pc;
++
++static void rp_record(uint32_t kind, uint32_t address, uint32_t value, uint32_t width, uint32_t aux)
++{
++  uint32_t *p, i;
++  if (rp_fault) return;
++  if (rp_count == GPGX_RESET_PREFIX_CAPACITY) { rp_fault=3; return; }
++  p=rp_records[rp_count]; memset(p,0,GPGX_RESET_PREFIX_WORDS*4);
++  p[0]=kind; p[1]=rp_count++; p[2]=m68k.pc; p[3]=m68k.cycles; p[4]=m68k.refresh_cycles;
++  p[5]=m68k_get_reg(M68K_REG_SR); p[6]=m68k.int_level; p[7]=Z80.cycles;
++  p[8]=zstate; p[9]=zbank; p[10]=address; p[11]=value; p[12]=width;
++  /* Knownness=1 means actual emulator value; no claim of physical power-on RAM/register certainty. */
++  p[13]=1;
++  for(i=0;i<16;i++) p[14+i]=m68k_get_reg(M68K_REG_D0+i);
++  p[30]=m68k_get_reg(M68K_REG_IR); p[31]=system_hw; p[32]=region_code;
++  p[33]=vdp_pal; p[34]=lines_per_frame; p[35]=io_reg[0];
++  p[36]=io_reg[4]|((uint32_t)io_reg[5]<<8)|((uint32_t)io_reg[6]<<16);
++  p[37]=config.bios; p[38]=cart.romsize; p[39]=kind>=4?rp_fetch_pc:aux;
++}
++void gpgx_reset_prefix_init_begin(void)
++{
++  /* Only native gpgx_init owns this boundary; reset-button paths never call it. */
++  rp_count=rp_fault=rp_ready=rp_seen_fetch=rp_armed=rp_ever_armed=0;
++  rp_active=rp_stop=rp_complete=0; rp_init=1;
++}
++void gpgx_reset_prefix_reset_enter(void)
++{
++  if (rp_init && !rp_count) rp_record(1,0,0,0,0);
++  else { rp_ready=0; if(rp_ever_armed) rp_fault=4; }
++}
++void gpgx_reset_prefix_reset_leave(uint32_t cost)
++{
++  if (rp_init && rp_count==1) rp_record(2,0,0,0,cost);
++}
++void gpgx_reset_prefix_init_end(void)
++{
++  if (!rp_init || rp_seen_fetch || rp_count!=2) { rp_fault=4; return; }
++  /* Profile payload: actual port systems, pad types and SRAM on/detected/custom flags. */
++  rp_record(3,input.system[0]|((uint32_t)input.system[1]<<8),
++    input.dev[0]|((uint32_t)input.dev[4]<<8),
++    sram.on|((uint32_t)sram.detected<<8)|((uint32_t)sram.custom<<16),0);
++  rp_init=0; rp_ready=1;
++}
++RP_EX uint32_t gpgx_reset_prefix_abi_version(void) { return 1; }
++RP_EX int gpgx_reset_prefix_layout(uint32_t *p,uint32_t count)
++{
++  if(!p || count!=4) return -2;
++  p[0]=160; p[1]=GPGX_RESET_PREFIX_CAPACITY; p[2]=GPGX_RESET_PREFIX_WORDS; p[3]=1; return 0;
++}
++RP_EX int gpgx_reset_prefix_enable(uint32_t abi)
++{
++  if(abi!=1) return -2;
++  if(rp_fault) return -(int)rp_fault;
++  if(!rp_ready || rp_seen_fetch || rp_ever_armed || rp_count!=3 || system_hw!=SYSTEM_MD
++    || config.bios || m68k.int_level || m68k.cycles!=rp_records[2][3]
++    || m68k.refresh_cycles!=rp_records[2][4] || m68k.pc!=rp_records[2][2]
++    || Z80.cycles!=rp_records[2][7]) { rp_fault=4; return -4; }
++  rp_ever_armed=rp_armed=1; return 0;
++}
++RP_EX int gpgx_reset_prefix_read(uint32_t *p,uint32_t capacity,uint32_t *records,uint32_t *status)
++{
++  if(!p || !records || !status) return -2;
++  *records=rp_count; *status=rp_complete;
++  if(rp_fault) return -(int)rp_fault;
++  if(!rp_armed) return -4;
++  if(capacity<rp_count*GPGX_RESET_PREFIX_WORDS) { rp_fault=3; return -3; }
++  memcpy(p,rp_records,rp_count*GPGX_RESET_PREFIX_WORDS*4); return 0;
++}
++RP_EX int gpgx_reset_prefix_disable(void) { rp_armed=0; return 0; }
++void gpgx_reset_prefix_unsupported(void) { if(rp_armed && !rp_complete) rp_fault=4; }
++void gpgx_reset_prefix_fetch(void)
++{
++  rp_seen_fetch=1;
++  if(!rp_armed || rp_complete || rp_fault) return;
++  if(rp_active || m68k.int_level || m68k.pc>=cart.romsize) { rp_fault=4; return; }
++  rp_fetch_pc=m68k.pc; rp_active=1; rp_record(4,0,0,0,0);
++}
++void gpgx_reset_prefix_decoded(uint32_t ir)
++{
++  if(rp_armed && !rp_complete && !rp_fault && rp_active && rp_count
++    && rp_records[rp_count-1][0]==4) rp_records[rp_count-1][30]=ir;
++}
++void gpgx_reset_prefix_retire(void)
++{
++  if(!rp_armed || rp_complete || rp_fault) return;
++  if(!rp_active) { rp_fault=4; return; }
++  rp_record(5,0,0,0,0); rp_active=0;
++  if(rp_stop && !rp_fault) rp_complete=1;
++}
++void gpgx_reset_prefix_bus(uint32_t address,uint32_t value,uint32_t width,uint32_t write)
++{
++  int supported;
++  if(!rp_armed || rp_complete || rp_fault) return;
++  address &= 0xffffff;
++  /* This bounded grammar owns only cold-entry ROM reads, IO control/version tests and the first status read.
++   * TMSS/BIOS-on, RAM, Z80 bus work and all other producers are deliberately unsupported. */
++  supported=!write && ((address<cart.romsize && width<=cart.romsize-address)
++    || (address==0xa10008 && width==4) || (address==0xa1000c && width==2)
++    || (address==0xa10001 && width==1) || (address==0xc00004 && width==2));
++  if(!rp_active || !supported) { rp_fault=4; return; }
++  rp_record(write?7:6,address,value,width,0);
++  if(address==0xc00004) rp_stop=1;
++}
+diff --git a/waterbox/gpgx/cinterface/reset_prefix.h b/waterbox/gpgx/cinterface/reset_prefix.h
+new file mode 100644
+index 0000000..a1b1822
+--- /dev/null
++++ b/waterbox/gpgx/cinterface/reset_prefix.h
+@@ -0,0 +1,28 @@
++/* Passive constructor-reset prefix, task native-reset-prefix-20261021. No control or clock writes. */
++#ifndef GPGX_RESET_PREFIX_H
++#define GPGX_RESET_PREFIX_H
++#include <stdint.h>
++#define GPGX_RESET_PREFIX_WORDS 40
++#define GPGX_RESET_PREFIX_CAPACITY 128
++#ifdef GPGX_RESET_PREFIX_ENABLED
++void gpgx_reset_prefix_init_begin(void);
++void gpgx_reset_prefix_init_end(void);
++void gpgx_reset_prefix_reset_enter(void);
++void gpgx_reset_prefix_reset_leave(uint32_t cost);
++void gpgx_reset_prefix_fetch(void);
++void gpgx_reset_prefix_decoded(uint32_t ir);
++void gpgx_reset_prefix_retire(void);
++void gpgx_reset_prefix_bus(uint32_t address, uint32_t value, uint32_t width, uint32_t write);
++void gpgx_reset_prefix_unsupported(void);
++#else
++#define gpgx_reset_prefix_init_begin() ((void)0)
++#define gpgx_reset_prefix_init_end() ((void)0)
++#define gpgx_reset_prefix_reset_enter() ((void)0)
++#define gpgx_reset_prefix_reset_leave(cost) ((void)0)
++#define gpgx_reset_prefix_fetch() ((void)0)
++#define gpgx_reset_prefix_decoded(ir) ((void)0)
++#define gpgx_reset_prefix_retire() ((void)0)
++#define gpgx_reset_prefix_bus(a,v,w,d) ((void)0)
++#define gpgx_reset_prefix_unsupported() ((void)0)
++#endif
++#endif

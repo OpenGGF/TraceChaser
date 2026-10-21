@@ -311,6 +311,19 @@ The marker records:
 
 These record input identity. They are not a host attestation.
 
+### Observing constructor reset through the first VDP status read
+
+`--native-reset-prefix --rom ABS --output ABS --observer on|off` runs one neutral
+hardware frame with the fixed fresh S3K USA/NTSC, BIOS-off, three-button profile.
+It requires the usual three producer-boundary root flags and the separately
+built 0001–0006 core, and verifies its installed build,
+source pins and current patch digests. The on report contains the genuine
+constructor reset and bounded ordered first fetch/retire/data-access records;
+the off report supplies the matched checkpoint control. Outputs stay outside the producer and consumer
+checkouts and contain no canonical trace. See the [native contract and build
+recipe](native/gpgx-audio-observer/README.md#constructor-reset-prefix-diagnostic-0006)
+for field layout, fail-closed conditions, restore limits and exact source rules.
+
 ### Draining the 68000 CPU ledger (stall ABI v2)
 
 `--m68k-ledger-window` needs a core built with 0001-0005. It starts from an explicit ingress savestate and its
