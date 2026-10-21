@@ -4,7 +4,8 @@
 
 - Add a source-locked, passive constructor-reset prefix diagnostic through the
   first S3K VDP status read, with ordered register/clock/device observations,
-  fail-closed provenance checks and matched observer-on/off controls.
+  fail-closed provenance checks, exact loaded managed-constructor byte qualification
+  and matched observer-on/off controls.
 
 ## v0.1.0 — 2026-08-29
 

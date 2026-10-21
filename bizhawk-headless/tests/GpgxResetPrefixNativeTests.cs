@@ -336,20 +336,30 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             string source = ResetPrefixRunner.ObserverSourceDirectory();
             JObject identity = IdentityForTest(source);
-            ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123);
+            const string managed = "0144e6e236be68ce126eb771dcb5a9ae7c153a083fa0333f345ac37b4a60acf7";
+            JObject sourceLock = JObject.Parse(File.ReadAllText(Path.Combine(source, "source-lock.json")));
+            AssertEx.Equal(managed, (string)sourceLock["stock"]["cores_sha256"]);
+            ResetPrefixRunner.ValidateManagedCorePin(sourceLock, managed);
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateManagedCorePin(sourceLock, new string('0', 64)), "managed constructor");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateManagedCorePin(sourceLock, null), "managed constructor");
+            JObject wrongSourceLock = (JObject)sourceLock.DeepClone(); wrongSourceLock.Remove("stock");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateManagedCorePin(wrongSourceLock, managed), "managed constructor");
+            ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed);
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123,
+                new string('0', 64)), "managed constructor");
             foreach (string key in new[] { "schema", "series", "compressed_sha256", "decompressed_sha256" })
             {
                 identity = IdentityForTest(source); identity[key] = "wrong";
-                AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123), "identity");
+                AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed), "identity");
             }
             identity = IdentityForTest(source); identity["source"]["bizhawk_commit"] = new string('0', 40);
-            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123), "source commits");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed), "source commits");
             identity = IdentityForTest(source); identity["reset_prefix_abi"]["capacity"] = 127;
-            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123), "ABI");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed), "ABI");
             identity = IdentityForTest(source); identity["patches"][5]["sha256"] = new string('0', 64);
-            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123), "patch identity");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed), "patch identity");
             identity = IdentityForTest(source); ((JArray)identity["patches"]).RemoveAt(5);
-            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123), "inventory");
+            AssertEx.Throws<InvalidDataException>(() => ResetPrefixRunner.ValidateIdentity(identity, source, new string('a', 64), 123, managed), "inventory");
         }
 
         private static void CliOutput()

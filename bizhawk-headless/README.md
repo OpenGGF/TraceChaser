@@ -359,7 +359,16 @@ These record input identity. They are not a host attestation.
 hardware frame with the fixed fresh S3K USA/NTSC, BIOS-off, three-button profile.
 It requires the usual three producer-boundary root flags and the separately
 built 0001–0006 core, and verifies its installed build,
-source pins and current patch digests. The on report contains the genuine
+source pins and current patch digests. Before `GpgxHost.Open`, the actual loaded
+`GPGX` assembly must resolve to the explicit installation's
+`dll/BizHawk.Emulation.Cores.dll` and match `source-lock.json`'s
+`stock.cores_sha256`; a same-version wrong hash refuses. Immediately after
+construction, the loaded assembly and source lock are rechecked. After
+observations and immediately before publication, the native build identity is
+rechecked together with those managed checks. The report records the verified actual loaded
+managed digest. This constructor/source qualification does not attest host or
+live memory or qualify the stock native-clock adapter's reset semantics.
+The on report contains the genuine
 constructor reset and bounded ordered first fetch/retire/data-access records;
 the off report supplies the matched checkpoint control. Outputs stay outside the producer and consumer
 checkouts and contain no canonical trace. See the [native contract and build

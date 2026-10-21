@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
+using System.Text;
+using BizHawk.Emulation.Cores.Consoles.Sega.gpgx;
 using System.Security.Cryptography;
 using BizHawk.Headless.Gpgx;
 using Newtonsoft.Json;
@@ -83,8 +86,10 @@ namespace OpenGGF.BizHawk.Headless
         // Build provenance is checked against the installed compressed core and the current source patch bytes.
         // It is a source/build identity check, not host attestation. The recorded raw hash is independently verified
         // only when the installation also carries an uncompressed core; Waterbox loads the compressed core first.
-        internal static void ValidateIdentity(JObject identity, string source, string compressedSha256, long compressedSize)
+        internal static void ValidateIdentity(JObject identity, string source, string compressedSha256, long compressedSize,
+            string loadedManagedSha256)
         {
+            ValidateManagedCorePin(JObject.Parse(File.ReadAllText(Path.Combine(source, "source-lock.json"))), loadedManagedSha256);
             if (identity == null || (string)identity["schema"] != BuildSchema || (string)identity["series"] != "reset-prefix")
                 throw new InvalidDataException("Reset-prefix native build identity schema/series differs.");
             JObject sources = identity["source"] as JObject, abi = identity["reset_prefix_abi"] as JObject;
@@ -109,6 +114,60 @@ namespace OpenGGF.BizHawk.Headless
             }
         }
 
+        // A version/path report alone does not authenticate the managed GPGX constructor at427.
+        // Enforce the checked-in stock byte pin, using the actual loaded GPGX assembly rather than an
+        // assumed installation filename. This is artifact/module identity, not live-IL or host attestation.
+        internal static void ValidateManagedCorePin(JObject sourceLock, string loadedManagedSha256)
+        {
+            string expected = (string)sourceLock?["stock"]?["cores_sha256"];
+            if ((string)sourceLock?["schema"] != "openggf.gpgx-observer-source-lock.v1"
+                || (string)sourceLock?["bizhawk"]?["commit"] != BizHawkCommit
+                || !IsSha256(expected) || loadedManagedSha256 != expected)
+                throw new InvalidDataException("Reset-prefix managed constructor bytes differ from source-lock stock.cores_sha256.");
+        }
+
+        internal sealed class ManagedConstructorIdentity
+        {
+            internal Assembly Assembly;
+            internal string LoadedPath, Sha256, SourceLockSha256, ModuleVersionId;
+            internal void RequireSame(ManagedConstructorIdentity other)
+            {
+                if (!ReferenceEquals(Assembly, other.Assembly) || LoadedPath != other.LoadedPath
+                    || Sha256 != other.Sha256 || SourceLockSha256 != other.SourceLockSha256
+                    || ModuleVersionId != other.ModuleVersionId)
+                    throw new InvalidDataException("Reset-prefix loaded managed constructor identity changed during capture.");
+            }
+        }
+
+        internal static ManagedConstructorIdentity ReadManagedConstructorIdentity(string source, string dllDirectory)
+        {
+            Assembly loaded = typeof(GPGX).Assembly;
+            string location = loaded.Location;
+            if (loaded.IsDynamic || string.IsNullOrEmpty(location)
+                || loaded.GetName().Name != "BizHawk.Emulation.Cores"
+                || loaded.GetName().Version != new Version(2, 11, 0, 0))
+                throw new InvalidDataException("Reset-prefix loaded managed constructor assembly is unavailable or unqualified.");
+            string path = LinuxPathEntry.ResolveProposedPath(location);
+            string expected = LinuxPathEntry.ResolveProposedPath(Path.Combine(dllDirectory, "BizHawk.Emulation.Cores.dll"));
+            if (path != expected)
+                throw new InvalidDataException("Reset-prefix loaded managed constructor path differs from the explicit installation.");
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                if (assembly.GetName().Name == "BizHawk.Emulation.Cores" && !ReferenceEquals(assembly, loaded))
+                    throw new InvalidDataException("Reset-prefix has ambiguous loaded managed constructor assemblies.");
+            byte[] sourceLockBytes = File.ReadAllBytes(Path.Combine(source, "source-lock.json"));
+            JObject sourceLock = JObject.Parse(Encoding.UTF8.GetString(sourceLockBytes));
+            byte[] image = File.ReadAllBytes(path);
+            string hash = Digest(image);
+            ValidateManagedCorePin(sourceLock, hash); // Reject same-version wrong bytes before any Open/constructor.
+            // Compare the loaded module identity with the authenticated disk image. Reflection-only loading
+            // inspects metadata and cannot run the GPGX constructor. Concurrent artifact/IL mutation is unsupported.
+            Guid module = loaded.ManifestModule.ModuleVersionId;
+            if (module == Guid.Empty || module != Assembly.ReflectionOnlyLoad(image).ManifestModule.ModuleVersionId)
+                throw new InvalidDataException("Reset-prefix loaded managed constructor module differs from authenticated bytes.");
+            return new ManagedConstructorIdentity { Assembly = loaded, LoadedPath = path, Sha256 = hash,
+                SourceLockSha256 = Digest(sourceLockBytes), ModuleVersionId = module.ToString("D") };
+        }
+
         private static bool IsSha256(string text)
         {
             if (text == null || text.Length != 64) return false;
@@ -116,10 +175,10 @@ namespace OpenGGF.BizHawk.Headless
             return true;
         }
 
-        private static JObject ReadIdentity(string root, string source, FinalPcmWindowRunner.CoreIdentity core)
+        private static JObject ReadIdentity(string root, string source, FinalPcmWindowRunner.CoreIdentity core, string loadedManagedSha256)
         {
             JObject identity = JObject.Parse(File.ReadAllText(Path.Combine(root, "gpgx-audio-observer-source/identity.json")));
-            ValidateIdentity(identity, source, core.Sha256, core.Size);
+            ValidateIdentity(identity, source, core.Sha256, core.Size, loadedManagedSha256);
             string raw = Path.Combine(root, "dll/gpgx.wbx");
             if (File.Exists(raw) && (FinalPcmWindowRunner.Sha256File(raw) != (string)identity["decompressed_sha256"]
                 || new FileInfo(raw).Length != (long)identity["decompressed_size"]))
@@ -143,7 +202,8 @@ namespace OpenGGF.BizHawk.Headless
             BizHawkInstallation installation = BizHawkInstallation.Validate(Environment.GetEnvironmentVariable("BIZHAWK_HOME"));
             var core = FinalPcmWindowRunner.CoreIdentity.Read(installation.DllDirectory);
             if (core.File != "gpgx.wbx.zst") throw new InvalidDataException("Reset-prefix requires the identified installed compressed core.");
-            JObject identity = ReadIdentity(root, source, core);
+            ManagedConstructorIdentity managed = ReadManagedConstructorIdentity(source, installation.DllDirectory);
+            JObject identity = ReadIdentity(root, source, core, managed.Sha256);
             string identityPath = Path.Combine(root, "gpgx-audio-observer-source/identity.json");
             string identitySha256 = FinalPcmWindowRunner.Sha256File(identityPath);
             string executableSha256 = FinalPcmWindowRunner.Sha256File(typeof(ResetPrefixRunner).Assembly.Location);
@@ -152,6 +212,7 @@ namespace OpenGGF.BizHawk.Headless
             using (new NativeStandardOutputSilencer())
             using (GpgxHost host = GpgxHost.Open(options.RomPath, GpgxHost.CreateGhz1SyncSettings()))
             {
+                managed.RequireSame(ReadManagedConstructorIdentity(source, installation.DllDirectory));
                 GpgxResetPrefixNative observer = options.Observer ? GpgxResetPrefixNative.Bind(host) : null;
                 try
                 {
@@ -181,7 +242,8 @@ namespace OpenGGF.BizHawk.Headless
                 || identitySha256 != FinalPcmWindowRunner.Sha256File(identityPath)
                 || executableSha256 != FinalPcmWindowRunner.Sha256File(typeof(ResetPrefixRunner).Assembly.Location))
                 throw new InvalidDataException("Reset-prefix input identity changed while the diagnostic ran.");
-            ReadIdentity(root, source, core);
+            managed.RequireSame(ReadManagedConstructorIdentity(source, installation.DllDirectory));
+            ReadIdentity(root, source, core, managed.Sha256);
             var rows = new JArray();
             if (capture != null)
                 foreach (var record in capture.Records)
@@ -210,12 +272,17 @@ namespace OpenGGF.BizHawk.Headless
                 ["installed_core_sha256"] = core.Sha256, ["installed_core_bytes"] = core.Size,
                 ["installed_decompressed_core_verified"] = File.Exists(Path.Combine(root, "dll/gpgx.wbx")),
                 ["harness_executable_sha256"] = executableSha256, ["bizhawk_managed_version"] = installation.ManagedVersion.ToString(),
-                ["managed_cores_sha256"] = FinalPcmWindowRunner.Sha256File(Path.Combine(installation.DllDirectory, "BizHawk.Emulation.Cores.dll")),
+                ["managed_cores_sha256"] = managed.Sha256,
+                ["managed_cores_loaded_path"] = managed.LoadedPath, ["managed_cores_module_version_id"] = managed.ModuleVersionId,
+                ["managed_source_lock_sha256"] = managed.SourceLockSha256,
+                ["managed_constructor_verification"] = "source-lock stock byte pin and loaded module checked before Open, after constructor/observations and before publication",
                 ["savestate_sha256"] = Digest(state), ["savestate_bytes"] = state.Length,
                 ["ram_register_video_audio_checkpoint_sha256"] = Digest(checkpoint), ["checkpoint_bytes"] = checkpoint.Length,
                 ["limits"] = "Prefix ends at first VDP status retirement. No title timing, AIZ, SSZ, full CPU or native heap claim."
             };
             RequireNewOutput(output);
+            managed.RequireSame(ReadManagedConstructorIdentity(source, installation.DllDirectory));
+            ReadIdentity(root, source, core, managed.Sha256);
             using (var staged = new NoReplacePublisher().StageAll(output, new[] { "reset-prefix.json" },
                 writers => writers[0].Write(report.ToString(Formatting.Indented) + "\n"))) staged.Publish();
             stdout.WriteLine("NATIVE_RESET_PREFIX observer=" + (options.Observer ? "on" : "off")

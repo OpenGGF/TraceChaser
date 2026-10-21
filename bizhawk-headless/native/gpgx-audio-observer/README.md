@@ -329,6 +329,25 @@ any main-CPU fetch. A fetch before arm permanently disqualifies that boundary.
 Arming after construction does not perform another reset or claim that a reset
 button is power-on. Reset while armed still invalidates stall ABI v2.
 
+Constructor qualification also requires the actual loaded managed core. Before
+`GpgxHost.Open`, resolved `typeof(GPGX).Assembly.Location` must equal the resolved
+explicit `BIZHAWK_HOME/dll/BizHawk.Emulation.Cores.dll`, and its file SHA-256 must
+match [`source-lock.json`](source-lock.json) `stock.cores_sha256`:
+`0144e6e236be68ce126eb771dcb5a9ae7c153a083fa0333f345ac37b4a60acf7`.
+A same-version assembly with different bytes refuses qualification. Immediately
+after construction, the actual loaded assembly and source lock are rechecked.
+After observations and immediately before report publication, the native build
+identity is rechecked together with those managed assembly/source-lock checks.
+Reports carry the verified loaded assembly digest, rather than a digest inferred
+from the expected installation filename.
+
+This pin qualifies the managed constructor/source boundary; it does not attest
+the host or live memory, or establish reset proof for `StockKosLiveClockReader`.
+The managed gate leaves native patch, toolchain and core bytes unchanged, so prior
+native controls remain applicable only to those exact verified identities. The
+maintained C# executable must be freshly qualified; results belong in the existing
+dated task artifact.
+
 The initial supported profile is the locked-on S3K ROM, ordinary Mega Drive,
 autodetected USA/NTSC, BIOS off, two normal three-button controllers, no firmware,
 no save provider and fresh emulator SRAM (`gpgx_clear_sram`: FF when SRAM is on).
