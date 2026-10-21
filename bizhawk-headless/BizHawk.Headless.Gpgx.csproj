@@ -85,6 +85,7 @@
     <Compile Include="src/Recording/ResetPrefixRunner.cs" />
     <Compile Include="src/Core/GpgxHost.AudioObserver.cs" />
     <Compile Include="src/Core/GpgxAudioObserverAdapter.cs" />
+    <Compile Include="src/Core/StockKosLiveClockReader.cs" />
     <Compile Include="src/Core/IGpgxHost.cs" />
     <Compile Include="src/Core/IMainRamWriter.cs" />
     <Compile Include="src/Core/MutableController.cs" />
