@@ -32,6 +32,21 @@ Use `--trace-profile complete_run` for an unnamed segment collection or
 and special stages in one movie and publishes all discovered members as one
 no-replace transaction.
 
+When a named or detour manifest is emitted after every original BK2 input
+row has advanced the core, it includes `expected_movie_end_mode` sampled from
+the final frame's `Game_mode` RAM byte (`$F600`), before segment finalization.
+The supported observations are `level` (`$0C` / PreLevel `$8C`) and
+`title_screen` (`$04`). The ROM's `GameLoop` / `GameModes` dispatcher
+(`sonic3k.asm:433-467`) distinguishes Save Screen `$4C` from Level; the
+segmentation low-nibble family is not an endpoint classifier. Other modes
+leave the optional field absent. Any effective-movie-length override also
+leaves it absent, including an override equal to the real input count.
+
+This observation authenticates the mode at original input exhaustion only.
+`complete_run`, a movie name, and an observed `level` endpoint do not establish
+campaign completion. Recorder correctness and independent review still precede
+authoritative fixture use; existing manifests are never filled in by hand.
+
 ```bash
 "$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
   --tracechaser-root "$TRACECHASER_ROOT" \

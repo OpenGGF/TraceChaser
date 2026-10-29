@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sample S3K manifest terminal mode after original movie input exhaustion;
+  omit unsupported modes and diagnostic capture bounds without changing rows.
 - Add a source-locked, passive constructor-reset prefix diagnostic through the
   first S3K VDP status read, with ordered register/clock/device observations,
   fail-closed provenance checks, exact loaded managed-constructor byte qualification

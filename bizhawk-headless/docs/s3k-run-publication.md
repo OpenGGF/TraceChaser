@@ -9,6 +9,15 @@ and never selects parser or replay behavior. Level and bonus payloads use the
 row. Optional hardware timing uses one module-plus-direct timing grammar.
 There is no numbered Lua stamp, CSV version, or secondary timing-schema axis.
 
+Native S3K manifests optionally record `expected_movie_end_mode` from the raw
+`Game_mode` byte after the last actual BK2 input advance, before finalization.
+Only unoverridden complete-input captures qualify. The ROM dispatch table
+maps `$04` to `title_screen` and `$0C` / PreLevel `$8C` to `level`; Save Screen
+`$4C` and other unsupported modes omit the field. See the maintained
+[S3K capture guide](../../docs/capture-s3k.md) for scope and limitations.
+This additive endpoint observation changes only the manifest; it neither
+changes segment boundaries/rows nor asserts that a campaign completed.
+
 Every candidate remains outside the installed fixture root until the strict
 v5 validator, literal comparator, candidate-root replay, native gates, and
 explicit publication review succeed. The maintained workflow is

@@ -262,6 +262,7 @@ namespace OpenGGF.BizHawk.Headless
                 true, movieLength, 0, 0);
             segmenter.SegmentOpened = state.OpenSegment;
             segmenter.SegmentClosed = state.CloseSegment;
+            string expectedMovieEndMode = null;
 
             using (IDisposable directSubmissionObserver =
                 host.RegisterExecuteCallback(
@@ -316,6 +317,18 @@ namespace OpenGGF.BizHawk.Headless
                     segmenter.ApplyFrameCap(host.CompletedFrame);
                     if (segmenter.Finished)
                     {
+                        // Only original input exhaustion authenticates a movie
+                        // endpoint. An effective-length override is a diagnostic
+                        // capture bound, even when it equals the actual length.
+                        // Sample before sink finalization/disposal, with no extra
+                        // advance and no dependence on the last exported row.
+                        if (effectiveMovieLength == 0
+                            && advanced == movie.FrameCount
+                            && host.CompletedFrame == movie.FrameCount)
+                        {
+                            expectedMovieEndMode = MapExpectedMovieEndMode(
+                                S3KRam.U8(host, S3KRam.GameMode));
+                        }
                         break;
                     }
 
@@ -357,12 +370,31 @@ namespace OpenGGF.BizHawk.Headless
                     runId,
                     sourceBk2,
                     state.ManifestSegments,
-                    segmenter.Transitions);
+                    segmenter.Transitions,
+                    expectedMovieEndMode);
             }
             return new S3KCompleteRunCaptureResult(
                 state.ManifestSegments,
                 segmenter.Transitions,
                 manifestJson);
+        }
+
+        private static string MapExpectedMovieEndMode(byte gameMode)
+        {
+            // Locked-on S3K GameLoop masks with $7C before GameModes
+            // dispatch (sonic3k.asm:433-467). Bit 7 marks PreLevel; $4C
+            // dispatches SaveScreen, NOT Level. Do not use the segmenter's
+            // broader low-nibble family here. Unsupported modes remain absent
+            // rather than claiming a terminal state the v5 consumer cannot name.
+            if (gameMode == 0x0C || gameMode == 0x8C)
+            {
+                return "level";
+            }
+            if (gameMode == 0x04)
+            {
+                return "title_screen";
+            }
+            return null;
         }
 
         /// <summary>

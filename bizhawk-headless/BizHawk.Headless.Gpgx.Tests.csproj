@@ -106,6 +106,7 @@
     <Compile Include="tests/S3kExactKosMeasurementObserverTests.cs" />
     <Compile Include="tests/S3KCompleteRunProfileTests.cs" />
     <Compile Include="tests/S3KCompleteRunSegmenterTests.cs" />
+    <Compile Include="tests/S3KMovieEndTests.cs" />
     <Compile Include="tests/S3KHookAbsenceTests.cs" />
     <Compile Include="tests/S3KTraceCaptureRunnerTests.cs" />
     <Compile Include="tests/S3KTraceCsvWriterTests.cs" />

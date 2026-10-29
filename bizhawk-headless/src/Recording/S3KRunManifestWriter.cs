@@ -59,7 +59,8 @@ namespace OpenGGF.BizHawk.Headless
             string runId,
             string sourceBk2,
             IList<RunManifestSegment> segments,
-            IList<RunManifestTransition> transitions)
+            IList<RunManifestTransition> transitions,
+            string expectedMovieEndMode = null)
         {
             return RunManifestWriter.Format(
                 Game,
@@ -67,7 +68,7 @@ namespace OpenGGF.BizHawk.Headless
                 sourceBk2,
                 true,   // string.format('  "source_bk2": %q,\n', ...)
                 S3KCompleteRunMetadataWriter.RomChecksum,
-                null,
+                expectedMovieEndMode,
                 segments,
                 transitions);
         }
