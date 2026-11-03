@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Record opt-in S3K initialization timing for real fresh-load phases after the
+  seeded bootstrap, with ROM-backed identities, explicit serviced/masked rows,
+  reviewed object cuts and fail-closed publication of incomplete loads.
+
 - Record `level_entry_placement_source` in S3K complete-run level/bonus and
   S2/KiS2 level metadata: the ROM's start-table, star-post or special-stage
   placement branch, latched at the first PreLevel frame of each load, with the

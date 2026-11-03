@@ -98,15 +98,18 @@ run-root `initialization_timing.jsonl` stream. Rows use absolute zero-based BK2
 indices across segment gaps. It observes ordered `hold`, `resume`, and `vint_0`
 outcomes for independently fingerprinted display clear, data decode, setup and
 initial assembly. It exports no clocks, CPU state or decoded gameplay values.
-The pre-trace seeded bootstrap is excluded and the first represented fresh load
-has ordinal one. Unsupported ordinary interrupts or unproved initial-object
+The pre-trace seeded bootstrap is excluded: fresh-load hooks arm after the first
+represented row, and the first represented fresh load has ordinal one.
+Competition rejection remains active before that boundary too.
+Unsupported ordinary interrupts or unproved initial-object
 service placements fail capture. Gumball's after-seed and Slots' placement
 cuts are source-derived. A between-callback interruption can also commute to
 completed object work only when the saved loop boundary is valid and every
 subsequent actual callback, including new children, has a reviewed independent
 closure. Unknown callbacks abort the entire staged capture; CPU/slot observations
-never enter the timing stream. A cap during a load or provisional callback tail
-rejects publication. For fixture candidates use `--compress-threshold 0` so this
+never enter the timing stream. A cap before any represented rows, during a
+represented load or during a provisional callback tail rejects publication.
+For fixture candidates use `--compress-threshold 0` so this
 small companion is compressed by the native publisher too. This capability is under qualification;
 its output does not become a canonical fixture without independent review and
 explicit approval of the exact native bytes.

@@ -264,10 +264,12 @@ namespace OpenGGF.BizHawk.Headless
             segmenter.SegmentOpened = state.OpenSegment;
             segmenter.SegmentClosed = state.CloseSegment;
             string expectedMovieEndMode = null;
+            bool representedRunStarted = false;
 
             using (var initialization = initializationTiming == null ? null
                 : new S3kInitializationTimingObserver(host, rom,
-                    S3kInitializationTimingObserver.CreateFingerprintResolver(host, rom)))
+                    S3kInitializationTimingObserver.CreateFingerprintResolver(host, rom),
+                    () => representedRunStarted))
             using (IDisposable directSubmissionObserver =
                 host.RegisterExecuteCallback(
                     HardwareTimingEventEngine.ModuleChildSubmissionPc,
@@ -282,7 +284,6 @@ namespace OpenGGF.BizHawk.Headless
                 // index, which is what the Lua's movie.getinput() takes.
                 var appliedRows = new List<Bk2Frame>();
                 var advanced = 0;
-                bool representedRunStarted = false;
                 while (true)
                 {
                     bool observedSpecialStageResults =
@@ -373,7 +374,11 @@ namespace OpenGGF.BizHawk.Headless
                             + "; expected " + advanced + ".");
                     }
                 }
-                if (initialization != null) initialization.VerifyComplete();
+                if (initialization != null) {
+                    if (!representedRunStarted)
+                        throw new InvalidOperationException("initialization timing has no represented run rows");
+                    initialization.VerifyComplete();
+                }
             }
 
             // End-of-run finalize, then — last of all — the manifest, so it

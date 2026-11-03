@@ -23,8 +23,13 @@ namespace OpenGGF.BizHawk.Headless
         private string lastObjectTailDiagnostic = "no object-tail callback observed";
 
         public S3kInitializationTimingObserver(IGpgxHost host, byte[] rom, Func<string, string> fingerprint)
+            : this(host, rom, fingerprint, () => true) { }
+
+        public S3kInitializationTimingObserver(IGpgxHost host, byte[] rom, Func<string, string> fingerprint,
+            Func<bool> representedRunStarted)
         {
-            if (host == null || rom == null || fingerprint == null) throw new ArgumentNullException();
+            if (host == null || rom == null || fingerprint == null || representedRunStarted == null)
+                throw new ArgumentNullException();
             using (SHA1 sha = SHA1.Create())
             {
                 string identity = BitConverter.ToString(sha.ComputeHash(rom)).Replace("-", "");
@@ -40,6 +45,10 @@ namespace OpenGGF.BizHawk.Headless
                     // that branch publishes SAT and is outside this contract.
                     if (S3KRam.U16(host, 0xFFE8) != 0)
                         throw new InvalidOperationException("competition initialization timing is unsupported");
+                    // The initial seeded bootstrap supplies no timing input.
+                    // Arm only fresh loads after the run's first represented
+                    // row; its cold entry can use other interrupt handlers.
+                    if (!representedRunStarted()) return;
                     events.BeginLoad(); Begin("display_clear"); loading = true;
                 });
                 Register(host, 0x62CC, () => {

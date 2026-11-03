@@ -23,6 +23,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase("InitializationTiming capped phases and provisional tails roll back publication", CappedInitializationRollsBack, game: "s3k"));
             tests.Add(new TestMain.TestCase("InitializationTiming empty SST tail can resume objects without skipping live work", EmptyObjectTail, game: "s3k"));
             tests.Add(new TestMain.TestCase("InitializationTiming verified native hook service and phase ordering", NativeHooks, game: "s3k"));
+            tests.Add(new TestMain.TestCase("InitializationTiming excludes cold bootstrap but rejects represented ordinary interrupts", BootstrapBoundary, game: "s3k"));
         }
 
         private static InitializationTimingEventEngine Started()
@@ -225,23 +226,30 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "initialization-cap-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             try {
-                string moviePath = Path.Combine(root, "two-rows.bk2");
+                string moviePath = Path.Combine(root, "three-rows.bk2");
                 using (var archive = new ZipArchive(File.Create(moviePath), ZipArchiveMode.Create)) {
                     foreach (string name in new[] { "Header.txt", "SyncSettings.json", "Input Log.txt" }) {
                         using (var writer = new StreamWriter(archive.CreateEntry(name).Open())) {
                             writer.Write(name == "Input Log.txt"
-                                ? "[Input]\nLogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 A|P1 B|P1 C|P1 Start|#P2 Up|P2 Down|P2 Left|P2 Right|P2 A|P2 B|P2 C|P2 Start|\n|..|........|........|\n|..|........|........|\n[/Input]\n"
+                                ? "[Input]\nLogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 A|P1 B|P1 C|P1 Start|#P2 Up|P2 Down|P2 Left|P2 Right|P2 A|P2 B|P2 C|P2 Start|\n|..|........|........|\n|..|........|........|\n|..|........|........|\n[/Input]\n"
                                 : "{}");
                         }
                     }
                 }
-                var movie = new Bk2Movie(moviePath) { FrameCount = 2 };
-                for (int scenario = 0; scenario < 3; scenario++) {
+                var movie = new Bk2Movie(moviePath) { FrameCount = 3 };
+                for (int scenario = 0; scenario < 4; scenario++) {
                     int selected = scenario;
                     string output = Path.Combine(root, "capture-" + scenario);
                     var host = new FakeS1Host((h, frame) => {
-                        if (frame == 1) {
+                        // Frame 1 is the first represented row, after the
+                        // segmenter's arm-and-return bootstrap boundary.
+                        if (frame == 2) {
                             h.FireExecuteCallback(0x6000);
+                            if (selected == 3) {
+                                h.Ram[0xF62A] = 0x14;
+                                h.FireExecuteCallback(0x584);
+                                return;
+                            }
                             if (selected == 0) return;
                             h.FireExecuteCallback(0x62CC); h.FireExecuteCallback(0x6326);
                             h.FireExecuteCallback(0x632C); h.FireExecuteCallback(0x6468);
@@ -252,7 +260,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                             WriteLong(h, 0x801C, 103);
                             h.FireExecuteCallback(0x608);
                         }
-                        if (frame == 2 && selected == 2) {
+                        if (frame == 3 && selected == 2) {
                             h.SetCpuRegister("M68K A0", 0xFFFFB206);
                             h.SetCpuRegister("M68K A1", 0x2B928);
                             WriteLong(h, 0xB206, 0x2B928);
@@ -261,21 +269,23 @@ namespace OpenGGF.BizHawk.Headless.Tests
                             h.FireExecuteCallback(0x64DC);
                         }
                     });
-                    host.Ram[S3KRam.GameMode] = S3KRam.GameModeLevel;
+                    host.Ram[S3KRam.GameMode] = (byte)(scenario == 3
+                        ? S3KRam.GameModeLevel | 0x80 : S3KRam.GameModeLevel);
                     using (var session = new NoReplacePublisher().OpenSession(output))
                     using (var sink = new S3KStagedSegmentSink(session)) {
                         TextWriter timing = sink.OpenInitializationTimingStream();
                         Action capture = () => S3KCompleteRunCaptureRunner.Capture(movie, host,
-                            "cap-test", "two-rows.bk2", "2026-11-03", 2, rom, sink, false, timing);
-                        if (scenario < 2) {
-                            AssertEx.Throws<InvalidOperationException>(capture, "incomplete native initialization");
+                            "cap-test", "three-rows.bk2", "2026-11-03", 3, rom, sink, false, timing);
+                        if (scenario != 2) {
+                            AssertEx.Throws<InvalidOperationException>(capture, scenario == 3
+                                ? "no represented run rows" : "incomplete native initialization");
                         } else {
                             capture(); sink.CompleteRunFiles(); session.Complete().Publish();
                         }
                     }
                     AssertEx.Equal(scenario == 2 ? 1 : 0,
                         Directory.GetFiles(output, "initialization_timing.jsonl", SearchOption.AllDirectories).Length);
-                    if (scenario < 2) AssertEx.Equal(0, Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length);
+                    if (scenario != 2) AssertEx.Equal(0, Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length);
                 }
             } finally { Directory.Delete(root, true); }
         }
@@ -311,6 +321,43 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 var output = new StringWriter(); observer.FlushFrame(0, output);
                 AssertEx.Equal(true, output.ToString().Contains("\"phase\":\"initial_presentation\""));
                 AssertEx.Equal(false, output.ToString().Contains("saved_a0"));
+            }
+        }
+
+        private static void BootstrapBoundary()
+        {
+            string path = Environment.GetEnvironmentVariable("S3K_ROM_PATH");
+            if (string.IsNullOrEmpty(path)) throw new TestMain.SkipTestException("S3K_ROM_PATH is not set");
+            var host = new FakeS1Host(null);
+            bool represented = false;
+            using (var observer = new S3kInitializationTimingObserver(host, File.ReadAllBytes(path),
+                phase => Fp, () => represented)) {
+                host.Ram[0xFFE9] = 1;
+                AssertEx.Throws<InvalidOperationException>(() => host.FireExecuteCallback(0x6000), "competition initialization");
+                host.Ram[0xFFE9] = 0;
+                host.Ram[0xF62A] = 0x14;
+                host.FireExecuteCallback(0x6000);
+                host.FireExecuteCallback(0x584);
+                observer.VerifyComplete();
+                var output = new StringWriter();
+                observer.FlushFrame(0, output);
+                AssertEx.Equal("", output.ToString());
+
+                represented = true;
+                host.FireExecuteCallback(0x6000);
+                observer.FlushFrame(1, output);
+                AssertEx.Equal(true, output.ToString().Contains("\"load_ordinal\":1"));
+                represented = false;
+                AssertEx.Throws<InvalidOperationException>(() => host.FireExecuteCallback(0x6000), "nested native initialization");
+                AssertEx.Throws<InvalidOperationException>(() => host.FireExecuteCallback(0x584), "ordinary interrupt");
+                represented = true;
+                host.Ram[0xF62A] = 0;
+                host.FireExecuteCallback(0x62CC); host.FireExecuteCallback(0x6326);
+                host.FireExecuteCallback(0x632C); host.FireExecuteCallback(0x6468);
+                host.FireExecuteCallback(0x647E); host.FireExecuteCallback(0x6484);
+                host.FireExecuteCallback(0x648A); host.FireExecuteCallback(0x64DC);
+                observer.FlushFrame(2, output);
+                observer.VerifyComplete();
             }
         }
 
