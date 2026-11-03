@@ -515,39 +515,7 @@ namespace OpenGGF.BizHawk.Headless
             /// </summary>
             private void AttachGapAdmissionCensus()
             {
-                foreach (RunManifestTransition tx in transitions)
-                {
-                    if (tx.FromSegment < 0 || tx.ToSegment < 0
-                        || tx.FromSegment >= segments.Count
-                        || tx.ToSegment >= segments.Count)
-                    {
-                        continue;
-                    }
-                    RunManifestSegment from = segments[tx.FromSegment];
-                    RunManifestSegment to = segments[tx.ToSegment];
-                    int start = from.Bk2FrameOffset + from.TraceFrameCount;
-                    int end = to.Bk2FrameOffset;
-                    if (start < 0 || end < start || end > physicalLag.Count)
-                    {
-                        continue;
-                    }
-                    var runs = new List<int>();
-                    bool expectLag = false;
-                    int length = 0;
-                    for (int row = start; row < end; row++)
-                    {
-                        if (physicalLag[row] == expectLag)
-                        {
-                            length++;
-                            continue;
-                        }
-                        runs.Add(length);
-                        expectLag = !expectLag;
-                        length = 1;
-                    }
-                    runs.Add(length);
-                    tx.GapAdmissionRuns = runs;
-                }
+                GapAdmissionCensus.Attach(segments, transitions, physicalLag);
             }
 
             internal void ObserveLevelEntryPlacement(
@@ -556,8 +524,7 @@ namespace OpenGGF.BizHawk.Headless
                 entryPlacement.Observe(
                     gameMode,
                     S2Ram.U8(host, S2Ram.Zone),
-                    () => LevelEntryPlacementLatch.ObserveS2(
-                        S2Ram.U8(host, AddrLastStarPostHit)));
+                    () => LevelEntryPlacementLatch.ObserveS2(host));
             }
 
             internal void ArmLevelSegment(int frameNow, IGpgxHost host)

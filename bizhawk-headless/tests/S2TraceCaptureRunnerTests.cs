@@ -512,7 +512,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string metadata = CaptureEhzTargetSegment(true);
             AssertContains(metadata,
                 "\",\n  \"level_entry_placement_source\": \"start_table\",\n"
-                + "  \"last_star_post_hit\": 0,\n  \"characters\"");
+                + "  \"last_star_post_hit\": 0,\n"
+                + "  \"level_entry_ram\": {\"saved_last_star_pole_hit\": 0, ");
         }
 
         private static string CaptureEhzTargetSegment(bool targetLoad)

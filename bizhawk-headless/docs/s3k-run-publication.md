@@ -25,7 +25,10 @@ latched at the first `$8C` frame of the segment's own load. It is absent when no
 load of the arming zone was observed since the previous arm, and never appears in
 special-stage metadata. It is followed by `last_star_post_hit`, the raw
 `Last_star_post_hit` byte (decimal, bit 7 retained) from the same observation.
-These additive keys change no row, aux or manifest byte.
+A `level_entry_ram` object (the Saved/Saved2 restore blocks and carried
+counters at the same boundary) follows. Manifest transitions carry the shared
+`gap_admission_runs` census of the unrecorded rows between their segments.
+These additive keys change no row or aux byte.
 
 Every candidate remains outside the installed fixture root until the strict
 v5 validator, literal comparator, candidate-root replay, native gates, and

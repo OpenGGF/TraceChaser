@@ -51,7 +51,10 @@ observed since the previous arm (a skipped or reset-discarded arm still consumes
 its load), or the fixture predates the field. KiS2 uses the same RAM address
 through the S2 recorder; no KiS2 disassembly is pinned to confirm it separately.
 The same observation publishes `last_star_post_hit`, the raw
-`Last_star_pole_hit` byte the load read (decimal, after the source).
+`Last_star_pole_hit` byte the load read (decimal, after the source), and
+`level_entry_ram`: the star-pole block `Obj79_LoadData` reads (`Saved_*`
+$FE31-$FE58, checked against the encoded routine at $1F35E) plus `Life_count`,
+`Extra_life_flags`, `Ring_count` and `Timer`.
 
 Only add `--effective-movie-length N` when reproducing a frozen, independently
 recorded session signal. It is not a convenient truncation flag.

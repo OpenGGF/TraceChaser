@@ -463,7 +463,9 @@ namespace OpenGGF.BizHawk.Headless
                     MapLevelEntryPlacementSource(
                         lastStarPostHit,
                         S3KRam.U8(host, S3KRam.SpecialBonusEntryFlag)),
-                    lastStarPostHit);
+                    lastStarPostHit,
+                    LevelEntryPlacementLatch.ReadFields(
+                        host, LevelEntryPlacementLatch.S3kFields));
             });
 
             // (5)/(6) Special-stage detour. The entry test is gated on the

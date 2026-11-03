@@ -489,4 +489,55 @@ namespace OpenGGF.BizHawk.Headless
             return value.ToString(CultureInfo.InvariantCulture);
         }
     }
+
+    /// <summary>
+    /// Contract-1 gap census shared by the S2 and S3K run recorders: for every
+    /// transition, the main-loop admission outcome of each movie row strictly
+    /// between the source segment's last recorded row and the destination
+    /// segment's first recorded row, run-length encoded and alternating from
+    /// non-lag. Only counts leave here, never a row index. Transitions whose
+    /// span is not covered by the admission record keep no census.
+    /// </summary>
+    public static class GapAdmissionCensus
+    {
+        public static void Attach(
+            IList<RunManifestSegment> segments,
+            IList<RunManifestTransition> transitions,
+            IList<bool> physicalLag)
+        {
+            foreach (RunManifestTransition tx in transitions)
+            {
+                if (tx.FromSegment < 0 || tx.ToSegment < 0
+                    || tx.FromSegment >= segments.Count
+                    || tx.ToSegment >= segments.Count)
+                {
+                    continue;
+                }
+                RunManifestSegment from = segments[tx.FromSegment];
+                RunManifestSegment to = segments[tx.ToSegment];
+                int start = from.Bk2FrameOffset + from.TraceFrameCount;
+                int end = to.Bk2FrameOffset;
+                if (start < 0 || end < start || end > physicalLag.Count)
+                {
+                    continue;
+                }
+                var runs = new List<int>();
+                bool expectLag = false;
+                int length = 0;
+                for (int row = start; row < end; row++)
+                {
+                    if (physicalLag[row] == expectLag)
+                    {
+                        length++;
+                        continue;
+                    }
+                    runs.Add(length);
+                    expectLag = !expectLag;
+                    length = 1;
+                }
+                runs.Add(length);
+                tx.GapAdmissionRuns = runs;
+            }
+        }
+    }
 }

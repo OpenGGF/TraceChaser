@@ -78,6 +78,23 @@ shows the star post it restored, which the post keeps hit (`loc_4A024`). The
 manifest's `starpost_bonus` `last_star_post_hit` is sampled after bonus entry
 zeroes the byte (`loc_2D4CA`) and is not a substitute.
 
+The same observation publishes `level_entry_ram`: the raw restore blocks and
+carried counters at that first PreLevel frame, as unsigned integers in a fixed
+order. It holds the `Saved_*` block (`sub_2D164`/`Save_Level_Data`, read by
+`Load_Starpost_Settings`), the `Saved2_*` block (`Save_Level_Data2`, read by
+`loc_2D2C2`), `Special_bonus_entry_flag`, `Life_count`, `Current_special_stage`,
+`Extra_life_flags`, `Ring_count`, `Timer`, `Collected_special_ring_array`,
+`Respawn_table_keep`, the emerald counts and array, and `SK_special_stage_flag`.
+The addresses are checked against the encoded `Save_Level_Data` ($2D176) and
+`Save_Level_Data2` ($2D1CC) instructions.
+
+Every manifest transition also carries `gap_admission_runs`, the S2 census
+shape: the main-loop admission of each movie row strictly between the source
+segment's last recorded row and the destination's first recorded row (the arm
+and special-stage entry frames the segmenter records in no segment), run-length
+encoded and alternating from non-lag. Plain level-to-level boundaries have no
+transition record and therefore no census.
+
 ```bash
 "$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
   --tracechaser-root "$TRACECHASER_ROOT" \
