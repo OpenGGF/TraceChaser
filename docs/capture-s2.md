@@ -50,6 +50,8 @@ through the same star-pole save). The byte is latched at the first
 observed since the previous arm (a skipped or reset-discarded arm still consumes
 its load), or the fixture predates the field. KiS2 uses the same RAM address
 through the S2 recorder; no KiS2 disassembly is pinned to confirm it separately.
+The same observation publishes `last_star_post_hit`, the raw
+`Last_star_pole_hit` byte the load read (decimal, after the source).
 
 Only add `--effective-movie-length N` when reproducing a frozen, independently
 recorded session signal. It is not a convenient truncation flag.

@@ -180,7 +180,7 @@ namespace OpenGGF.BizHawk.Headless
             bool loadQueueState,
             bool nativePreludeBootstrap,
             S2TraceIdentity identity,
-            string levelEntryPlacementSource = null)
+            LevelEntryObservation levelEntry = null)
         {
             if (identity == null)
             {
@@ -221,12 +221,8 @@ namespace OpenGGF.BizHawk.Headless
                 .Append(Hex4(startX)).Append("\",\n");
             json.Append("  \"start_y\": \"0x")
                 .Append(Hex4(startY)).Append("\",\n");
-            if (levelEntryPlacementSource != null)
-            {
-                // Additive: absent when no load of this zone was observed.
-                json.Append("  \"level_entry_placement_source\": \"")
-                    .Append(levelEntryPlacementSource).Append("\",\n");
-            }
+            // Additive: absent when no load of this zone was observed.
+            LevelEntryPlacementLatch.AppendMetadata(json, levelEntry);
             string main = identity.MainCharacter;
             json.Append(sidekickPresent
                 ? "  \"characters\": [\"" + main + "\", \"tails\"],\n"

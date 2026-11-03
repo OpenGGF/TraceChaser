@@ -68,7 +68,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var latch = new LevelEntryPlacementLatch();
             int reads = 0;
             string value = "start_table";
-            Func<string> read = () => { reads++; return value; };
+            Func<LevelEntryObservation> read = () =>
+            {
+                reads++;
+                return new LevelEntryObservation(value, value == "start_table" ? 0 : 3);
+            };
             latch.Observe(0x04, 0, read);
             latch.Observe(0x8C, 1, read);
             value = "starpost_restore";   // a later write inside the load
@@ -76,9 +80,11 @@ namespace OpenGGF.BizHawk.Headless.Tests
             latch.Observe(0x8C, 1, read);
             latch.Observe(0x0C, 1, read);
             AssertEx.Equal(1, reads);
-            AssertEx.Equal("start_table", latch.Consume(1));
+            LevelEntryObservation first = latch.Consume(1);
+            AssertEx.Equal("start_table", first.PlacementSource);
+            AssertEx.Equal(0, first.LastStarPostHit);
             // Consumed: a second arm without a new load publishes nothing.
-            AssertEx.Equal<string>(null, latch.Consume(1));
+            AssertEx.Equal<LevelEntryObservation>(null, latch.Consume(1));
             // $4C (SaveScreen) and a still-$0C restart are not PreLevel.
             latch.Observe(0x4C, 1, read);
             latch.Observe(0x0C, 1, read);
@@ -86,16 +92,18 @@ namespace OpenGGF.BizHawk.Headless.Tests
             // A new load latches again.
             latch.Observe(0x8C, 1, read);
             AssertEx.Equal(2, reads);
-            AssertEx.Equal("starpost_restore", latch.Consume(1));
+            LevelEntryObservation second = latch.Consume(1);
+            AssertEx.Equal("starpost_restore", second.PlacementSource);
+            AssertEx.Equal(3, second.LastStarPostHit);
         }
 
         private static void LatchRequiresArmingZone()
         {
             var latch = new LevelEntryPlacementLatch();
-            latch.Observe(0x8C, 3, () => "starpost_restore");
-            latch.Observe(0x0C, 3, () => "unused");
-            AssertEx.Equal<string>(null, latch.Consume(4));
-            AssertEx.Equal<string>(null, latch.Consume(3));
+            latch.Observe(0x8C, 3, () => LevelEntryPlacementLatch.ObserveS2(2));
+            latch.Observe(0x0C, 3, () => LevelEntryPlacementLatch.ObserveS2(9));
+            AssertEx.Equal<LevelEntryObservation>(null, latch.Consume(4));
+            AssertEx.Equal<LevelEntryObservation>(null, latch.Consume(3));
         }
 
         private sealed class Frame
@@ -180,6 +188,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal("start_table", levelArms[2].LevelEntryPlacementSource);
             AssertEx.Equal("starpost_restore", levelArms[3].LevelEntryPlacementSource);
             AssertEx.Equal("start_table", levelArms[4].LevelEntryPlacementSource);
+            // The raw byte as each load read it: results' $80 survives in the
+            // latch although the arm-time RAM reads 0; the bonus exit's star post.
+            AssertEx.Equal(0, levelArms[0].LevelEntry.LastStarPostHit);
+            AssertEx.Equal(0x80, levelArms[1].LevelEntry.LastStarPostHit);
+            AssertEx.Equal(0, levelArms[2].LevelEntry.LastStarPostHit);
+            AssertEx.Equal(2, levelArms[3].LevelEntry.LastStarPostHit);
         }
 
         private static void MetadataWritersEmitKeyOnlyWhenObserved()
@@ -193,14 +207,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string absent = S3KCompleteRunMetadataWriter.Format(
                 arm, 10, "movie.bk2", "2026-11-03", "run", 2);
             AssertEx.Equal(false, absent.Contains("level_entry_placement_source"));
-            arm.LevelEntryPlacementSource = "starpost_restore";
+            arm.LevelEntry = new LevelEntryObservation("starpost_restore", 5);
             string present = S3KCompleteRunMetadataWriter.Format(
                 arm, 10, "movie.bk2", "2026-11-03", "run", 2);
+            const string s3kLines =
+                "  \"level_entry_placement_source\": \"starpost_restore\",\n"
+                + "  \"last_star_post_hit\": 5,\n";
             AssertEx.Equal(true, present.Contains(
-                "  \"start_y\": \"0x03EC\",\n"
-                + "  \"level_entry_placement_source\": \"starpost_restore\",\n"));
-            AssertEx.Equal(absent, present.Replace(
-                "  \"level_entry_placement_source\": \"starpost_restore\",\n", ""));
+                "  \"start_y\": \"0x03EC\",\n" + s3kLines));
+            AssertEx.Equal(absent, present.Replace(s3kLines, ""));
 
             string s2Absent = S2TraceMetadataWriter.Format(
                 0, 0, 0, 714, 10, 0x60, 0x290, false, 0, "gameplay_unlock",
@@ -210,12 +225,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
             string s2Present = S2TraceMetadataWriter.Format(
                 0, 0, 0, 714, 10, 0x60, 0x290, false, 0, "gameplay_unlock",
                 "kis2-ehz1.bk2", "2026-11-03", null, 0, false, true,
-                S2TraceIdentity.StockSonic2, "start_table");
+                S2TraceIdentity.StockSonic2, LevelEntryPlacementLatch.ObserveS2(0));
+            const string s2Lines =
+                "  \"level_entry_placement_source\": \"start_table\",\n"
+                + "  \"last_star_post_hit\": 0,\n";
             AssertEx.Equal(true, s2Present.Contains(
-                "  \"start_y\": \"0x0290\",\n"
-                + "  \"level_entry_placement_source\": \"start_table\",\n"));
-            AssertEx.Equal(s2Absent, s2Present.Replace(
-                "  \"level_entry_placement_source\": \"start_table\",\n", ""));
+                "  \"start_y\": \"0x0290\",\n" + s2Lines));
+            AssertEx.Equal(s2Absent, s2Present.Replace(s2Lines, ""));
         }
     }
 }

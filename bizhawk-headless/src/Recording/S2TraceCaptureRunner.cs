@@ -237,7 +237,7 @@ namespace OpenGGF.BizHawk.Headless
             DynamicArtCaptureRowBuffer rowBuffer = null;
             bool dynamicArtArmed = false;
             var entryPlacement = new LevelEntryPlacementLatch();
-            string startPlacementSource = null;
+            LevelEntryObservation startPlacementSource = null;
 
             try
             {
@@ -283,7 +283,7 @@ namespace OpenGGF.BizHawk.Headless
                     entryPlacement.Observe(
                         gameMode,
                         S2Ram.U8(host, S2Ram.Zone),
-                        () => LevelEntryPlacementLatch.MapS2(
+                        () => LevelEntryPlacementLatch.ObserveS2(
                             S2Ram.U8(host, S2Ram.LastStarPoleHit)));
 
                     if (skippingSegment)
@@ -333,7 +333,7 @@ namespace OpenGGF.BizHawk.Headless
                         {
                             // Every armable load consumes its own latch,
                             // skipped or not.
-                            string armPlacementSource =
+                            LevelEntryObservation armPlacementSource =
                                 entryPlacement.Consume(
                                     S2Ram.U8(host, S2Ram.Zone));
                             if (gameplaySegmentIndex < targetGameplaySegment)

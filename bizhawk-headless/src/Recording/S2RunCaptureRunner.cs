@@ -411,7 +411,7 @@ namespace OpenGGF.BizHawk.Headless
             private int startX;
             private int startY;
             private uint startRngSeed;
-            private string startPlacementSource;
+            private LevelEntryObservation startPlacementSource;
             private readonly LevelEntryPlacementLatch entryPlacement =
                 new LevelEntryPlacementLatch();
 
@@ -556,7 +556,7 @@ namespace OpenGGF.BizHawk.Headless
                 entryPlacement.Observe(
                     gameMode,
                     S2Ram.U8(host, S2Ram.Zone),
-                    () => LevelEntryPlacementLatch.MapS2(
+                    () => LevelEntryPlacementLatch.ObserveS2(
                         S2Ram.U8(host, AddrLastStarPostHit)));
             }
 

@@ -4,7 +4,8 @@
 
 - Record `level_entry_placement_source` in S3K complete-run level/bonus and
   S2/KiS2 level metadata: the ROM's start-table, star-post or special-stage
-  placement branch, latched at the first PreLevel frame of each load.
+  placement branch, latched at the first PreLevel frame of each load, with the
+  raw `last_star_post_hit` byte from the same observation.
 - Sample S3K manifest terminal mode after original movie input exhaustion;
   omit unsupported modes and diagnostic capture bounds without changing rows.
 - Add a source-locked, passive constructor-reset prefix diagnostic through the

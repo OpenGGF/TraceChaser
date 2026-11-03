@@ -70,6 +70,14 @@ since the previous arm, or the fixture predates the field. Special-stage
 metadata never carries it. It is observed ROM state for consumers that take the
 same branch; it selects nothing in the recorder.
 
+The same observation also publishes `last_star_post_hit`: the raw
+`Last_star_post_hit` byte the load read, as a decimal integer immediately after
+the source. Bit 7 is kept, so a special-stage return shows the results screen's
+`$80` (for example 128 with no star post, 131 after post 3). A bonus-stage exit
+shows the star post it restored, which the post keeps hit (`loc_4A024`). The
+manifest's `starpost_bonus` `last_star_post_hit` is sampled after bonus entry
+zeroes the byte (`loc_2D4CA`) and is not a substitute.
+
 ```bash
 "$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
   --tracechaser-root "$TRACECHASER_ROOT" \

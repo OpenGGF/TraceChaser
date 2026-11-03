@@ -783,7 +783,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal(false, seg1.MetadataJson.Contains(
                     "level_entry_placement_source"));
                 AssertContains(seg2.MetadataJson,
-                    "  \"level_entry_placement_source\": \"starpost_restore\",\n");
+                    "  \"level_entry_placement_source\": \"starpost_restore\",\n"
+                    + "  \"last_star_post_hit\": 2,\n");
                 // The re-arm rebuilt the aux engine: gameplay_start again.
                 AssertContains(seg2.AuxStateJsonl, "\"gameplay_start\"");
 

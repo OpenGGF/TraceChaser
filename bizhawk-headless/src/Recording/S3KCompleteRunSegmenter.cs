@@ -123,7 +123,13 @@ namespace OpenGGF.BizHawk.Headless
         /// null (=> metadata key ABSENT) when no load of this zone was
         /// observed since the previous arm, and always null for SS.
         /// </summary>
-        public string LevelEntryPlacementSource { get; set; }
+        public string LevelEntryPlacementSource
+        {
+            get { return LevelEntry == null ? null : LevelEntry.PlacementSource; }
+        }
+
+        /// <summary>The whole load observation (source and raw Last_star_post_hit).</summary>
+        public LevelEntryObservation LevelEntry { get; set; }
     }
 
     /// <summary>
@@ -451,9 +457,14 @@ namespace OpenGGF.BizHawk.Headless
             // special-stage results set on a star-post-less return
             // (sonic3k.asm:12154-12157).
             entryPlacement.Observe(gameMode, zoneId, () =>
-                MapLevelEntryPlacementSource(
-                    S3KRam.U8(host, S3KRam.LastStarPostHit),
-                    S3KRam.U8(host, S3KRam.SpecialBonusEntryFlag)));
+            {
+                int lastStarPostHit = S3KRam.U8(host, S3KRam.LastStarPostHit);
+                return new LevelEntryObservation(
+                    MapLevelEntryPlacementSource(
+                        lastStarPostHit,
+                        S3KRam.U8(host, S3KRam.SpecialBonusEntryFlag)),
+                    lastStarPostHit);
+            });
 
             // (5)/(6) Special-stage detour. The entry test is gated on the
             // DETOUR flag and never on `started` alone: StartSpecialStage
@@ -668,7 +679,7 @@ namespace OpenGGF.BizHawk.Headless
             arm.GameplayFrameCounter =
                 S3KRam.U16(host, S3KRam.LevelFrameCounter);
             arm.BonusStageType = bonusToken;
-            arm.LevelEntryPlacementSource = entryPlacement.Consume(zoneId);
+            arm.LevelEntry = entryPlacement.Consume(zoneId);
             // Only bonus segments carry the free-running V-int counter
             // base; for a level segment the key is ABSENT, not null.
             arm.VIntRunCount = isBonus

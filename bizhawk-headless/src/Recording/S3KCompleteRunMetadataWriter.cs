@@ -184,12 +184,8 @@ namespace OpenGGF.BizHawk.Headless
                 .Append("\",\n");
             json.Append("  \"start_y\": \"0x").Append(Hex4(arm.StartY))
                 .Append("\",\n");
-            if (arm.LevelEntryPlacementSource != null)
-            {
-                // Additive: absent when no load of this zone was observed.
-                json.Append("  \"level_entry_placement_source\": \"")
-                    .Append(arm.LevelEntryPlacementSource).Append("\",\n");
-            }
+            // Additive: absent when no load of this zone was observed.
+            LevelEntryPlacementLatch.AppendMetadata(json, arm.LevelEntry);
             json.Append(CharacterMetadataJson(playerMode));
             json.Append("  \"rng_seed\": \"0x").Append(Hex8(arm.RngSeed))
                 .Append("\",\n");

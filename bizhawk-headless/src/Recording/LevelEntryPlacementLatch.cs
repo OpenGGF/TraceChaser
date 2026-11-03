@@ -17,20 +17,44 @@ namespace OpenGGF.BizHawk.Headless
     /// Observation only: it reads RAM the caller names and decides nothing
     /// about segmentation.
     /// </summary>
+    /// <summary>One PreLevel-load observation: the placement branch and the raw byte.</summary>
+    public sealed class LevelEntryObservation
+    {
+        public LevelEntryObservation(string placementSource, int lastStarPostHit)
+        {
+            if (placementSource == null)
+            {
+                throw new ArgumentNullException("placementSource");
+            }
+            PlacementSource = placementSource;
+            LastStarPostHit = lastStarPostHit & 0xFF;
+        }
+
+        public string PlacementSource { get; private set; }
+
+        /// <summary>
+        /// Raw S3K Last_star_post_hit ($FE2A) / S2 Last_star_pole_hit ($FE30)
+        /// as the load reads it, including any bit 7 set by the special-stage
+        /// results (sonic3k.asm:12154-12157, 12709-12712).
+        /// </summary>
+        public int LastStarPostHit { get; private set; }
+    }
+
     public sealed class LevelEntryPlacementLatch
     {
         public const int PreLevelGameMode = 0x8C;
 
         private int previousGameMode = -1;
         private int? pendingZone;
-        private string pendingSource;
+        private LevelEntryObservation pendingObservation;
 
         /// <summary>
         /// Call once per evaluated frame with that frame's raw Game_mode
         /// and Current_zone. <paramref name="readSource"/> runs only on the
         /// first PreLevel frame of a load.
         /// </summary>
-        public void Observe(int gameMode, int zone, Func<string> readSource)
+        public void Observe(
+            int gameMode, int zone, Func<LevelEntryObservation> readSource)
         {
             if (readSource == null)
             {
@@ -40,23 +64,24 @@ namespace OpenGGF.BizHawk.Headless
                 && previousGameMode != PreLevelGameMode)
             {
                 pendingZone = zone;
-                pendingSource = readSource();
+                pendingObservation = readSource();
             }
             previousGameMode = gameMode;
         }
 
         /// <summary>
-        /// The latched source for an arm of <paramref name="zone"/>, or null.
-        /// Always clears the latch.
+        /// The latched observation for an arm of <paramref name="zone"/>, or
+        /// null. Always clears the latch.
         /// </summary>
-        public string Consume(int zone)
+        public LevelEntryObservation Consume(int zone)
         {
-            string source = pendingZone.HasValue && pendingZone.Value == zone
-                ? pendingSource
-                : null;
+            LevelEntryObservation observation =
+                pendingZone.HasValue && pendingZone.Value == zone
+                    ? pendingObservation
+                    : null;
             pendingZone = null;
-            pendingSource = null;
-            return source;
+            pendingObservation = null;
+            return observation;
         }
 
         /// <summary>
@@ -71,6 +96,31 @@ namespace OpenGGF.BizHawk.Headless
             return (lastStarPoleHit & 0xFF) == 0
                 ? RunManifestSegment.PlacementStartTable
                 : RunManifestSegment.PlacementStarpostRestore;
+        }
+
+        public static LevelEntryObservation ObserveS2(int lastStarPoleHit)
+        {
+            return new LevelEntryObservation(
+                MapS2(lastStarPoleHit), lastStarPoleHit);
+        }
+
+        /// <summary>
+        /// The two additive metadata lines, emitted immediately after start_y,
+        /// or nothing when the observation is absent.
+        /// </summary>
+        public static void AppendMetadata(
+            System.Text.StringBuilder json, LevelEntryObservation observation)
+        {
+            if (observation == null)
+            {
+                return;
+            }
+            json.Append("  \"level_entry_placement_source\": \"")
+                .Append(observation.PlacementSource).Append("\",\n");
+            json.Append("  \"last_star_post_hit\": ")
+                .Append(observation.LastStarPostHit.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture))
+                .Append(",\n");
         }
     }
 }
