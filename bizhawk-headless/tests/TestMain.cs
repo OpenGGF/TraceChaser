@@ -229,7 +229,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             SmokeCaptureRunnerTests.Register(tests);
             NoReplacePublisherTests.Register(tests);
             OverrideResumeFirstDivergenceExtractorTests.Register(tests);
-            OverrideResumeFirstDivergencePublisherTests.Register(tests);
+            // fork() snapshots process-wide managed state; keep it outside worker tests.
+            RegisterSerial(tests, OverrideResumeFirstDivergencePublisherTests.Register);
             TracePayloadCompressorTests.Register(tests);
             // These two classes drive the CLI in-process, and the CLI
             // wraps its capture in NativeStandardOutputSilencer, which

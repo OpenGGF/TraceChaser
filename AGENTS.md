@@ -105,8 +105,8 @@ hook-driven debugging (see below).
   keep their exact shapes and streams; do not change them, and do not add output
   that starts with those prefixes. The slowest-N report and the summary line
   start with `  ` or `---` so a `grep '^PASS '` count is unaffected.
-- **Anything that mutates process-global state must run alone.** Three families
-  exist today:
+- **Anything that mutates process-global state must run alone.** Known families
+  include:
   1. **File descriptors 1 and 2.** The CLI wraps its capture in
      `NativeStandardOutputSilencer`, which `dup2()`s `/dev/null` onto both for
      the whole process. Anything another thread writes in that window is not
@@ -129,6 +129,11 @@ hook-driven debugging (see below).
   constructs a `GpgxHost`, or calls `Program.Run`** — none of them announce
   themselves, and what they produce looks like a flaky gate or a truncated run
   rather than a scheduling bug.
+- **Fork-based publication tests run serially.** `OverrideResumeFirstDivergencePublisherTests`
+  snapshots the managed process with `fork()`. Running it beside worker tests can
+  abort the Mono child before its intended kill barrier, producing SIGABRT rather
+  than the expected SIGKILL. Register the entire class through `RegisterSerial`;
+  selecting `--jobs 1` alone is diagnostic evidence, not the repair.
 - **New ROM-backed gates should carry metadata**: `game:`, `movie:`,
   `kind: TestKind.Gate` and `estimatedSeconds:`. All are optional C# defaults,
   so no other registration needs touching. `estimatedSeconds` chooses start

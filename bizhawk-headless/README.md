@@ -59,6 +59,11 @@ unmaintained Lua is fine; it is not the fixture publisher.
 - **User-supplied ROMs**, passed by environment variable and SHA-1 verified:
   `S1_ROM_PATH`, `S2_ROM_PATH`, `S3K_ROM_PATH`. No ROM is committed to this repo.
 
+For tests that inspect consumer inputs, set `TRACECHASER_TEST_INPUT_REPOSITORY_ROOT`
+to the absolute OpenGGF checkout and `TRACECHASER_TEST_FIXTURE_ROOT` to its
+absolute canonical trace directory. Producer-source checks use the checkout that
+owns the running test build, including standalone worktrees.
+
 ## Build, run, test
 
 ```bash

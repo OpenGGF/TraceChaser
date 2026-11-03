@@ -26,6 +26,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
             tests.Add(new TestMain.TestCase(
+                "Recorder test roots select the current producer and explicit consumer",
+                UsesExplicitConsumerAndCurrentProducerRoots));
+            tests.Add(new TestMain.TestCase(
                 "Cli requires ROM movie and output arguments",
                 CliRequiresArguments));
             tests.Add(new TestMain.TestCase(
@@ -88,6 +91,27 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 movie: "ghz1_fullrun",
                 kind: TestKind.Gate,
                 estimatedSeconds: 2.0));
+        }
+
+        private static void UsesExplicitConsumerAndCurrentProducerRoots()
+        {
+            const string variable = "TRACECHASER_TEST_INPUT_REPOSITORY_ROOT";
+            string previous = Environment.GetEnvironmentVariable(variable);
+            string root = Path.Combine(TraceChaserRoot, "bizhawk-headless", ".scratch",
+                "test-roots-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try {
+                Environment.SetEnvironmentVariable(variable, root);
+                AssertEx.Equal(root, RepositoryRoot);
+                AssertEx.Equal(true, File.Exists(Path.Combine(ToolDirectory, "src", "Recording", "InitializationTimingEventEngine.cs")));
+                Environment.SetEnvironmentVariable(variable, "relative-consumer");
+                AssertEx.Throws<ArgumentException>(() => { var ignored = RepositoryRoot; }, "explicit absolute");
+                Environment.SetEnvironmentVariable(variable, root + "-missing");
+                AssertEx.Throws<DirectoryNotFoundException>(() => { var ignored = RepositoryRoot; }, "unavailable");
+            } finally {
+                Environment.SetEnvironmentVariable(variable, previous);
+                Directory.Delete(root, true);
+            }
         }
 
         private static void CliRequiresArguments()
@@ -1433,6 +1457,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             get
             {
+                string configured = Environment.GetEnvironmentVariable("TRACECHASER_TEST_INPUT_REPOSITORY_ROOT");
+                if (!string.IsNullOrWhiteSpace(configured)) {
+                    if (!Path.IsPathRooted(configured))
+                        throw new ArgumentException("The test consumer repository root must be an explicit absolute directory.");
+                    if (!Directory.Exists(configured))
+                        throw new DirectoryNotFoundException("The test consumer repository root is unavailable: " + configured);
+                    return Path.GetFullPath(configured);
+                }
                 return Path.GetFullPath(Path.Combine(
                     AppDomain.CurrentDomain.BaseDirectory,
                     "..",
@@ -1464,8 +1496,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
         {
             get
             {
-                return Path.Combine(RepositoryRoot, "tools", "tracechaser",
-                    "bizhawk-headless");
+                return Path.Combine(TraceChaserRoot, "bizhawk-headless");
             }
         }
 
