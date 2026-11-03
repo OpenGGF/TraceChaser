@@ -47,6 +47,22 @@ This observation authenticates the mode at original input exhaustion only.
 campaign completion. Recorder correctness and independent review still precede
 authoritative fixture use; existing manifests are never filled in by hand.
 
+Complete-run level and bonus metadata also carry
+`level_entry_placement_source`: the branch the ROM took to place the player
+for that segment's load. `Get_LevelSizeStart` (`loc_1BE46`,
+`sonic3k.asm:38186-38192`) reads the start table when `Last_star_post_hit`
+(`$FE2A`) is clear (`start_table`); otherwise `Load_Starpost_Settings` restores
+the `Saved_*` block (`starpost_restore`), or the `Saved2_*` special-stage block
+when `Special_bonus_entry_flag` (`$FE48`) is set (`special_stage_restore`,
+`loc_2D2C2`). Both bytes are latched at the first `Game_mode` `$8C` frame of
+each load, because `Level:` sets bit 7 before its first `Wait_VSync`
+(`sonic3k.asm:7536-7561`) and the load later clears the flag (`sonic3k.asm:61836`)
+and masks the `$80` that a star-post-less special-stage return carries
+(`sonic3k.asm:7913`). An arm whose zone had no observed load since the previous
+arm omits the key. Special-stage metadata never carries it. The field is
+observed ROM state for consumers that take the same branch; it selects nothing
+in the recorder.
+
 ```bash
 "$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
   --tracechaser-root "$TRACECHASER_ROOT" \

@@ -115,6 +115,15 @@ namespace OpenGGF.BizHawk.Headless
 
         /// <summary>u8 0xFE16 at SS arm; null for level/bonus.</summary>
         public int? SpecialStageIndex { get; set; }
+
+        /// <summary>
+        /// The placement branch the ROM chose for THIS level/bonus load,
+        /// observed when the load began (see
+        /// <see cref="S3KCompleteRunSegmenter.MapLevelEntryPlacementSource"/>);
+        /// null (=> metadata key ABSENT) when no load of this zone was
+        /// observed since the previous arm, and always null for SS.
+        /// </summary>
+        public string LevelEntryPlacementSource { get; set; }
     }
 
     /// <summary>
@@ -240,6 +249,11 @@ namespace OpenGGF.BizHawk.Headless
 
         private bool preTraceSnapshotsWritten;
         private bool runEndFinalized;
+
+        // level_entry_placement_source, latched per PreLevel load and
+        // consumed by the next level/bonus arm of the same zone.
+        private readonly LevelEntryPlacementLatch entryPlacement =
+            new LevelEntryPlacementLatch();
 
         /// <param name="movieLoaded">
         /// movie.isloaded(). Always true for the native harness, which
@@ -429,6 +443,17 @@ namespace OpenGGF.BizHawk.Headless
             // (4) The frame's two driving reads.
             int gameMode = S3KRam.U8(host, S3KRam.GameMode);
             int zoneId = S3KRam.U8(host, S3KRam.Zone);
+            // Level: sets bit 7 before its first Wait_VSync
+            // (sonic3k.asm:7536-7561). Later frames of the load are too late:
+            // loc_2D2C2 clears Special_bonus_entry_flag inside
+            // Get_LevelSizeStart (sonic3k.asm:7791, 61836) and the andi.b #$7F
+            // before LevelLoop (sonic3k.asm:7913) erases the $80 the
+            // special-stage results set on a star-post-less return
+            // (sonic3k.asm:12154-12157).
+            entryPlacement.Observe(gameMode, zoneId, () =>
+                MapLevelEntryPlacementSource(
+                    S3KRam.U8(host, S3KRam.LastStarPostHit),
+                    S3KRam.U8(host, S3KRam.SpecialBonusEntryFlag)));
 
             // (5)/(6) Special-stage detour. The entry test is gated on the
             // DETOUR flag and never on `started` alone: StartSpecialStage
@@ -643,6 +668,7 @@ namespace OpenGGF.BizHawk.Headless
             arm.GameplayFrameCounter =
                 S3KRam.U16(host, S3KRam.LevelFrameCounter);
             arm.BonusStageType = bonusToken;
+            arm.LevelEntryPlacementSource = entryPlacement.Consume(zoneId);
             // Only bonus segments carry the free-running V-int counter
             // base; for a level segment the key is ABSENT, not null.
             arm.VIntRunCount = isBonus
@@ -810,6 +836,31 @@ namespace OpenGGF.BizHawk.Headless
                 S3KRam.U8(host, S3KRam.LastStarPostHit);
             entry.RingsBefore = S3KRam.U16(host, S3KRam.RingCount);
             entry.EmeraldsBefore = S3KRam.U8(host, S3KRam.EmeraldCount);
+        }
+
+        /// <summary>
+        /// level_entry_placement_source: the branch Get_LevelSizeStart takes
+        /// for the player's load position. loc_1BE46 (sonic3k.asm:38186-38192)
+        /// tests Last_star_post_hit; zero selects the Sonic/Knux start table
+        /// (loc_1BE5E, sonic3k.asm:38195-38211). Non-zero calls
+        /// Load_Starpost_Settings (sonic3k.asm:61800-61857), which restores
+        /// the Saved_* star-post block unless Special_bonus_entry_flag is set,
+        /// in which case loc_2D2C2 restores the Saved2_* block written by
+        /// Save_Level_Data2 at special-stage entry (sonic3k.asm:61775-61794,
+        /// 128446). A bonus-stage entry clears Last_star_post_hit
+        /// (loc_2D47E, sonic3k.asm:61936-61964), so its own load is a
+        /// start-table load.
+        /// </summary>
+        public static string MapLevelEntryPlacementSource(
+            int lastStarPostHit, int specialBonusEntryFlag)
+        {
+            if ((lastStarPostHit & 0xFF) == 0)
+            {
+                return RunManifestSegment.PlacementStartTable;
+            }
+            return (specialBonusEntryFlag & 0xFF) != 0
+                ? RunManifestSegment.PlacementSpecialStageRestore
+                : RunManifestSegment.PlacementStarpostRestore;
         }
 
         /// <summary>

@@ -27,6 +27,16 @@ namespace OpenGGF.BizHawk.Headless
         /// </summary>
         public const string BonusStageKind = "bonus_stage";
 
+        /// <summary>
+        /// level_entry_placement_source values: the ROM branch that chose
+        /// the player's load position for a level/bonus segment. Observed
+        /// ROM state, never a replay selector by itself.
+        /// </summary>
+        public const string PlacementStartTable = "start_table";
+        public const string PlacementStarpostRestore = "starpost_restore";
+        public const string PlacementSpecialStageRestore =
+            "special_stage_restore";
+
         public RunManifestSegment(
             string dir,
             string kind,

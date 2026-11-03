@@ -265,6 +265,7 @@ namespace OpenGGF.BizHawk.Headless
                     }
 
                     byte gameMode = S2Ram.U8(host, S2Ram.GameMode);
+                    state.ObserveLevelEntryPlacement(gameMode, host);
 
                     // Block 1: SS entry/continuation. Gated on `started` so
                     // a movie reaching $10 with no armed level segment can
@@ -410,6 +411,9 @@ namespace OpenGGF.BizHawk.Headless
             private int startX;
             private int startY;
             private uint startRngSeed;
+            private string startPlacementSource;
+            private readonly LevelEntryPlacementLatch entryPlacement =
+                new LevelEntryPlacementLatch();
 
             // SS-segment arm context. The aux engine is per-detour
             // (v9.13-s2 §11.3): constructed at ss arm so ss_2+ segments
@@ -546,6 +550,16 @@ namespace OpenGGF.BizHawk.Headless
                 }
             }
 
+            internal void ObserveLevelEntryPlacement(
+                byte gameMode, IGpgxHost host)
+            {
+                entryPlacement.Observe(
+                    gameMode,
+                    S2Ram.U8(host, S2Ram.Zone),
+                    () => LevelEntryPlacementLatch.MapS2(
+                        S2Ram.U8(host, S2Ram.LastStarPoleHit)));
+            }
+
             internal void ArmLevelSegment(int frameNow, IGpgxHost host)
             {
                 Started = true;
@@ -556,6 +570,7 @@ namespace OpenGGF.BizHawk.Headless
                 startRngSeed = S2Ram.U32(host, S2Ram.RngSeed);
                 startRomZoneId = S2Ram.U8(host, S2Ram.Zone);
                 startAct = S2Ram.U8(host, S2Ram.Act);
+                startPlacementSource = entryPlacement.Consume(startRomZoneId);
 
                 levelSegmentCount++;
                 dirToken = "seg" + Dec(levelSegmentCount) + "_"
@@ -678,7 +693,7 @@ namespace OpenGGF.BizHawk.Headless
                     runId,
                     segments.Count,
                     loadQueueRom != null,
-                    traceFrame > 0, identity);
+                    traceFrame > 0, identity, startPlacementSource);
                 var entry = new RunManifestSegment(
                     dirToken,
                     RunManifestSegment.LevelKind,

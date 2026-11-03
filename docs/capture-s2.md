@@ -40,6 +40,14 @@ Use `--run-id NAME` for a complete auto-segmented run with a mandatory
   --output /absolute/scratch/s2-complete
 ```
 
+Level metadata (plain and run mode) carries `level_entry_placement_source`:
+`start_table` when `Last_star_pole_hit` (`$FE30`) is clear at
+`LevelSizeLoad` (`s2.asm:14774-14792`), otherwise `starpost_restore`
+(`Obj79_LoadData`, `s2.asm:44776-44812`; a special-stage return re-enters
+through the same star-pole save). The byte is latched at the first
+`Game_Mode` `$8C` frame of each load (`Level:` sets bit 7 before its fade,
+`s2.asm:4757-4765`), and an arm with no observed load of its zone omits the key.
+
 Only add `--effective-movie-length N` when reproducing a frozen, independently
 recorded session signal. It is not a convenient truncation flag.
 

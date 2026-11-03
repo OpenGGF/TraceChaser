@@ -236,6 +236,8 @@ namespace OpenGGF.BizHawk.Headless
                     loadQueueRom, host, () => dynamicArtLogicalFrame);
             DynamicArtCaptureRowBuffer rowBuffer = null;
             bool dynamicArtArmed = false;
+            var entryPlacement = new LevelEntryPlacementLatch();
+            string startPlacementSource = null;
 
             try
             {
@@ -278,6 +280,11 @@ namespace OpenGGF.BizHawk.Headless
                     }
 
                     byte gameMode = S2Ram.U8(host, S2Ram.GameMode);
+                    entryPlacement.Observe(
+                        gameMode,
+                        S2Ram.U8(host, S2Ram.Zone),
+                        () => LevelEntryPlacementLatch.MapS2(
+                            S2Ram.U8(host, S2Ram.LastStarPoleHit)));
 
                     if (skippingSegment)
                     {
@@ -324,6 +331,11 @@ namespace OpenGGF.BizHawk.Headless
                             host, S2Ram.PlayerBase + S2Ram.OffMoveLock);
                         if (gameMode == LevelGameMode && moveLock == 0)
                         {
+                            // Every armable load consumes its own latch,
+                            // skipped or not.
+                            string armPlacementSource =
+                                entryPlacement.Consume(
+                                    S2Ram.U8(host, S2Ram.Zone));
                             if (gameplaySegmentIndex < targetGameplaySegment)
                             {
                                 skippedSegmentZoneName = S2Zones.ZoneName(
@@ -345,6 +357,7 @@ namespace OpenGGF.BizHawk.Headless
                                 startRngSeed = S2Ram.U32(host, S2Ram.RngSeed);
                                 startRomZoneId = S2Ram.U8(host, S2Ram.Zone);
                                 startAct = S2Ram.U8(host, S2Ram.Act);
+                                startPlacementSource = armPlacementSource;
                                 startZoneName =
                                     S2Zones.ZoneName(startRomZoneId);
                                 physicsBuf
@@ -480,7 +493,8 @@ namespace OpenGGF.BizHawk.Headless
                     0,
                     loadQueueRom != null,
                     traceFrame > 0,
-                    identity));
+                    identity,
+                    startPlacementSource));
                 return new S2TraceCaptureResult(
                     offset, traceFrame, gameplaySegmentIndex);
                 }

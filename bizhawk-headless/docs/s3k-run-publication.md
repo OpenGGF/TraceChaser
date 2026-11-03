@@ -18,6 +18,13 @@ maps `$04` to `title_screen` and `$0C` / PreLevel `$8C` to `level`; Save Screen
 This additive endpoint observation changes only the manifest; it neither
 changes segment boundaries/rows nor asserts that a campaign completed.
 
+Level and bonus `metadata.json` optionally carry `level_entry_placement_source`
+(`start_table`, `starpost_restore` or `special_stage_restore`) immediately after
+`start_y`: the `Get_LevelSizeStart` / `Load_Starpost_Settings` placement branch
+latched at the first `$8C` frame of the segment's own load. It is absent when no
+load of the arming zone was observed since the previous arm, and never appears in
+special-stage metadata. This additive key changes no row, aux or manifest byte.
+
 Every candidate remains outside the installed fixture root until the strict
 v5 validator, literal comparator, candidate-root replay, native gates, and
 explicit publication review succeed. The maintained workflow is

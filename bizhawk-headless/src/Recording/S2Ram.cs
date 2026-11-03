@@ -22,6 +22,7 @@ namespace OpenGGF.BizHawk.Headless
         public const int CameraX = 0xEE00;               // u16be pixel word of Camera_X_pos
         public const int CameraY = 0xEE04;               // u16be pixel word of Camera_Y_pos
         public const int Zone = 0xFE10;                  // u8 Current_Zone
+        public const int LastStarPoleHit = 0xFE30;       // u8 Last_star_pole_hit
         public const int Act = 0xFE11;                   // u8 Current_Act
         public const int RngSeed = 0xF636;               // u32be RNG_seed
         public const int FrameCount = 0xFE04;            // u16be Level_frame_counter

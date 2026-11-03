@@ -222,6 +222,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             S3KTraceCaptureRunnerTests.Register(tests);
             S3KCompleteRunSegmenterTests.Register(tests);
             S3KMovieEndTests.Register(tests);
+            LevelEntryPlacementTests.Register(tests);
             S3KCompleteRunProfileTests.Register(tests);
             S3KHookAbsenceTests.Register(tests);
             SmokeCaptureRunnerTests.Register(tests);
