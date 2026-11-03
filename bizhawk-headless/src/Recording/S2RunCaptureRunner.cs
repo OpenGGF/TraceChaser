@@ -87,7 +87,7 @@ namespace OpenGGF.BizHawk.Headless
 
         // Detour transition RAM fields (mainmemory addresses).
         private const int AddrBigringFlag = 0xF7CD;
-        private const int AddrLastStarPostHit = 0xFE30;
+        private const int AddrLastStarPostHit = S2Ram.LastStarPoleHit;
         private const int AddrSavedXPos = 0xFE32;
         private const int AddrSavedYPos = 0xFE34;
         private const int AddrEmeralds = 0xFFB1;
@@ -557,7 +557,7 @@ namespace OpenGGF.BizHawk.Headless
                     gameMode,
                     S2Ram.U8(host, S2Ram.Zone),
                     () => LevelEntryPlacementLatch.MapS2(
-                        S2Ram.U8(host, S2Ram.LastStarPoleHit)));
+                        S2Ram.U8(host, AddrLastStarPostHit)));
             }
 
             internal void ArmLevelSegment(int frameNow, IGpgxHost host)

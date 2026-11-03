@@ -778,6 +778,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 AssertEx.Equal(7, seg2.ManifestEntry.TraceFrameCount);
                 AssertContains(seg2.MetadataJson,
                     "  \"segment_index\": 1,\n");
+                // No load preceded the first arm; the death reload's own $8C
+                // frame latched the star pole, after seg1 had finalized.
+                AssertEx.Equal(false, seg1.MetadataJson.Contains(
+                    "level_entry_placement_source"));
+                AssertContains(seg2.MetadataJson,
+                    "  \"level_entry_placement_source\": \"starpost_restore\",\n");
                 // The re-arm rebuilt the aux engine: gameplay_start again.
                 AssertContains(seg2.AuxStateJsonl, "\"gameplay_start\"");
 

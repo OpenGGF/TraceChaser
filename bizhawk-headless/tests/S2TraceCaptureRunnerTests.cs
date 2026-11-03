@@ -45,6 +45,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S2TraceCaptureRunner counts EHZ segment under gameplay_unlock",
                 CountsEhzSegmentUnderGameplayUnlock));
             tests.Add(new TestMain.TestCase(
+                "S2TraceCaptureRunner consumes a skipped segment's entry placement",
+                SkippedSegmentConsumesEntryPlacement));
+            tests.Add(new TestMain.TestCase(
+                "S2TraceCaptureRunner publishes the target load's entry placement",
+                TargetLoadPublishesEntryPlacement));
+            tests.Add(new TestMain.TestCase(
                 "S2TraceCaptureRunner fails clearly when target segment never reached",
                 FailsClearlyWhenTargetSegmentNeverReached));
             tests.Add(new TestMain.TestCase(
@@ -487,6 +493,60 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         metadata.ToString().Contains(
                             "  \"gameplay_segment\": 1,\n"));
                 });
+        }
+
+        /// <summary>
+        /// Two EHZ arms; the first (a star-post load) is skipped. The second
+        /// arms without a new $8C load, so the skipped arm's latch must not
+        /// leak into the target's metadata.
+        /// </summary>
+        private static void SkippedSegmentConsumesEntryPlacement()
+        {
+            string metadata = CaptureEhzTargetSegment(false);
+            AssertEx.Equal(false, metadata.Contains("level_entry_placement_source"));
+        }
+
+        /// <summary>The target's own $8C load (star pole clear) publishes start_table.</summary>
+        private static void TargetLoadPublishesEntryPlacement()
+        {
+            string metadata = CaptureEhzTargetSegment(true);
+            AssertContains(metadata,
+                "\",\n  \"level_entry_placement_source\": \"start_table\",\n"
+                + "  \"characters\"");
+        }
+
+        private static string CaptureEhzTargetSegment(bool targetLoad)
+        {
+            string captured = null;
+            WithMovie(
+                Rows(12),
+                movie =>
+                {
+                    var host = new ScriptedHost((ram, frame) =>
+                    {
+                        if (frame == 1)
+                        {
+                            ram.SetByte(0xF600, 0x8C);
+                            ram.SetByte(0xFE30, 3);   // Last_star_pole_hit
+                        }
+                        if (frame == 2) ram.SetByte(0xF600, 0x0C);   // skipped arm
+                        if (frame == 4) ram.SetByte(0xF600, 0x00);
+                        if (frame == 5 && targetLoad)
+                        {
+                            ram.SetByte(0xF600, 0x8C);
+                            ram.SetByte(0xFE30, 0);
+                        }
+                        if (frame == 6) ram.SetByte(0xF600, 0x0C);   // target arm
+                    });
+                    var metadata = new StringWriter();
+                    S2TraceCaptureResult result = S2TraceCaptureRunner.CaptureScratchLegacy(
+                        movie, host, "gameplay_unlock", 1, "synthetic.bk2",
+                        "2026-11-03", new StringWriter(), new StringWriter(), metadata);
+                    AssertEx.Equal(6, result.Bk2FrameOffset);
+                    AssertEx.Equal(1, result.GameplaySegment);
+                    captured = metadata.ToString();
+                });
+            return captured;
         }
 
         private static void CountsEhzSegmentUnderGameplayUnlock()
