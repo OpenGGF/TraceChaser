@@ -36,6 +36,7 @@ namespace OpenGGF.BizHawk.Headless
         private NoReplacePublisher.StagedStream aux;
         private NoReplacePublisher.StagedStream hardwareTiming;
         private NoReplacePublisher.StagedStream interstitial;
+        private NoReplacePublisher.StagedStream initialization;
         private string dirToken;
 
         internal S3KStagedSegmentSink(
@@ -131,8 +132,16 @@ namespace OpenGGF.BizHawk.Headless
         /// Completes the run-level stream, after the last segment and
         /// before the session is published. A no-op when nothing opened it.
         /// </summary>
+        public TextWriter OpenInitializationTimingStream()
+        {
+            if (initialization != null) throw new InvalidOperationException("Initialization stream already opened");
+            initialization = session.OpenFile("initialization_timing.jsonl");
+            return initialization.Writer;
+        }
+
         public void CompleteRunFiles()
         {
+            if (initialization != null) { initialization.Complete(); initialization = null; }
             if (interstitial != null)
             {
                 interstitial.Complete();
@@ -152,6 +161,7 @@ namespace OpenGGF.BizHawk.Headless
 
         private void DisposeOpenStreams()
         {
+            if (initialization != null) { initialization.Dispose(); initialization = null; }
             if (physics != null)
             {
                 physics.Dispose();

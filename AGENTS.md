@@ -214,7 +214,7 @@ them, and that is a decision rather than a gap —
 `bizhawk-headless/docs/s3k-profiles-and-hooks.md` §2.4 records the reasoning,
 and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
-Do not "helpfully" add general M68K exec/memory-write callback support. Five fixed,
+Do not "helpfully" add general M68K exec/memory-write callback support. Six fixed,
 address-filtered observers are the permitted recorder exceptions.
 
 The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001B46`,
@@ -280,6 +280,21 @@ recorder, CLI, fixture, host-interface, gameplay or timing/readiness wiring, and
 is not permission to add general callback capabilities. Bind-only identity access
 does not qualify scalar observations, callbacks, phase origin, SR/IRQ semantics
 or a hardware kernel. See [usage and limits](bizhawk-headless/README.md#stock-native-clock-diagnostic-adapter).
+
+The sixth is the user-authorized, opt-in S3K `--initialization-timing`
+observer for the verified locked-on ROM. Its fixed Level/VInt/object-loop
+entrypoints may record only ordered `hold`, `resume` and `vint_0` operations
+for independently fingerprinted production initialization phases. It exports
+no counters, CPU/register/slot values, decoder progress or gameplay state.
+Reference-only register/stack reads may prove an interrupted loop boundary;
+commuting a service past remaining object callbacks requires validating every
+actual later target, including children, against reviewed clock-independent
+closures. Unknown targets, ordinary interrupts, competition mode and unfinished
+loads or provisional callback tails must reject the whole staged capture.
+Successful completion must be checked before publication; Dispose stays cleanup-only.
+The stream has absolute movie rows and its own run-root `initialization_timing.jsonl`
+companion; it never populates physics/aux comparison rows or chooses their sync.
+See `docs/capture-s3k.md`. All other publication/review/approval rules still apply.
 
 Native observer builds are **not host-attested**. `build-observer.sh` pins the source
 commits, the clang packages, and the patch; it makes no claim about the identity of the

@@ -1,4 +1,5 @@
-# Compresses trace payload files (aux_state*.jsonl, physics*.csv) above a size
+# Compresses trace payload files (aux_state*.jsonl, physics*.csv,
+# initialization_timing.jsonl) above a size
 # threshold, verifying the round trip by SHA-256 and length before deleting the
 # original.
 #
@@ -119,8 +120,8 @@ $resolved = Resolve-Path -LiteralPath $Path -ErrorAction Stop
 $item = Get-Item -LiteralPath $resolved
 
 if ($item -is [System.IO.FileInfo]) {
-    if ($item.Name -notlike "aux_state*.jsonl" -and $item.Name -notlike "physics*.csv") {
-        throw "expected aux_state*.jsonl, physics*.csv, or directory, got $($item.FullName)"
+    if ($item.Name -notlike "aux_state*.jsonl" -and $item.Name -notlike "physics*.csv" -and $item.Name -ne "initialization_timing.jsonl") {
+        throw "expected a trace payload or directory, got $($item.FullName)"
     }
     Compress-TracePayloadFile $item
     exit 0
@@ -129,11 +130,13 @@ if ($item -is [System.IO.FileInfo]) {
 if ($Recurse) {
     $auxFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "aux_state*.jsonl" -File -Recurse
     $physicsFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "physics*.csv" -File -Recurse
+    $initializationFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "initialization_timing.jsonl" -File -Recurse
 } else {
     $auxFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "aux_state*.jsonl" -File
     $physicsFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "physics*.csv" -File
+    $initializationFiles = Get-ChildItem -LiteralPath $item.FullName -Filter "initialization_timing.jsonl" -File
 }
 
-foreach ($file in @($auxFiles) + @($physicsFiles)) {
+foreach ($file in @($auxFiles) + @($physicsFiles) + @($initializationFiles)) {
     Compress-TracePayloadFile $file
 }

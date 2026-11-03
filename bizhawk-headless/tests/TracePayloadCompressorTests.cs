@@ -89,8 +89,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         }
 
         /// <summary>
-        /// The compress-traces.ps1 filter: aux_state*.jsonl and
-        /// physics*.csv, nothing else. metadata.json and run_manifest.json
+        /// The compress-traces.ps1 filter: aux_state*.jsonl,
+        /// physics*.csv and the dedicated initialization companion. metadata.json and run_manifest.json
         /// are stored uncompressed in the fixtures and must stay that way,
         /// and an already-compressed name must never be compressed twice.
         /// </summary>
@@ -101,7 +101,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "physics.csv",
                 "physics_special_stage.csv",
                 "aux_state.jsonl",
-                "aux_state_2.jsonl"
+                "aux_state_2.jsonl",
+                "initialization_timing.jsonl"
             })
             {
                 AssertEx.Equal(
@@ -115,6 +116,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "smoke.csv",
                 "physics.csv.gz",
                 "aux_state.jsonl.gz",
+                "initialization_timing.jsonl.gz",
                 "aux_state.json",
                 "csv",
                 "physics"
@@ -385,6 +387,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         stream.Writer.Write(physics);
                         stream.Complete();
                     }
+                    string initialization = "native initialization\n" + new string('i', 128);
+                    using (NoReplacePublisher.StagedStream stream =
+                        session.OpenFile("initialization_timing.jsonl"))
+                    {
+                        stream.Writer.Write(initialization);
+                        stream.Complete();
+                    }
                     session.StageFile("aiz1/metadata.json", "metadata\n");
                     session.StageFile("run_manifest.json", "manifest\n");
                     NoReplacePublisher.StagedPublicationSet staged =
@@ -393,12 +402,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
                     AssertEx.Equal(
                         "aiz1/metadata.json,aiz1/physics.csv.gz,"
-                        + "run_manifest.json",
+                        + "initialization_timing.jsonl.gz,run_manifest.json",
                         JoinRelativeFileNames(output));
                     AssertBytesEqual(
                         Encoding.UTF8.GetBytes(physics),
                         Decompress(Path.Combine(
                             output, "aiz1", "physics.csv.gz")));
+                    AssertBytesEqual(Encoding.UTF8.GetBytes(initialization),
+                        Decompress(Path.Combine(output, "initialization_timing.jsonl.gz")));
                 });
         }
 

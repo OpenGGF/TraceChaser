@@ -8,7 +8,7 @@ using System.Security.Cryptography;
 namespace OpenGGF.BizHawk.Headless
 {
     /// <summary>
-    /// Gzip compression of the two trace payload files, applied inside the
+    /// Gzip compression of trace payload files, applied inside the
     /// publisher's all-or-nothing publish (see
     /// <see cref="NoReplacePublisher.StagedPublicationSet.Publish"/>).
     ///
@@ -25,7 +25,7 @@ namespace OpenGGF.BizHawk.Headless
     /// (which remains the Windows Lua-route path and is not superseded for
     /// that route):
     ///
-    /// - only aux_state*.jsonl and physics*.csv are targeted; metadata.json
+    /// - aux_state*.jsonl, physics*.csv and initialization_timing.jsonl are targeted; metadata.json
     ///   and run_manifest.json are stored uncompressed in the fixtures too;
     /// - files below <see cref="ThresholdBytes"/> (default 1 MiB) are left
     ///   alone;
@@ -153,7 +153,8 @@ namespace OpenGGF.BizHawk.Headless
         public static bool IsTracePayloadName(string fileName)
         {
             return MatchesPrefixAndExtension(fileName, "aux_state", ".jsonl")
-                || MatchesPrefixAndExtension(fileName, "physics", ".csv");
+                || MatchesPrefixAndExtension(fileName, "physics", ".csv")
+                || fileName == "initialization_timing.jsonl";
         }
 
         internal bool ShouldCompress(string fileName, long length)

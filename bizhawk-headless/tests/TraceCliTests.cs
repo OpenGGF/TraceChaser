@@ -21,6 +21,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
+            tests.Add(new TestMain.TestCase("InitializationTiming CLI requires complete-run trace mode", InitializationTimingScope));
             tests.Add(new TestMain.TestCase("TraceCli KiS2 rejects unsupported run profiles and audit requests", Kis2OptionsAreStrict));
 
             tests.Add(new TestMain.TestCase(
@@ -217,6 +218,22 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var audit = new List<string>(valid); audit.Add("--load-queue-state");
             AssertEx.Throws<ArgumentException>(() => Program.ValidateKis2TraceOptions(
                 CommandLineOptions.Parse(audit.ToArray(), fixture)), "KiS2");
+        }
+
+        private static void InitializationTimingScope()
+        {
+            string output = TestScratch.CreateRootPath("initialization-cli");
+            string fixture = TestScratch.CreateRootPath("initialization-fixture");
+            Directory.CreateDirectory(fixture);
+            var args = new List<string> { "--mode", "trace", "--rom", "s3k.gen",
+                "--movie", "movie.bk2", "--output", output, "--initialization-timing" };
+            AssertEx.Throws<ArgumentException>(() => CommandLineOptions.Parse(args.ToArray(), fixture), "complete run");
+            args.Add("--run-id"); args.Add("reviewed-run");
+            AssertEx.Equal(true, CommandLineOptions.Parse(args.ToArray(), fixture).InitializationTiming);
+            args[1] = "smoke";
+            AssertEx.Throws<ArgumentException>(() => CommandLineOptions.Parse(args.ToArray(), fixture), "trace mode");
+            args[1] = "load-time";
+            AssertEx.Throws<ArgumentException>(() => CommandLineOptions.Parse(args.ToArray(), fixture), "load-time mode");
         }
 
         private static void CreditsDemoSelectorsAreStrict()

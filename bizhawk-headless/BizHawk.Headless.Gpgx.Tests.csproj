@@ -104,6 +104,7 @@
     <Compile Include="tests/S3KAuxEventEngineTests.cs" />
     <Compile Include="tests/HardwareTimingEventEngineTests.cs" />
     <Compile Include="tests/S3kExactKosMeasurementObserverTests.cs" />
+    <Compile Include="tests/InitializationTimingEventEngineTests.cs" />
     <Compile Include="tests/S3KCompleteRunProfileTests.cs" />
     <Compile Include="tests/LevelEntryPlacementTests.cs" />
     <Compile Include="tests/S3KCompleteRunSegmenterTests.cs" />

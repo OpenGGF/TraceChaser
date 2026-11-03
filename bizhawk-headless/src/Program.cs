@@ -75,7 +75,8 @@ namespace BizHawk.Headless.Gpgx
             int? creditsTarget = null,
             string creditsRawObservationsPath = null,
             string creditsRawObservationId = null,
-            string fixtureRoot = null)
+            string fixtureRoot = null,
+            bool initializationTiming = false)
         {
             Mode = mode;
             RomPath = romPath;
@@ -88,6 +89,7 @@ namespace BizHawk.Headless.Gpgx
             RunId = runId;
             EffectiveMovieLength = effectiveMovieLength;
             LoadQueueState = loadQueueState;
+            InitializationTiming = initializationTiming;
             Compress = compress;
             CompressThresholdBytes = compressThresholdBytes;
             CreditsTarget = creditsTarget;
@@ -136,6 +138,7 @@ namespace BizHawk.Headless.Gpgx
         /// ignores this value because PLC and player-DPLC audit is mandatory.
         /// </summary>
         public bool LoadQueueState { get; private set; }
+        public bool InitializationTiming { get; private set; }
 
         /// <summary>
         /// Load-time mode only: also attach the existing
@@ -272,6 +275,7 @@ namespace BizHawk.Headless.Gpgx
             RejectInSmokeMode(values, "--run-id");
             RejectInSmokeMode(values, "--effective-movie-length");
             RejectInSmokeMode(values, "--load-queue-state");
+            RejectInSmokeMode(values, "--initialization-timing");
             RejectInSmokeMode(values, "--credits-raw-observations");
             RejectInSmokeMode(values, "--credits-raw-observation-id");
             // Smoke mode publishes smoke.csv, which is not a trace payload,
@@ -340,7 +344,7 @@ namespace BizHawk.Headless.Gpgx
                 "--gameplay-segment", "--run-id",
                 "--effective-movie-length", "--compress",
                 "--no-compress", "--compress-threshold",
-                "--load-queue-state", "--credits-raw-observations",
+                "--load-queue-state", "--initialization-timing", "--credits-raw-observations",
                 "--credits-raw-observation-id"
             };
             foreach (string name in unsupported)
@@ -469,6 +473,9 @@ namespace BizHawk.Headless.Gpgx
                 }
                 gameplaySegment = parsed;
             }
+            if (values.ContainsKey("--initialization-timing") && runId == null
+                && traceProfile != S3KCompleteRunSegmenter.LevelTraceProfile)
+                throw new ArgumentException("--initialization-timing requires an S3K complete run");
             if (runId != null && traceProfile != null)
             {
                 throw new ArgumentException(
@@ -686,7 +693,8 @@ namespace BizHawk.Headless.Gpgx
                 effectiveMovieLength,
                 values.ContainsKey("--load-queue-state"),
                 compress,
-                compressThresholdBytes);
+                compressThresholdBytes,
+                initializationTiming: values.ContainsKey("--initialization-timing"));
         }
 
         private static CaptureMode ParseMode(
@@ -752,6 +760,7 @@ namespace BizHawk.Headless.Gpgx
                 || name == "--gameplay-segment"
                 || name == "--run-id"
                 || name == "--effective-movie-length"
+                || name == "--initialization-timing"
                 || name == "--load-queue-state"
                 || name == "--compress"
                 || name == "--no-compress"
@@ -761,7 +770,8 @@ namespace BizHawk.Headless.Gpgx
         private static bool IsValuelessArgument(string name)
         {
             return name == "--compress" || name == "--no-compress"
-                || name == "--load-queue-state" || name == "--exact-kos-v2";
+                || name == "--load-queue-state" || name == "--exact-kos-v2"
+                || name == "--initialization-timing";
         }
 
         private static string Required(
@@ -1378,6 +1388,8 @@ namespace BizHawk.Headless.Gpgx
                 {
                     romSha1 = RomIdentity.ValidateSonic1Rev01(romBytes);
                 }
+                if (options.InitializationTiming && (options.Mode != CaptureMode.Trace || traceGame != "s3k"))
+                    throw new ArgumentException("--initialization-timing supports only S3K complete-run traces");
                 Bk2Movie movie = null;
                 if (options.MoviePath != null)
                 {
@@ -3024,7 +3036,8 @@ namespace BizHawk.Headless.Gpgx
                         options.EffectiveMovieLength,
                         romBytes,
                         sink,
-                        options.LoadQueueState);
+                        options.LoadQueueState,
+                        options.InitializationTiming ? sink.OpenInitializationTimingStream() : null);
                     // The run-level interstitial hardware-timing stream
                     // outlives every segment, so it is completed here rather
                     // than at any EndSegment. A no-op unless a completion

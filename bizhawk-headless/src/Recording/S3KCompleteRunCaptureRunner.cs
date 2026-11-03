@@ -219,7 +219,8 @@ namespace OpenGGF.BizHawk.Headless
             int effectiveMovieLength,
             byte[] rom,
             IS3KCompleteRunSegmentSink sink,
-            bool loadQueueState = false)
+            bool loadQueueState = false,
+            TextWriter initializationTiming = null)
         {
             if (movie == null)
             {
@@ -264,6 +265,9 @@ namespace OpenGGF.BizHawk.Headless
             segmenter.SegmentClosed = state.CloseSegment;
             string expectedMovieEndMode = null;
 
+            using (var initialization = initializationTiming == null ? null
+                : new S3kInitializationTimingObserver(host, rom,
+                    S3kInitializationTimingObserver.CreateFingerprintResolver(host, rom)))
             using (IDisposable directSubmissionObserver =
                 host.RegisterExecuteCallback(
                     HardwareTimingEventEngine.ModuleChildSubmissionPc,
@@ -278,6 +282,7 @@ namespace OpenGGF.BizHawk.Headless
                 // index, which is what the Lua's movie.getinput() takes.
                 var appliedRows = new List<Bk2Frame>();
                 var advanced = 0;
+                bool representedRunStarted = false;
                 while (true)
                 {
                     bool observedSpecialStageResults =
@@ -309,6 +314,17 @@ namespace OpenGGF.BizHawk.Headless
                     else if (!observedSpecialStageResults)
                     {
                         state.ObserveUnexportedHardwareBoundary();
+                    }
+
+                    // One physical movie row, including true gaps between
+                    // segments. The seeded initial bootstrap is unrepresented.
+                    if (initialization != null) {
+                        if (action == S3KCompleteRunFrameAction.LevelRow
+                            || action == S3KCompleteRunFrameAction.SpecialStageRow)
+                            representedRunStarted = true;
+                        if (representedRunStarted && host.CompletedFrame > 0)
+                            initialization.FlushFrame(host.CompletedFrame - 1, initializationTiming);
+                        else initialization.DiscardUnrepresentedFrame();
                     }
 
                     // The Lua's runaway backstop, evaluated by the main loop
@@ -357,6 +373,7 @@ namespace OpenGGF.BizHawk.Headless
                             + "; expected " + advanced + ".");
                     }
                 }
+                if (initialization != null) initialization.VerifyComplete();
             }
 
             // End-of-run finalize, then — last of all — the manifest, so it
