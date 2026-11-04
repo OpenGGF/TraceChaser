@@ -33,6 +33,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "TracePayloadCompressor targets only the payload names",
                 TargetsOnlyThePayloadNames));
             tests.Add(new TestMain.TestCase(
+                "TracePayloadCompressor always gzips tiny initialization companions unless disabled",
+                InitializationCompanionsAlwaysGzip));
+            tests.Add(new TestMain.TestCase(
                 "TracePayloadCompressor honors the size threshold in both"
                 + " directions",
                 HonorsTheSizeThresholdInBothDirections));
@@ -94,6 +97,33 @@ namespace OpenGGF.BizHawk.Headless.Tests
         /// are stored uncompressed in the fixtures and must stay that way,
         /// and an already-compressed name must never be compressed twice.
         /// </summary>
+        private static void InitializationCompanionsAlwaysGzip()
+        {
+            WithTemporaryDirectory(root => {
+                foreach (bool compressed in new[] { false, true }) {
+                    string output = Path.Combine(root, compressed ? "gzip" : "plain");
+                    var compressor = compressed ? new TracePayloadCompressor() : null;
+                    using (var session = new NoReplacePublisher(compressor).OpenSession(output)) {
+                        using (var phase = session.OpenFile("initialization_timing.jsonl")) {
+                            phase.Complete();
+                        }
+                        using (var readiness = session.OpenFile("initialization_hardware_timing.jsonl")) {
+                            readiness.Writer.Write("tiny readiness\n"); readiness.Complete();
+                        }
+                        session.Complete().Publish();
+                    }
+                    string extension = compressed ? ".gz" : "";
+                    AssertEx.Equal("initialization_hardware_timing.jsonl" + extension
+                        + ",initialization_timing.jsonl" + extension, JoinRelativeFileNames(output));
+                    if (compressed) {
+                        AssertBytesEqual(new byte[0], Decompress(Path.Combine(output, "initialization_timing.jsonl.gz")));
+                        AssertBytesEqual(Encoding.UTF8.GetBytes("tiny readiness\n"),
+                            Decompress(Path.Combine(output, "initialization_hardware_timing.jsonl.gz")));
+                    }
+                }
+            });
+        }
+
         private static void TargetsOnlyThePayloadNames()
         {
             foreach (string name in new[]
@@ -102,7 +132,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "physics_special_stage.csv",
                 "aux_state.jsonl",
                 "aux_state_2.jsonl",
-                "initialization_timing.jsonl"
+                "initialization_timing.jsonl",
+                "initialization_hardware_timing.jsonl"
             })
             {
                 AssertEx.Equal(
@@ -117,6 +148,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "physics.csv.gz",
                 "aux_state.jsonl.gz",
                 "initialization_timing.jsonl.gz",
+                "initialization_hardware_timing.jsonl.gz",
                 "aux_state.json",
                 "csv",
                 "physics"
@@ -394,6 +426,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         stream.Writer.Write(initialization);
                         stream.Complete();
                     }
+                    using (NoReplacePublisher.StagedStream stream =
+                        session.OpenFile("initialization_hardware_timing.jsonl"))
+                    {
+                        stream.Writer.Write(initialization);
+                        stream.Complete();
+                    }
                     session.StageFile("aiz1/metadata.json", "metadata\n");
                     session.StageFile("run_manifest.json", "manifest\n");
                     NoReplacePublisher.StagedPublicationSet staged =
@@ -402,7 +440,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
                     AssertEx.Equal(
                         "aiz1/metadata.json,aiz1/physics.csv.gz,"
-                        + "initialization_timing.jsonl.gz,run_manifest.json",
+                        + "initialization_hardware_timing.jsonl.gz,initialization_timing.jsonl.gz,run_manifest.json",
                         JoinRelativeFileNames(output));
                     AssertBytesEqual(
                         Encoding.UTF8.GetBytes(physics),
@@ -410,6 +448,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                             output, "aiz1", "physics.csv.gz")));
                     AssertBytesEqual(Encoding.UTF8.GetBytes(initialization),
                         Decompress(Path.Combine(output, "initialization_timing.jsonl.gz")));
+                    AssertBytesEqual(Encoding.UTF8.GetBytes(initialization),
+                        Decompress(Path.Combine(output, "initialization_hardware_timing.jsonl.gz")));
                 });
         }
 

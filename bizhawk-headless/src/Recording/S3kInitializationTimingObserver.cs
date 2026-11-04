@@ -17,6 +17,19 @@ namespace OpenGGF.BizHawk.Headless
         private readonly Func<string, string> fingerprint;
         private bool disposed;
         private bool loading;
+        private long? frameLoadOrdinal;
+        private bool ambiguousFrameLoad;
+
+        // Keep the release row until frame-end queue reconciliation has run.
+        // loading alone is already false after loc_64DC on that same row.
+        internal long? LoadOrdinalForCompletedFrame
+        {
+            get {
+                if (ambiguousFrameLoad)
+                    throw new InvalidOperationException("multiple initialization loads in one readiness row");
+                return frameLoadOrdinal;
+            }
+        }
         private bool initialServiceCutOpen;
         private bool presentationServiceCutOpen;
         private bool validateRemainingObjectCallbacks;
@@ -49,7 +62,9 @@ namespace OpenGGF.BizHawk.Headless
                     // Arm only fresh loads after the run's first represented
                     // row; its cold entry can use other interrupt handlers.
                     if (!representedRunStarted()) return;
+                    ambiguousFrameLoad |= frameLoadOrdinal.HasValue;
                     events.BeginLoad(); Begin("display_clear"); loading = true;
+                    frameLoadOrdinal = events.CurrentRepresentedLoadOrdinal;
                 });
                 Register(host, 0x62CC, () => {
                     if (loading && events.ActivePhase == "display_clear") events.ResumePhase();
@@ -300,9 +315,16 @@ namespace OpenGGF.BizHawk.Headless
         {
             if (disposed) throw new ObjectDisposedException("S3kInitializationTimingObserver");
             events.FlushFrame(rawFrame, output);
+            frameLoadOrdinal = loading ? (long?)events.CurrentRepresentedLoadOrdinal : null;
+            ambiguousFrameLoad = false;
         }
 
-        public void DiscardUnrepresentedFrame() { events.DiscardUnrepresentedFrame(); }
+        public void DiscardUnrepresentedFrame()
+        {
+            events.DiscardUnrepresentedFrame();
+            frameLoadOrdinal = loading ? (long?)events.CurrentRepresentedLoadOrdinal : null;
+            ambiguousFrameLoad = false;
+        }
 
         /// <summary>Success-path publication gate; Dispose remains failure-safe cleanup.</summary>
         public void VerifyComplete()

@@ -24,6 +24,10 @@ namespace OpenGGF.BizHawk.Headless
         private PhaseIdentity active;
 
         public string ActivePhase { get { return active == null ? null : active.Phase; } }
+        internal long CurrentRepresentedLoadOrdinal
+        {
+            get { return loadOrdinal == 0 ? 0 : loadOrdinal - (firstRepresentedLoad ?? loadOrdinal) + 1; }
+        }
 
         private sealed class PhaseIdentity
         {

@@ -12,6 +12,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
             tests.Add(new TestMain.TestCase("InitializationTiming native same-row service and phase ordering", SameRowOrder));
+            tests.Add(new TestMain.TestCase("InitializationTiming readiness excludes bootstrap and structural owners", ReadinessScope));
+            tests.Add(new TestMain.TestCase("InitializationTiming readiness retains the final load row only until reconciliation", ReadinessFinalRow, game: "s3k"));
             tests.Add(new TestMain.TestCase("InitializationTiming no-service row is explicit hold", NoService));
             tests.Add(new TestMain.TestCase("InitializationTiming unrepresented prefix retains live identity", UnrepresentedPrefix));
             tests.Add(new TestMain.TestCase("InitializationTiming ordinary handler cannot masquerade as zero service", OrdinaryHandlerRejected));
@@ -24,6 +26,73 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase("InitializationTiming empty SST tail can resume objects without skipping live work", EmptyObjectTail, game: "s3k"));
             tests.Add(new TestMain.TestCase("InitializationTiming verified native hook service and phase ordering", NativeHooks, game: "s3k"));
             tests.Add(new TestMain.TestCase("InitializationTiming excludes cold bootstrap but rejects represented ordinary interrupts", BootstrapBoundary, game: "s3k"));
+        }
+
+        private static void ReadinessScope()
+        {
+            var output = new StringWriter();
+            var writer = new InitializationHardwareTimingWriter(output);
+            writer.ObserveCompletion(10, null, false, "post_objects", "kos_module_queue", 0, Fp);
+            writer.ObserveCompletion(11, 1, true, "post_objects", "kos_module_queue", 0, Fp);
+            AssertEx.Equal("", output.ToString());
+            writer.ObserveCompletion(12, 2, false, "post_objects", "kos_module_queue", 7, Fp);
+            AssertEx.Equal("{\"event\":\"hardware_work_completed\",\"raw_frame\":12,\"boundary\":\"post_objects\",\"kind\":\"kos_module_queue\",\"ordinal\":7,\"submission_fingerprint\":\"" + Fp + "\",\"load_ordinal\":2}\n", output.ToString());
+            AssertEx.Throws<ArgumentOutOfRangeException>(() => writer.ObserveCompletion(-1, 1, false,
+                "post_objects", "kos_module_queue", 0, Fp), "identity");
+            AssertEx.Throws<ArgumentException>(() => writer.ObserveCompletion(13, 1, false,
+                "unknown", "kos_module_queue", 0, Fp), "boundary");
+            AssertEx.Throws<ArgumentException>(() => writer.ObserveCompletion(13, 1, false,
+                "post_objects", "unknown", 0, Fp), "kind");
+        }
+
+        private static void ReadinessFinalRow()
+        {
+            string path = Environment.GetEnvironmentVariable("S3K_ROM_PATH");
+            if (string.IsNullOrEmpty(path)) throw new TestMain.SkipTestException("S3K_ROM_PATH is not set");
+            bool represented = false;
+            var host = new FakeS1Host(null);
+            var phases = new StringWriter();
+            var output = new StringWriter();
+            var readiness = new InitializationHardwareTimingWriter(output);
+            using (var observer = new S3kInitializationTimingObserver(host, File.ReadAllBytes(path),
+                phase => Fp, () => represented)) {
+                host.FireExecuteCallback(0x6000);
+                AssertEx.Equal(false, observer.LoadOrdinalForCompletedFrame.HasValue);
+                observer.FlushFrame(0, phases);
+                represented = true;
+                host.FireExecuteCallback(0x6000);
+                observer.FlushFrame(1, phases);
+                host.FireExecuteCallback(0x62CC);
+                AssertEx.Equal(1L, observer.LoadOrdinalForCompletedFrame.Value);
+                host.FireExecuteCallback(0x6326); host.FireExecuteCallback(0x632C);
+                host.FireExecuteCallback(0x6468); host.FireExecuteCallback(0x647E);
+                host.FireExecuteCallback(0x6484); host.FireExecuteCallback(0x648A);
+                host.FireExecuteCallback(0x64DC);
+                readiness.ObserveCompletion(2, observer.LoadOrdinalForCompletedFrame, false,
+                    "pre_main_loop", "kos_decompression_queue", 9, Fp);
+                AssertEx.Equal(true, output.ToString().Contains("\"raw_frame\":2"));
+                AssertEx.Equal(true, output.ToString().Contains("\"load_ordinal\":1"));
+                observer.FlushFrame(2, phases);
+                AssertEx.Equal(false, observer.LoadOrdinalForCompletedFrame.HasValue);
+                string finalRow = output.ToString();
+                readiness.ObserveCompletion(3, observer.LoadOrdinalForCompletedFrame, false,
+                    "pre_main_loop", "kos_decompression_queue", 10, Fp);
+                AssertEx.Equal(finalRow, output.ToString());
+                observer.VerifyComplete();
+                host.FireExecuteCallback(0x6000);
+                AssertEx.Equal(2L, observer.LoadOrdinalForCompletedFrame.Value);
+                host.FireExecuteCallback(0x62CC); host.FireExecuteCallback(0x6326);
+                host.FireExecuteCallback(0x632C); host.FireExecuteCallback(0x6468);
+                host.FireExecuteCallback(0x647E); host.FireExecuteCallback(0x6484);
+                host.FireExecuteCallback(0x648A); host.FireExecuteCallback(0x64DC);
+                host.FireExecuteCallback(0x6000);
+                AssertEx.Throws<InvalidOperationException>(
+                    () => GC.KeepAlive(observer.LoadOrdinalForCompletedFrame), "one readiness row");
+                // Phase capture still supports ordered same-row operations;
+                // only ambiguous queue attribution is forbidden.
+                observer.FlushFrame(3, phases);
+                AssertEx.Equal(3L, observer.LoadOrdinalForCompletedFrame.Value);
+            }
         }
 
         private static InitializationTimingEventEngine Started()
@@ -274,8 +343,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     using (var session = new NoReplacePublisher().OpenSession(output))
                     using (var sink = new S3KStagedSegmentSink(session)) {
                         TextWriter timing = sink.OpenInitializationTimingStream();
+                        TextWriter readiness = sink.OpenInitializationHardwareTimingStream();
+                        // Even pre-written eligible output must be revoked on a
+                        // capped phase, ordinary IRQ or provisional callback tail.
+                        new InitializationHardwareTimingWriter(readiness).ObserveCompletion(1, 1, false,
+                            "post_objects", "kos_module_queue", 0, Fp);
                         Action capture = () => S3KCompleteRunCaptureRunner.Capture(movie, host,
-                            "cap-test", "three-rows.bk2", "2026-11-03", 3, rom, sink, false, timing);
+                            "cap-test", "three-rows.bk2", "2026-11-03", 3, rom, sink, false, timing, readiness);
                         if (scenario != 2) {
                             AssertEx.Throws<InvalidOperationException>(capture, scenario == 3
                                 ? "no represented run rows" : "incomplete native initialization");
@@ -285,6 +359,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     }
                     AssertEx.Equal(scenario == 2 ? 1 : 0,
                         Directory.GetFiles(output, "initialization_timing.jsonl", SearchOption.AllDirectories).Length);
+                    AssertEx.Equal(scenario == 2 ? 1 : 0,
+                        Directory.GetFiles(output, "initialization_hardware_timing.jsonl", SearchOption.AllDirectories).Length);
                     if (scenario != 2) AssertEx.Equal(0, Directory.GetFiles(output, "*", SearchOption.AllDirectories).Length);
                 }
             } finally { Directory.Delete(root, true); }

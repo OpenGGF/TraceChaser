@@ -3037,7 +3037,8 @@ namespace BizHawk.Headless.Gpgx
                         romBytes,
                         sink,
                         options.LoadQueueState,
-                        options.InitializationTiming ? sink.OpenInitializationTimingStream() : null);
+                        options.InitializationTiming ? sink.OpenInitializationTimingStream() : null,
+                        options.InitializationTiming ? sink.OpenInitializationHardwareTimingStream() : null);
                     // The run-level interstitial hardware-timing stream
                     // outlives every segment, so it is completed here rather
                     // than at any EndSegment. A no-op unless a completion

@@ -220,7 +220,8 @@ namespace OpenGGF.BizHawk.Headless
             byte[] rom,
             IS3KCompleteRunSegmentSink sink,
             bool loadQueueState = false,
-            TextWriter initializationTiming = null)
+            TextWriter initializationTiming = null,
+            TextWriter initializationHardwareTiming = null)
         {
             if (movie == null)
             {
@@ -246,6 +247,8 @@ namespace OpenGGF.BizHawk.Headless
             {
                 throw new ArgumentNullException("rom");
             }
+            if (initializationHardwareTiming != null && initializationTiming == null)
+                throw new ArgumentException("initialization readiness requires phase observation", "initializationHardwareTiming");
             if (effectiveMovieLength < 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -277,6 +280,7 @@ namespace OpenGGF.BizHawk.Headless
             using (IEnumerator<Bk2Frame> frames =
                 movie.OpenFrameStream().GetEnumerator())
             {
+                state.AttachInitializationReadiness(initialization, initializationHardwareTiming);
                 Bk2Frame next = frames.MoveNext() ? frames.Current : null;
                 Bk2Frame lastApplied = null;
                 // BK2 row i lives at appliedRows[i]. Rows are applied in
@@ -466,6 +470,9 @@ namespace OpenGGF.BizHawk.Headless
             private readonly HardwareTimingEventEngine hardwareTimingEngine;
             private readonly byte[] rom;
             private readonly bool loadQueueState;
+            private S3kInitializationTimingObserver initializationObserver;
+            private InitializationHardwareTimingWriter initializationHardware;
+            private bool observingInterstitial;
 
             // Per-segment: a fresh engine at every arm, so each segment
             // re-emits its own pre-trace snapshot and re-latches its own
@@ -491,7 +498,24 @@ namespace OpenGGF.BizHawk.Headless
                 this.loadQueueState = loadQueueState;
                 hardwareTimingEngine =
                     new HardwareTimingEventEngine(rom);
+                hardwareTimingEngine.CompletionObserved = ObserveInitializationReadiness;
                 ManifestSegments = new List<RunManifestSegment>();
+            }
+
+            internal void AttachInitializationReadiness(S3kInitializationTimingObserver observer, TextWriter output)
+            {
+                initializationObserver = observer;
+                initializationHardware = output == null ? null : new InitializationHardwareTimingWriter(output);
+            }
+
+            private void ObserveInitializationReadiness(string boundary, string kind, long ordinal, string fingerprint)
+            {
+                if (initializationHardware == null || !observingInterstitial) return;
+                // Same physical namespace as initialization.FlushFrame below:
+                // completed advance count N belongs to zero-based BK2 row N-1.
+                initializationHardware.ObserveCompletion(host.CompletedFrame - 1,
+                    initializationObserver.LoadOrdinalForCompletedFrame, !observingInterstitial,
+                    boundary, kind, ordinal, fingerprint);
             }
 
             internal IList<RunManifestSegment> ManifestSegments
@@ -625,6 +649,7 @@ namespace OpenGGF.BizHawk.Headless
 
             private void ObserveInterstitial()
             {
+                observingInterstitial = true;
                 hardwareTimingEngine.InterstitialContext =
                     InterstitialContext();
                 try
@@ -634,6 +659,7 @@ namespace OpenGGF.BizHawk.Headless
                 }
                 finally
                 {
+                    observingInterstitial = false;
                     hardwareTimingEngine.InterstitialContext = null;
                 }
             }

@@ -148,6 +148,7 @@
     <Compile Include="src/Recording/S3kExactKosMeasurementObserver.cs" />
     <Compile Include="src/Recording/LevelEntryPlacementLatch.cs" />
     <Compile Include="src/Recording/InitializationTimingEventEngine.cs" />
+    <Compile Include="src/Recording/InitializationHardwareTimingWriter.cs" />
     <Compile Include="src/Recording/InitializationTimingFingerprint.cs" />
     <Compile Include="src/Recording/S3kInitializationTimingObserver.cs" />
     <Compile Include="src/Recording/LazyOpenTextWriter.cs" />

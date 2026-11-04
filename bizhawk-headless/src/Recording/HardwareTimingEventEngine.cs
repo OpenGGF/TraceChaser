@@ -94,6 +94,9 @@ namespace OpenGGF.BizHawk.Headless
         private int priorMeasurementRawFrame = int.MinValue;
         private int measurementSequenceInFrame;
         private string interstitialContext;
+        // One notification at the existing, reconciled completion owner. This
+        // does not observe another hardware boundary or alter legacy output.
+        internal Action<string, string, long, string> CompletionObserved;
 
         /// <summary>
         /// Names the run-level position of the observations that follow, for
@@ -1487,6 +1490,8 @@ namespace OpenGGF.BizHawk.Headless
             writer.Write(",\"submission_fingerprint\":\"");
             writer.Write(fingerprint);
             writer.Write("\"}\n");
+            if (CompletionObserved != null)
+                CompletionObserved(boundary, eventKind, ordinal, fingerprint);
         }
 
         private static void WriteLengthPrefixedUtf8(

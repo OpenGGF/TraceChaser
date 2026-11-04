@@ -1442,15 +1442,14 @@ namespace OpenGGF.BizHawk.Headless
             /// <summary>
             /// Verifies the finished gzip against the plaintext digest taken
             /// while writing, then decides which file publishes: the gzip
-            /// itself at or above the compressor's threshold (final name
+            /// itself when the shared compression policy selects it (final name
             /// gaining ".gz"), or the payload expanded back to its plain
-            /// name below it — the same threshold rule the bulk path
-            /// applies, evaluated on the plaintext length the digest
-            /// carries. Either way exactly one temporary survives.
+            /// name otherwise. Initialization companions always remain gzip;
+            /// ordinary payloads use the threshold, exactly as the bulk path does. Either way exactly one temporary survives.
             /// </summary>
             private void ResolveCompressedFile()
             {
-                if (payload.PlaintextLength >= compressor.ThresholdBytes)
+                if (compressor.ShouldCompress(Path.GetFileName(finalPath), payload.PlaintextLength))
                 {
                     compressor.VerifyStreamedGzip(
                         stagingPath,

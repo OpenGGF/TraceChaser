@@ -25,10 +25,10 @@ namespace OpenGGF.BizHawk.Headless
     /// (which remains the Windows Lua-route path and is not superseded for
     /// that route):
     ///
-    /// - aux_state*.jsonl, physics*.csv and initialization_timing.jsonl are targeted; metadata.json
+    /// - aux_state*.jsonl, physics*.csv and both initialization companions are targeted; metadata.json
     ///   and run_manifest.json are stored uncompressed in the fixtures too;
-    /// - files below <see cref="ThresholdBytes"/> (default 1 MiB) are left
-    ///   alone;
+    /// - ordinary payloads below <see cref="ThresholdBytes"/> (default 1 MiB)
+    ///   are left alone; initialization companions always use gzip;
     /// - **verify before destroying**: the gzip is written to its own file,
     ///   decompressed again, and compared against the source by SHA-256 AND
     ///   length. Only then is the uncompressed source discarded. A
@@ -154,12 +154,16 @@ namespace OpenGGF.BizHawk.Headless
         {
             return MatchesPrefixAndExtension(fileName, "aux_state", ".jsonl")
                 || MatchesPrefixAndExtension(fileName, "physics", ".csv")
-                || fileName == "initialization_timing.jsonl";
+                || fileName == "initialization_timing.jsonl"
+                || fileName == "initialization_hardware_timing.jsonl";
         }
 
         internal bool ShouldCompress(string fileName, long length)
         {
-            return IsTracePayloadName(fileName) && length >= ThresholdBytes;
+            return IsTracePayloadName(fileName)
+                && (fileName == "initialization_timing.jsonl"
+                    || fileName == "initialization_hardware_timing.jsonl"
+                    || length >= ThresholdBytes);
         }
 
         /// <summary>

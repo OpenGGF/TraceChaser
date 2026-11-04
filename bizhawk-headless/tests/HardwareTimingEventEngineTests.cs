@@ -18,6 +18,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "HardwareTiming pending final module emits one LF event",
                 PendingFinalModuleEmitsOneLfEvent));
             tests.Add(new TestMain.TestCase(
+                "InitializationTiming reconciled completion preserves legacy bytes and emits one readiness event",
+                InitializationReadinessCompletion));
+            tests.Add(new TestMain.TestCase(
                 "HardwareTiming interstitial context replaces raw_frame with"
                 + " run-level provenance",
                 InterstitialContextReplacesRawFrame));
@@ -252,6 +255,40 @@ namespace OpenGGF.BizHawk.Headless.Tests
         /// instead, and is field-disjoint from the per-segment shape so the
         /// two can never be read by the wrong parser.
         /// </summary>
+        private static void InitializationReadinessCompletion()
+        {
+            const int source = 0x100;
+            const int destination = 0xA400;
+            byte[] rom = RomWithSingleModule(source);
+            var host = NewHost();
+            var legacy = new StringWriter();
+            var output = new StringWriter();
+            var readiness = new InitializationHardwareTimingWriter(output);
+            var engine = new HardwareTimingEventEngine(rom);
+            var phases = new InitializationTimingEventEngine();
+            var phaseOutput = new StringWriter();
+            phases.BeginLoad(); phases.BeginPhase("display_clear", GoldenFingerprint);
+            engine.CompletionObserved = (boundary, kind, ordinal, fingerprint) =>
+                readiness.ObserveCompletion(host.CompletedFrame - 1, 1, false, boundary, kind, ordinal, fingerprint);
+            host.Advance(); StageActive(host, source, destination, 0x81);
+            engine.InterstitialContext = "\"after_segment\":\"ss\",\"after_segment_index\":1,\"bk2_frame\":" + host.CompletedFrame;
+            engine.ObserveFrameEnd(0, host, legacy);
+            phases.FlushFrame(host.CompletedFrame - 1, phaseOutput);
+            AssertEx.Equal("", output.ToString());
+            host.Advance(); StageEmpty(host);
+            engine.InterstitialContext = "\"after_segment\":\"ss\",\"after_segment_index\":1,\"bk2_frame\":" + host.CompletedFrame;
+            engine.ObserveFrameEnd(0, host, legacy);
+            phases.ResumePhase(); phases.FlushFrame(host.CompletedFrame - 1, phaseOutput);
+            engine.ObserveFrameEnd(0, host, legacy);
+            // CompletedFrame is a one-based completed advance count. Both
+            // dedicated companions name physical input row count - 1.
+            AssertEx.Equal(true, phaseOutput.ToString().Contains("\"raw_frame\":1,\"sequence\":0,\"load_ordinal\":1"));
+            string fingerprint = HardwareTimingEventEngine.ComputeSubmissionFingerprint(
+                "KOS_MODULE_QUEUE", source, 7, destination, 1, "kosinski_moduled", 1);
+            AssertEx.Equal("{\"event\":\"hardware_work_completed\",\"origin\":\"interstitial\",\"after_segment\":\"ss\",\"after_segment_index\":1,\"bk2_frame\":2,\"boundary\":\"post_objects\",\"kind\":\"kos_module_queue\",\"ordinal\":0,\"submission_fingerprint\":\"" + fingerprint + "\"}\n", legacy.ToString());
+            AssertEx.Equal("{\"event\":\"hardware_work_completed\",\"raw_frame\":1,\"boundary\":\"post_objects\",\"kind\":\"kos_module_queue\",\"ordinal\":0,\"submission_fingerprint\":\"" + fingerprint + "\",\"load_ordinal\":1}\n", output.ToString());
+        }
+
         private static void InterstitialContextReplacesRawFrame()
         {
             const int source = 0x100;

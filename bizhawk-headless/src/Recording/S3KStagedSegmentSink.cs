@@ -37,6 +37,7 @@ namespace OpenGGF.BizHawk.Headless
         private NoReplacePublisher.StagedStream hardwareTiming;
         private NoReplacePublisher.StagedStream interstitial;
         private NoReplacePublisher.StagedStream initialization;
+        private NoReplacePublisher.StagedStream initializationHardware;
         private string dirToken;
 
         internal S3KStagedSegmentSink(
@@ -139,9 +140,17 @@ namespace OpenGGF.BizHawk.Headless
             return initialization.Writer;
         }
 
+        public TextWriter OpenInitializationHardwareTimingStream()
+        {
+            if (initializationHardware != null) throw new InvalidOperationException("Initialization readiness stream already opened");
+            initializationHardware = session.OpenFile("initialization_hardware_timing.jsonl");
+            return initializationHardware.Writer;
+        }
+
         public void CompleteRunFiles()
         {
             if (initialization != null) { initialization.Complete(); initialization = null; }
+            if (initializationHardware != null) { initializationHardware.Complete(); initializationHardware = null; }
             if (interstitial != null)
             {
                 interstitial.Complete();
@@ -162,6 +171,7 @@ namespace OpenGGF.BizHawk.Headless
         private void DisposeOpenStreams()
         {
             if (initialization != null) { initialization.Dispose(); initialization = null; }
+            if (initializationHardware != null) { initializationHardware.Dispose(); initializationHardware = null; }
             if (physics != null)
             {
                 physics.Dispose();

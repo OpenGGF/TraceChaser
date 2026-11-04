@@ -4,7 +4,10 @@
 
 - Record opt-in S3K initialization timing for real fresh-load phases after the
   seeded bootstrap, with ROM-backed identities, explicit serviced/masked rows,
-  reviewed object cuts and fail-closed publication of incomplete loads.
+  reviewed object cuts and fail-closed publication of incomplete loads. Its
+  companion records actual queue readiness during unsegmented represented loads,
+  without changing the existing interstitial provenance stream. Both dedicated
+  companions use gzip by default even below the ordinary payload threshold.
 
 - Record `level_entry_placement_source` in S3K complete-run level/bonus and
   S2/KiS2 level metadata: the ROM's start-table, star-post or special-stage

@@ -109,7 +109,29 @@ subsequent actual callback, including new children, has a reviewed independent
 closure. Unknown callbacks abort the entire staged capture; CPU/slot observations
 never enter the timing stream. A cap before any represented rows, during a
 represented load or during a provisional callback tail rejects publication.
-For fixture candidates use `--compress-threshold 0` so this
-small companion is compressed by the native publisher too. This capability is under qualification;
+The same opt-in also writes `initialization_hardware_timing.jsonl`. It mirrors
+actual queue completions only while a represented fresh load owns the physical
+row and no structural segment exports it. Each event has exactly seven fields:
+`event` (`hardware_work_completed`), absolute zero-based `raw_frame`, `boundary`,
+`kind`, `ordinal`, `submission_fingerprint`, and the matching `load_ordinal`.
+The existing completion observer owns kind, ordinal, fingerprint and service
+boundary; no new execute hook or elapsed-work estimate is introduced. The load
+ordinal remains associated with its final physical row until frame-end queue
+reconciliation, then is cleared. A completion row containing more than one
+represented load is rejected rather than attributed to one arbitrarily.
+Cold bootstrap and ordinary gaps emit nothing,
+and structural rows retain their sole per-segment completion record. An enabled
+capture with no eligible completions publishes an empty companion.
+
+Both dedicated companions convert the owning host's completed advance count
+`N` to absolute input row `N-1`. For the same completion the old interstitial
+`bk2_frame` retains `N`; its integer must never be copied as `raw_frame`.
+The old `hardware_timing_interstitial.jsonl` bytes and provenance-only frame
+positions remain unchanged. They are not repurposed as readiness input. Both
+new companions share the staging transaction and incomplete-load rejection.
+Both initialization companions are gzip-compressed whenever compression is
+enabled, including empty or tiny output below the ordinary payload threshold.
+`--no-compress` remains available for diagnostics; use `--compress-threshold 0`
+when all other small trace payloads must also be compressed. This capability is under qualification;
 its output does not become a canonical fixture without independent review and
 explicit approval of the exact native bytes.
