@@ -254,7 +254,15 @@ namespace OpenGGF.BizHawk.Headless
             new RamField("collected_emerald_4", 0xFFB6, 1),
             new RamField("collected_emerald_5", 0xFFB7, 1),
             new RamField("collected_emerald_6", 0xFFB8, 1),
-            new RamField("sk_special_stage_flag", 0xFFBB, 1)
+            new RamField("sk_special_stage_flag", 0xFFBB, 1),
+            // Full 16.16 camera longs: the low word is the sub-pixel fraction,
+            // which survives level loads (only Title_Screen clears Camera_RAM,
+            // sonic3k.asm:5448) and feeds autoscrollers such as DDZ's. The
+            // addresses are the loc_1BF8C stores (ROM $1BF8C).
+            new RamField("camera_x_pos", 0xEE78, 4),
+            new RamField("camera_y_pos", 0xEE7C, 4),
+            new RamField("camera_x_pos_p2", 0xEE60, 4),
+            new RamField("camera_y_pos_p2", 0xEE64, 4)
         };
 
         /// <summary>
@@ -288,7 +296,13 @@ namespace OpenGGF.BizHawk.Headless
             new RamField("life_count", 0xFE12, 1),
             new RamField("extra_life_flags", 0xFE1B, 1),
             new RamField("ring_count", 0xFE20, 2),
-            new RamField("timer", 0xFE22, 4)
+            new RamField("timer", 0xFE22, 4),
+            // Full 16.16 camera longs (s2.constants.asm:1216-1217; P2 pair from
+            // the encoded LevelSizeLoad stores).
+            new RamField("camera_x_pos", 0xEE00, 4),
+            new RamField("camera_y_pos", 0xEE04, 4),
+            new RamField("camera_x_pos_p2", 0xEE20, 4),
+            new RamField("camera_y_pos_p2", 0xEE24, 4)
         };
     }
 }

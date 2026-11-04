@@ -217,6 +217,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 host.SetU16(0xFE3C, (ushort)(f < 4 ? 0x1234 : 0x9999)); // Saved_camera_X_pos
                 host.SetU16(0xFE5E, 0x0456);                           // Saved2_mean_water_level
                 host.Ram[0xFE12] = 4;                                  // Life_count
+                host.SetU16(0xEE78, 0x0123);                           // Camera_X_pos
+                host.SetU16(0xEE7A, (ushort)(f < 4 ? 0xC000 : 0x4000)); // fraction
             };
             var arms = new List<S3KSegmentArm>();
             var segmenter = new S3KCompleteRunSegmenter(20);
@@ -235,6 +237,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x1234L, ram["saved_camera_x_pos"]);
             AssertEx.Equal(0x0456L, ram["saved2_mean_water_level"]);
             AssertEx.Equal(4L, ram["life_count"]);
+            // The whole 16.16 long, fraction included, as of the first PreLevel frame.
+            AssertEx.Equal(0x0123C000L, ram["camera_x_pos"]);
             AssertEx.Equal(LevelEntryPlacementLatch.S3kFields.Length, arms[0].LevelEntry.Ram.Count);
         }
 
