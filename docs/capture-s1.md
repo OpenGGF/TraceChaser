@@ -26,6 +26,11 @@ with `--run-id NAME` for a named run manifest. The segmenter records level and
 special-stage transitions from one movie and disambiguates repeated segment
 directories. Do not combine the two selectors.
 
+Run-mode manifest transitions carry `gap_admission_runs`, the shared S2/S3K
+census: the main-loop admission (BizHawk lag flag) of each movie row strictly
+between the source segment's last recorded row and the destination segment's
+first recorded row, run-length encoded and alternating from non-lag.
+
 ```bash
 "$TRACECHASER_ROOT/bizhawk-headless/run.sh" \
   --tracechaser-root "$TRACECHASER_ROOT" \

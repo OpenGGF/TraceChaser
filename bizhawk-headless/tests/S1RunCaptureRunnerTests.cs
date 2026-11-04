@@ -561,12 +561,24 @@ namespace OpenGGF.BizHawk.Headless.Tests
                     "{\"from_segment\": 0, \"to_segment\": 1,"
                     + " \"entry_kind\": \"giant_ring\","
                     + " \"mode_change_bk2_frame\": 16,"
-                    + " \"rings_before\": 10, \"emeralds_before\": 0},");
+                    + " \"rings_before\": 10, \"emeralds_before\": 0,"
+                    + " \"gap_admission_runs\": [");
                 AssertContains(result.RunManifestJson,
                     "{\"from_segment\": 1, \"to_segment\": 2,"
                     + " \"entry_kind\": \"stage_exit\","
                     + " \"mode_change_bk2_frame\": 22,"
-                    + " \"rings_after\": 9, \"emeralds_after\": 1}");
+                    + " \"rings_after\": 9, \"emeralds_after\": 1,"
+                    + " \"gap_admission_runs\": [");
+                // The census covers exactly the movie rows no segment records.
+                foreach (RunManifestTransition tx in result.Transitions)
+                {
+                    RunManifestSegment from = result.Segments[tx.FromSegment];
+                    RunManifestSegment to = result.Segments[tx.ToSegment];
+                    int gap = to.Bk2FrameOffset - from.Bk2FrameOffset - from.TraceFrameCount;
+                    int total = 0;
+                    foreach (int run in tx.GapAdmissionRuns) total += run;
+                    AssertEx.Equal(gap, total);
+                }
             });
         }
 
