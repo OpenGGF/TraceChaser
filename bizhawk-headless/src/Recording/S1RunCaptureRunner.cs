@@ -233,6 +233,9 @@ namespace OpenGGF.BizHawk.Headless
                             "GPGX CompletedFrame is " + host.CompletedFrame
                             + "; expected " + rowsConsumed + ".");
                     }
+                    // Every physical frame, armed or not, so the census
+                    // covers the unrecorded rows between segments.
+                    state.RecordPhysicalAdmission(rowsConsumed - 1, host);
                     int frameNow = rowsConsumed;
                     byte gameMode = S1Ram.U8(host, S1Ram.GameMode);
 
@@ -370,6 +373,8 @@ namespace OpenGGF.BizHawk.Headless
                 new List<RunManifestSegment>();
             private readonly List<RunManifestTransition> transitions =
                 new List<RunManifestTransition>();
+            // Movie row i's main-loop admission, for the gap census.
+            private readonly List<bool> physicalLag = new List<bool>();
             private readonly List<DynamicArtGapTransition>
                 dynamicArtGapTransitions =
                     new List<DynamicArtGapTransition>();
@@ -437,6 +442,22 @@ namespace OpenGGF.BizHawk.Headless
             internal bool Started { get; private set; }
             internal bool DetourActive { get; set; }
             internal int DynamicArtLogicalFrame { get; private set; }
+
+            /// <summary>
+            /// Records this physical frame's main-loop admission at its BK2
+            /// movie-row index, keeping the list dense and aligned with
+            /// bk2_frame_offset (the S2 run-mode contract).
+            /// </summary>
+            internal void RecordPhysicalAdmission(int movieRow, IGpgxHost host)
+            {
+                if (movieRow != physicalLag.Count)
+                {
+                    throw new InvalidOperationException(
+                        "admission census expected movie row "
+                        + physicalLag.Count + " but was " + movieRow + ".");
+                }
+                physicalLag.Add(host.IsLagged);
+            }
 
             internal void PrepareDynamicArtCursor(int movieLogicalFrame)
             {
@@ -691,6 +712,8 @@ namespace OpenGGF.BizHawk.Headless
                     if (transitions.Count > 0 || runId != null
                         || dynamicArtGapTransitions.Count > 0)
                     {
+                        GapAdmissionCensus.Attach(
+                            segments, transitions, physicalLag);
                         runManifestJson = S1RunManifestWriter.Format(
                             runId,
                             sourceBk2,
