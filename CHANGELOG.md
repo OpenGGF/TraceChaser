@@ -11,6 +11,7 @@
   manifest transitions the shared `gap_admission_runs` census of the
   unrecorded rows between segments.
 - Give S1 run-mode manifest transitions the same `gap_admission_runs` census.
+- Add the full 16.16 camera longs (fraction included) to `level_entry_ram`.
 - Sample S3K manifest terminal mode after original movie input exhaustion;
   omit unsupported modes and diagnostic capture bounds without changing rows.
 - Add a source-locked, passive constructor-reset prefix diagnostic through the

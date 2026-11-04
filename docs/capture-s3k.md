@@ -84,7 +84,10 @@ order. It holds the `Saved_*` block (`sub_2D164`/`Save_Level_Data`, read by
 `Load_Starpost_Settings`), the `Saved2_*` block (`Save_Level_Data2`, read by
 `loc_2D2C2`), `Special_bonus_entry_flag`, `Life_count`, `Current_special_stage`,
 `Extra_life_flags`, `Ring_count`, `Timer`, `Collected_special_ring_array`,
-`Respawn_table_keep`, the emerald counts and array, and `SK_special_stage_flag`.
+`Respawn_table_keep`, the emerald counts and array, `SK_special_stage_flag`,
+and the full 16.16 `Camera_X_pos`/`Camera_Y_pos` longs and their `_P2` pair
+(`camera_x_pos`, `camera_y_pos`, `camera_x_pos_p2`, `camera_y_pos_p2`; the low
+word is the sub-pixel fraction, which only `Title_Screen` clears).
 The addresses are checked against the encoded `Save_Level_Data` ($2D176) and
 `Save_Level_Data2` ($2D1CC) instructions.
 
