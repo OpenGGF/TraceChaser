@@ -37,6 +37,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "LevelEntryPlacement metadata writers emit the key only when observed",
                 MetadataWritersEmitKeyOnlyWhenObserved));
+            tests.Add(new TestMain.TestCase(
+                "LevelEntryPlacement S3K segmenter latches the saved blocks with the source",
+                S3kSegmenterLatchesSavedBlocks));
+            tests.Add(new TestMain.TestCase(
+                "GapAdmissionCensus encodes the unrecorded rows between segments",
+                GapCensusEncodesUnrecordedRows));
         }
 
         private static void S3kMappingFollowsRomBranches()
@@ -194,6 +200,61 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x80, levelArms[1].LevelEntry.LastStarPostHit);
             AssertEx.Equal(0, levelArms[2].LevelEntry.LastStarPostHit);
             AssertEx.Equal(2, levelArms[3].LevelEntry.LastStarPostHit);
+        }
+
+        private static void S3kSegmenterLatchesSavedBlocks()
+        {
+            // Load_Starpost_Settings/loc_2D2C2 read these before the load
+            // overwrites anything; a value written after the first PreLevel
+            // frame must not appear.
+            int frame = 0;
+            Action<FakeS1Host, int> apply = (host, f) =>
+            {
+                frame = f;
+                host.Ram[S3KRam.GameMode] = (byte)(f < 3 ? 0x04 : f < 8 ? 0x8C : 0x0C);
+                host.Ram[S3KRam.Zone] = 1;
+                host.Ram[S3KRam.LastStarPostHit] = 3;
+                host.SetU16(0xFE3C, (ushort)(f < 4 ? 0x1234 : 0x9999)); // Saved_camera_X_pos
+                host.SetU16(0xFE5E, 0x0456);                           // Saved2_mean_water_level
+                host.Ram[0xFE12] = 4;                                  // Life_count
+            };
+            var arms = new List<S3KSegmentArm>();
+            var segmenter = new S3KCompleteRunSegmenter(20);
+            segmenter.SegmentOpened = arms.Add;
+            var fake = new FakeS1Host(apply);
+            apply(fake, 0);
+            while (!segmenter.Finished)
+            {
+                segmenter.Step(fake);
+                if (segmenter.Finished) break;
+                fake.Advance();
+            }
+            AssertEx.Equal(1, arms.Count);
+            var ram = new Dictionary<string, long>();
+            foreach (var kv in arms[0].LevelEntry.Ram) ram[kv.Key] = kv.Value;
+            AssertEx.Equal(0x1234L, ram["saved_camera_x_pos"]);
+            AssertEx.Equal(0x0456L, ram["saved2_mean_water_level"]);
+            AssertEx.Equal(4L, ram["life_count"]);
+            AssertEx.Equal(LevelEntryPlacementLatch.S3kFields.Length, arms[0].LevelEntry.Ram.Count);
+        }
+
+        private static void GapCensusEncodesUnrecordedRows()
+        {
+            var segments = new List<RunManifestSegment>
+            {
+                new RunManifestSegment("aiz", RunManifestSegment.LevelKind, "complete_run", 10, 5, 0, 1, null),
+                new RunManifestSegment("gumball", RunManifestSegment.BonusStageKind, "s3k_bonus_stage", 20, 3, 0x13, 1, null)
+            };
+            var tx = new RunManifestTransition(0, 1, RunManifestTransition.StarpostBonusKind, 18);
+            var transitions = new List<RunManifestTransition> { tx };
+            var lag = new List<bool>();
+            for (int i = 0; i < 30; i++) lag.Add(i == 16 || i == 17);
+            GapAdmissionCensus.Attach(segments, transitions, lag);
+            // Rows 15..19: 15 run, 16-17 lag, 18-19 run.
+            AssertEx.Equal(3, tx.GapAdmissionRuns.Count);
+            AssertEx.Equal(1, tx.GapAdmissionRuns[0]);
+            AssertEx.Equal(2, tx.GapAdmissionRuns[1]);
+            AssertEx.Equal(2, tx.GapAdmissionRuns[2]);
         }
 
         private static void MetadataWritersEmitKeyOnlyWhenObserved()

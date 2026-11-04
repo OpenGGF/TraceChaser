@@ -268,6 +268,9 @@ namespace OpenGGF.BizHawk.Headless
             segmenter.SegmentClosed = state.CloseSegment;
             string expectedMovieEndMode = null;
             bool representedRunStarted = false;
+            // Movie row i's main-loop admission (BizHawk lag flag of the frame
+            // its input produced): the gap census's only input.
+            var physicalLag = new List<bool>();
 
             using (var initialization = initializationTiming == null ? null
                 : new S3kInitializationTimingObserver(host, rom,
@@ -371,6 +374,7 @@ namespace OpenGGF.BizHawk.Headless
                     S1TraceCaptureRunner.ApplyFrame(lastApplied, host);
                     host.Advance();
                     advanced++;
+                    physicalLag.Add(host.IsLagged);
                     if (host.CompletedFrame != advanced)
                     {
                         throw new InvalidOperationException(
@@ -392,6 +396,8 @@ namespace OpenGGF.BizHawk.Headless
             string manifestJson = null;
             if (S3KRunManifestWriter.ShouldEmit(segmenter.Transitions, runId))
             {
+                GapAdmissionCensus.Attach(
+                    state.ManifestSegments, segmenter.Transitions, physicalLag);
                 manifestJson = S3KRunManifestWriter.Format(
                     runId,
                     sourceBk2,

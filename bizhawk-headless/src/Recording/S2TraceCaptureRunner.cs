@@ -283,8 +283,7 @@ namespace OpenGGF.BizHawk.Headless
                     entryPlacement.Observe(
                         gameMode,
                         S2Ram.U8(host, S2Ram.Zone),
-                        () => LevelEntryPlacementLatch.ObserveS2(
-                            S2Ram.U8(host, S2Ram.LastStarPoleHit)));
+                        () => LevelEntryPlacementLatch.ObserveS2(host));
 
                     if (skippingSegment)
                     {

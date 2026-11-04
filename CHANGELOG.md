@@ -13,6 +13,10 @@
   S2/KiS2 level metadata: the ROM's start-table, star-post or special-stage
   placement branch, latched at the first PreLevel frame of each load, with the
   raw `last_star_post_hit` byte from the same observation.
+- Record the ROM's Saved/Saved2 restore blocks and carried counters as
+  `level_entry_ram` at the same boundary (S3K and S2/KiS2), and give S3K
+  manifest transitions the shared `gap_admission_runs` census of the
+  unrecorded rows between segments.
 - Sample S3K manifest terminal mode after original movie input exhaustion;
   omit unsupported modes and diagnostic capture bounds without changing rows.
 - Add a source-locked, passive constructor-reset prefix diagnostic through the
