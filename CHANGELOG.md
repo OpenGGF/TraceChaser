@@ -19,6 +19,9 @@
   unrecorded rows between segments.
 - Give S1 run-mode manifest transitions the same `gap_admission_runs` census.
 - Add the full 16.16 camera longs (fraction included) to `level_entry_ram`.
+  The same S3K first-PreLevel observation also exports the native Act3 flag,
+  ring word and timer long before title/ScreenEvents consume them; absent
+  observations remain absent and schema v5 remains the sole contract.
 - Sample S3K manifest terminal mode after original movie input exhaustion;
   omit unsupported modes and diagnostic capture bounds without changing rows.
 - Add a source-locked, passive constructor-reset prefix diagnostic through the

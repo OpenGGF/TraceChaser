@@ -238,6 +238,12 @@ namespace OpenGGF.BizHawk.Headless
             new RamField("saved2_camera_max_y_pos", 0xFE62, 2),
             new RamField("saved2_dynamic_resize_routine", 0xFE64, 1),
             new RamField("saved2_status_secondary", 0xFF96, 1),
+            // Native continuation bank, independent of Saved/Saved2 and live counters.
+            // loc_63C14 / loc_7F310 store byte/word/long; loc_62FE clears the
+            // flag and loc_59B1C / loc_5A49A consume the bank after this latch.
+            new RamField("act3_flag", 0xEE5E, 1),
+            new RamField("act3_ring_count", 0xEF5E, 2),
+            new RamField("act3_timer", 0xEF60, 4),
             new RamField("life_count", 0xFE12, 1),
             new RamField("current_special_stage", 0xFE16, 1),
             new RamField("extra_life_flags", 0xFE1B, 1),

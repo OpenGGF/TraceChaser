@@ -88,6 +88,15 @@ order. It holds the `Saved_*` block (`sub_2D164`/`Save_Level_Data`, read by
 and the full 16.16 `Camera_X_pos`/`Camera_Y_pos` longs and their `_P2` pair
 (`camera_x_pos`, `camera_y_pos`, `camera_x_pos_p2`, `camera_y_pos_p2`; the low
 word is the sub-pixel fraction, which only `Title_Screen` clears).
+The same table includes `act3_flag` (byte `$FFEE5E`),
+`act3_ring_count` (word `$FFEF5E`) and `act3_timer` (long `$FFEF60`).
+These are the separate native LRZ/DEZ continuation bank, not live counters or
+Saved/Saved2. The ROM writes them at `loc_63C14` and `loc_7F310`, clears the
+flag at `loc_62FE`, then consumes the bank at `loc_59B1C` / `loc_5A49A`.
+The first PreLevel latch precedes both consumers; later arming samples cannot
+recover the flag or bank. Zero remains an observed zero, and absent fields in
+older recordings remain unknown. Schema v5 governs this additive observation;
+recorder provenance selects no behavior.
 The addresses are checked against the encoded `Save_Level_Data` ($2D176) and
 `Save_Level_Data2` ($2D1CC) instructions.
 

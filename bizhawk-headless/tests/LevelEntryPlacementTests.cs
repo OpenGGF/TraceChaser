@@ -216,6 +216,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 host.Ram[S3KRam.LastStarPostHit] = 3;
                 host.SetU16(0xFE3C, (ushort)(f < 4 ? 0x1234 : 0x9999)); // Saved_camera_X_pos
                 host.SetU16(0xFE5E, 0x0456);                           // Saved2_mean_water_level
+                // loc_63C14 writes these before Level; loc_62FE and the first
+                // screen event clear them during loading. Sample the earlier bank.
+                host.Ram[0xEE5D] = 0x12;
+                host.Ram[0xEE5E] = (byte)(f < 4 ? 0xFF : 0);
+                host.Ram[0xEE5F] = 0x34;
+                host.SetU16(0xEF5E, (ushort)(f < 4 ? 233 : 0));
+                host.SetU16(0xEF60, 0x8003);
+                host.SetU16(0xEF62, (ushort)(f < 4 ? 0x2825 : 0));
                 host.Ram[0xFE12] = 4;                                  // Life_count
                 host.SetU16(0xEE78, 0x0123);                           // Camera_X_pos
                 host.SetU16(0xEE7A, (ushort)(f < 4 ? 0xC000 : 0x4000)); // fraction
@@ -237,6 +245,9 @@ namespace OpenGGF.BizHawk.Headless.Tests
             AssertEx.Equal(0x1234L, ram["saved_camera_x_pos"]);
             AssertEx.Equal(0x0456L, ram["saved2_mean_water_level"]);
             AssertEx.Equal(4L, ram["life_count"]);
+            AssertEx.Equal(255L, ram["act3_flag"]);
+            AssertEx.Equal(233L, ram["act3_ring_count"]);
+            AssertEx.Equal(0x80032825L, ram["act3_timer"]);
             // The whole 16.16 long, fraction included, as of the first PreLevel frame.
             AssertEx.Equal(0x0123C000L, ram["camera_x_pos"]);
             AssertEx.Equal(LevelEntryPlacementLatch.S3kFields.Length, arms[0].LevelEntry.Ram.Count);
