@@ -187,7 +187,7 @@ namespace OpenGGF.BizHawk.Headless
                 : new S1DynamicArtObserver(
                     loadQueueRom, host,
                     () => state.DynamicArtLogicalFrame);
-            // RunPLC arming, observed at its entry PC because the routine
+            // RunPLC arming, observed at its accepted count write before the routine
             // destroys the head identity (S1PlcHardwareTimingObserver). It
             // reads the Nemesis header out of the ROM image, so the
             // scratch-only legacy capture records nothing.

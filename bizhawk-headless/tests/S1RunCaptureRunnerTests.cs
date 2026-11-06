@@ -135,7 +135,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                         h.SetU16(S1Ram.PlcBuffer + 4, 0xC800);
                         h.SetU16(S1Ram.PlcPatternsLeft, 0);
                         h.FireExecuteCallback(
-                            S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                            S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                     }
                     if (frame == 5)
                     {

@@ -10,22 +10,19 @@ namespace OpenGGF.BizHawk.Headless
     /// RunPLC accepts the queue head for decompression — as a per-segment
     /// hardware-timing readiness stream.
     ///
-    /// RunPLC (docs/s1disasm/sonic.asm:1379-1420, ROM 0x0015E4 in Sonic 1
-    /// World REV01) is the main-loop tail routine that arms the head of
-    /// v_plc_buffer. It arms iff, on entry, v_plc_buffer (0xF680, u32) is
-    /// non-zero AND v_plc_patternsleft (0xF6F8, u16) is zero.
+    /// RunPLC (sonic.asm:1379-1420, World REV01) arms its queue head at
+    /// the shipped FixBugs=0 count write (sonic.asm:1396-1399), before
+    /// NemDec_BuildCodeTable. FixBugs=1 instead writes after that builder;
+    /// this observer intentionally models the shipped FixBugs=0 path.
+    /// Observe that accepted instruction, not routine
+    /// entry: an interrupt between entry and the eligibility tests can retire
+    /// the old decoder, and one before the write can cross a capture row.
+    /// Both would make an entry-time prediction wrong.
     ///
-    /// It is observed at ENTRY rather than sampled per frame because the
-    /// routine DESTROYS the head identity: `move.l a0,(v_plc_buffer).w`
-    /// (sonic.asm:1405) writes back a pointer already advanced past the
-    /// Nemesis header, so no later RAM sample can recover the descriptor
-    /// that was armed. The arm predicate itself is likewise only true at
-    /// entry — the assembly is built with FixBugs = 0 (sonic.asm:20), so
-    /// v_plc_patternsleft is written BEFORE NemDec_BuildCodeTable
-    /// (sonic.asm:1396-1399) and is already non-zero by the time the
-    /// routine returns. This models that un-fixed path; the FixBugs = 1
-    /// path would defer that write to the end of the routine, which does
-    /// not change the entry-observed predicate.
+    /// The original descriptor is still in v_plc_buffer at this instruction;
+    /// RunPLC overwrites it with the advanced source only later (0x161C).
+    /// The native core executes the observed instruction atomically. This
+    /// reads its identity without reproducing CPU timing in the consumer.
     ///
     /// This is an OBSERVER: it reads RAM and the supplied ROM image, and
     /// mutates nothing. It carries no gameplay value, selects no sync
@@ -34,13 +31,12 @@ namespace OpenGGF.BizHawk.Headless
     public sealed class S1PlcHardwareTimingObserver : IDisposable
     {
         /// <summary>
-        /// RunPLC entry, Sonic 1 World REV01 (SHA-1
-        /// 69E102855D4389C3FD1A8F3DC7D193F8EEE5FE5B). The byte pattern
-        /// `4A B8 F6 80 67 xx 4A 78 F6 F8 66` — tst.l (v_plc_buffer).w /
-        /// beq.s / tst.w (v_plc_patternsleft).w / bne.s — occurs exactly
-        /// once in that ROM, here.
+        /// RunPLC's accepted pattern-count write, World REV01 (SHA-1
+        /// 69E102855D4389C3FD1A8F3DC7D193F8EEE5FE5B): 31 C2 F6 F8,
+        /// move.w d2,(v_plc_patternsleft).w. Both eligibility branches have
+        /// succeeded; the instruction has not yet overwritten head identity.
         /// </summary>
-        public const uint RunPlcEntryPc = 0x0015E4;
+        public const uint RunPlcArmWritePc = 0x00160A;
 
         private const string KindName = "NEMESIS_PLC_QUEUE";
         private const string EventKind = "nemesis_plc_queue";
@@ -71,9 +67,9 @@ namespace OpenGGF.BizHawk.Headless
             }
             this.rom = rom;
             this.host = host;
-            callback = OnRunPlcEntry;
+            callback = OnRunPlcArmWrite;
             registration = host.RegisterExecuteCallback(
-                RunPlcEntryPc, callback);
+                RunPlcArmWritePc, callback);
         }
 
         /// <summary>
@@ -160,7 +156,7 @@ namespace OpenGGF.BizHawk.Headless
             registration.Dispose();
         }
 
-        private void OnRunPlcEntry()
+        private void OnRunPlcArmWrite()
         {
             if (disposed || writer == null)
             {
@@ -170,7 +166,7 @@ namespace OpenGGF.BizHawk.Headless
             int patternsLeft = S1Ram.U16(host, S1Ram.PlcPatternsLeft);
             if (head == 0 || patternsLeft != 0)
             {
-                return;     // RunPLC returns without arming anything.
+                return;     // No valid arm identity; never publish a fabricated edge.
             }
 
             uint source = head & 0x00FFFFFFU;

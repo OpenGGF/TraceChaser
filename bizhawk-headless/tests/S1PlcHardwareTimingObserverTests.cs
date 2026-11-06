@@ -55,16 +55,67 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S1PlcHardwareTimingObserver unregisters its callback deterministically",
                 UnregistersCallback));
+            tests.Add(new TestMain.TestCase(
+                "S1PlcHardwareTimingObserver attributes an interrupted entry only to the arm write row",
+                AttributesInterruptedEntryToArmWrite));
+            tests.Add(new TestMain.TestCase(
+                "S1PlcHardwareTimingObserver observes a new head after entry-time decoder retirement",
+                ObservesHeadAfterEntryRetirement));
             string romPath = Environment.GetEnvironmentVariable("S1_ROM_PATH");
             if (!String.IsNullOrEmpty(romPath) && File.Exists(romPath))
             {
                 tests.Add(new TestMain.TestCase(
-                    "S1PlcHardwareTimingObserver pins RunPLC's entry PC in the retail ROM",
-                    PinsRunPlcEntryInRetailRom,
+                    "S1PlcHardwareTimingObserver pins RunPLC's accepted count write in the retail ROM",
+                    PinsRunPlcArmWriteInRetailRom,
                     game: "s1",
                     kind: TestKind.Gate,
                     estimatedSeconds: 0.2));
             }
+        }
+
+        private static void AttributesInterruptedEntryToArmWrite()
+        {
+            var host = new FakeS1Host(null);
+            var writer = new StringWriter();
+            using (host.RegisterExecuteCallback(0x0015E4, () => { }))
+            using (var observer = new S1PlcHardwareTimingObserver(CreateRom(), host))
+            {
+                observer.ArmSegment(writer);
+                ArmHead(host, 0x022670, 0xC800);
+                observer.BeginFrame();
+                host.FireExecuteCallback(0x0015E4);
+                observer.CommitRow(0);
+                AssertEx.Equal("", writer.ToString());
+                observer.BeginFrame();
+                host.FireExecuteCallback(0x00160A);
+                observer.CommitRow(1);
+            }
+            AssertEx.Equal(1, Lines(writer.ToString()).Length);
+            AssertEx.Equal(true, writer.ToString().Contains("\"raw_frame\":1,"));
+            AssertEx.Equal(true, writer.ToString().Contains(FirstFingerprint));
+        }
+
+        private static void ObservesHeadAfterEntryRetirement()
+        {
+            var host = new FakeS1Host(null);
+            var writer = new StringWriter();
+            using (host.RegisterExecuteCallback(0x0015E4, () => { }))
+            using (var observer = new S1PlcHardwareTimingObserver(CreateRom(), host))
+            {
+                observer.ArmSegment(writer);
+                observer.BeginFrame();
+                ArmHead(host, 0x022670, 0xC800);
+                host.SetU16(S1Ram.PlcPatternsLeft, 1);
+                host.FireExecuteCallback(0x0015E4);
+                // The interrupt retires the active decoder before RunPLC's
+                // actual eligibility tests. Only the accepted new head counts.
+                ArmHead(host, 0x0304F0, 0xD000);
+                host.FireExecuteCallback(0x00160A);
+                observer.CommitRow(0);
+            }
+            AssertEx.Equal(1, Lines(writer.ToString()).Length);
+            AssertEx.Equal(true, writer.ToString().Contains(SecondFingerprint));
+            AssertEx.Equal(false, writer.ToString().Contains(FirstFingerprint));
         }
 
         private static void WritesArmedEdge()
@@ -78,7 +129,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.BeginFrame();
                 ArmHead(host, 0x022670, 0xC800);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(0);
             }
             AssertEx.Equal(
@@ -110,14 +161,14 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 host.SetU32(S1Ram.PlcBuffer, 0);
                 host.SetU16(S1Ram.PlcPatternsLeft, 0);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(0);
 
                 observer.BeginFrame();
                 ArmHead(host, 0x022670, 0xC800);
                 host.SetU16(S1Ram.PlcPatternsLeft, 0x2E);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(1);
             }
             AssertEx.Equal(false, lazy.Opened);
@@ -136,10 +187,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.BeginFrame();
                 ArmHead(host, 0x022670, 0xC800);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 ArmHead(host, 0x0304F0, 0xD000);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(4);
 
                 // A frame that produces no row: its edge is dropped and
@@ -147,12 +198,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.BeginFrame();
                 ArmHead(host, 0x022670, 0xC800);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
 
                 observer.BeginFrame();
                 ArmHead(host, 0x0304F0, 0xD000);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(5);
             }
             string[] lines = Lines(writer.ToString());
@@ -180,7 +231,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 ArmHead(host, 0x022670, 0xC800);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.ArmSegment(writer);
                 observer.CommitRow(0);
             }
@@ -199,7 +250,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.BeginFrame();
                 ArmHead(host, 0x022670, 0xC800);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(0);
                 observer.EndSegment();
 
@@ -207,7 +258,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 observer.BeginFrame();
                 ArmHead(host, 0x0304F0, 0xD000);
                 host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc);
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc);
                 observer.CommitRow(0);
                 observer.EndSegment();
             }
@@ -227,13 +278,13 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 ArmHead(host, 0x0F0000, 0xC800);
                 AssertEx.Throws<InvalidDataException>(
                     () => host.FireExecuteCallback(
-                        S1PlcHardwareTimingObserver.RunPlcEntryPc),
+                        S1PlcHardwareTimingObserver.RunPlcArmWritePc),
                     "outside the supplied");
 
                 ArmHead(host, 0x000100, 0xC800);
                 AssertEx.Throws<InvalidDataException>(
                     () => host.FireExecuteCallback(
-                        S1PlcHardwareTimingObserver.RunPlcEntryPc),
+                        S1PlcHardwareTimingObserver.RunPlcArmWritePc),
                     "zero patterns");
             }
         }
@@ -244,44 +295,35 @@ namespace OpenGGF.BizHawk.Headless.Tests
             var observer = new S1PlcHardwareTimingObserver(
                 CreateRom(), host);
             AssertEx.Equal(
-                S1PlcHardwareTimingObserver.RunPlcEntryPc,
+                S1PlcHardwareTimingObserver.RunPlcArmWritePc,
                 host.ExecuteCallbackAddress.Value);
             observer.Dispose();
             AssertEx.Equal(true, host.ExecuteCallbackDisposed);
             AssertEx.Throws<InvalidOperationException>(
                 () => host.FireExecuteCallback(
-                    S1PlcHardwareTimingObserver.RunPlcEntryPc),
+                    S1PlcHardwareTimingObserver.RunPlcArmWritePc),
                 "No execute callback is registered");
             observer.Dispose();
         }
 
         /// <summary>
-        /// RunPLC's entry, identified by the routine's own opening test
-        /// pair (sonic.asm:1380-1383): tst.l (v_plc_buffer).w / beq.s /
-        /// tst.w (v_plc_patternsleft).w / bne.s. The pattern occurs exactly
-        /// once in the retail ROM, so the pinned PC is not a coincidence of
-        /// one build's layout.
+        /// The shipped count write followed by the call into the Nemesis
+        /// code-table builder. Pin opcode bytes against the supplied retail
+        /// ROM rather than trusting a synthetic callback address.
         /// </summary>
-        private static void PinsRunPlcEntryInRetailRom()
+        private static void PinsRunPlcArmWriteInRetailRom()
         {
-            byte[] rom = File.ReadAllBytes(
-                Environment.GetEnvironmentVariable("S1_ROM_PATH"));
+            byte[] rom = File.ReadAllBytes(Environment.GetEnvironmentVariable("S1_ROM_PATH"));
+            byte[] window = { 0x31, 0xC2, 0xF6, 0xF8, 0x61, 0x00, 0xFF, 0x16 };
             var matches = new List<int>();
-            for (int offset = 0; offset + 11 <= rom.Length; offset++)
+            for (int offset = 0; offset + window.Length <= rom.Length; offset++)
             {
-                if (rom[offset] == 0x4A && rom[offset + 1] == 0xB8
-                    && rom[offset + 2] == 0xF6 && rom[offset + 3] == 0x80
-                    && rom[offset + 4] == 0x67
-                    && rom[offset + 6] == 0x4A && rom[offset + 7] == 0x78
-                    && rom[offset + 8] == 0xF6 && rom[offset + 9] == 0xF8
-                    && rom[offset + 10] == 0x66)
-                {
-                    matches.Add(offset);
-                }
+                bool match = true;
+                for (int i = 0; i < window.Length; i++) match &= rom[offset + i] == window[i];
+                if (match) matches.Add(offset);
             }
             AssertEx.Equal(1, matches.Count);
-            AssertEx.Equal(
-                (int)S1PlcHardwareTimingObserver.RunPlcEntryPc, matches[0]);
+            AssertEx.Equal((int)S1PlcHardwareTimingObserver.RunPlcArmWritePc, matches[0]);
         }
 
         /// <summary>

@@ -226,14 +226,14 @@ The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001
 immediately after `Process_Kos_Module_Queue` returns from `Queue_Kos`. It may mirror or
 stage direct-FIFO submission lifecycle only.
 
-The second is the S1 PLC arming observer at `M68K BUS` PC `0x0015E4`, the entry of
-`RunPLC` (`sonic.asm:1379`) in Sonic 1 World REV01. An entry-PC observation is required
-rather than per-frame RAM sampling because the routine DESTROYS the head identity:
-`move.l a0,(v_plc_buffer).w` (`sonic.asm:1405`) writes the pointer back already advanced
-past the Nemesis header, so no later sample can recover the descriptor that was armed,
-and the arm predicate itself (`v_plc_buffer` non-zero, `v_plc_patternsleft` zero) is only
-true on entry. It records readiness edges into the per-segment `hardware_timing.jsonl`
-and nothing else.
+The second is the S1 PLC arming observer at `M68K BUS` PC `0x00160A`, the
+accepted `move.w d2,(v_plc_patternsleft).w` in shipped `RunPLC`
+(`sonic.asm:1396-1399`), Sonic 1 World REV01. Routine entry is too early:
+an interrupt can cross the write or retire the old decoder before eligibility
+is tested. At the accepted write both tests succeeded and the original head
+identity remains intact; `move.l a0,(v_plc_buffer).w` (`sonic.asm:1405`)
+overwrites it only later. The fixed instruction observer records readiness
+edges into per-segment `hardware_timing.jsonl` and nothing else.
 
 The third is the Sonic 2 REV01 pre-consumption request-transfer observer at `M68K BUS`
 PC `0x0010D6`, before opcode bytes `13 80 10 09` execute. It may read only the accepted

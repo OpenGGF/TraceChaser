@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Observe S1 Nemesis PLC arming at the accepted pattern-count write instead
+  of predicting it from RunPLC entry. Interrupts before the actual eligibility
+  tests or count write can no longer omit an arm or stamp it on an earlier row.
+
 - Record opt-in S3K initialization timing for real fresh-load phases after the
   seeded bootstrap, with ROM-backed identities, explicit serviced/masked rows,
   reviewed object cuts and fail-closed publication of incomplete loads. Its
