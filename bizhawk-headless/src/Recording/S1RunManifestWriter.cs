@@ -27,7 +27,8 @@ namespace OpenGGF.BizHawk.Headless
             string expectedMovieEndMode,
             IList<RunManifestSegment> segments,
             IList<RunManifestTransition> transitions,
-            IList<DynamicArtGapTransition> dynamicArtGapTransitions = null)
+            IList<DynamicArtGapTransition> dynamicArtGapTransitions = null,
+            IList<int> terminalAdmissionRuns = null)
         {
             return RunManifestWriter.Format(
                 "s1",
@@ -38,7 +39,7 @@ namespace OpenGGF.BizHawk.Headless
                 expectedMovieEndMode,
                 segments,
                 transitions,
-                dynamicArtGapTransitions);
+                dynamicArtGapTransitions, terminalAdmissionRuns);
         }
     }
 }

@@ -15,6 +15,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
     {
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
+            tests.Add(new TestMain.TestCase("S1RunManifestWriter exports observed terminal lag census", TerminalCensus));
             tests.Add(new TestMain.TestCase(
                 "S1RunManifestWriter emits current strict v5 fields",
                 EmitsStrictV5ManifestEnvelope));
@@ -31,6 +32,17 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase(
                 "S1RunManifestWriter omits an unspecified movie endpoint",
                 OmitsUnspecifiedMovieEndpoint));
+        }
+
+        private static void TerminalCensus()
+        {
+            var physicalLag = new List<bool> { false, false, true, true, false };
+            var runs = GapAdmissionCensus.Encode(physicalLag, 1, 5);
+            AssertEx.Equal("1,2,1", string.Join(",", runs));
+            string json = S1RunManifestWriter.Format("run", "movie.bk2", "title_screen",
+                new List<RunManifestSegment>(), new List<RunManifestTransition>(), null, runs);
+            AssertEx.Equal(true, json.Contains("\"terminal_admission_runs\": [1,2,1]"));
+            AssertEx.Throws<System.ArgumentOutOfRangeException>(() => GapAdmissionCensus.Encode(physicalLag, 1, 6), "invalid admission census range");
         }
 
         private static void EmitsStrictV5ManifestEnvelope()

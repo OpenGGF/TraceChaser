@@ -270,7 +270,7 @@ the count and before the FIFO shifts, and the explicitly opted-in top-level `Que
 the FIFO descriptors, count word and the caller return address; it may not write RAM,
 classify by scene, fixture or frame, select a sync point, or feed a replay.
 
-All five are observers. None may select a trace sync point, mutate emulation state, carry
+All six are observers. None may select a trace sync point, mutate emulation state, carry
 a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate must
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and
@@ -286,8 +286,8 @@ is not permission to add general callback capabilities. Bind-only identity acces
 does not qualify scalar observations, callbacks, phase origin, SR/IRQ semantics
 or a hardware kernel. See [usage and limits](bizhawk-headless/README.md#stock-native-clock-diagnostic-adapter).
 
-The sixth is the user-authorized, opt-in S3K `--initialization-timing`
-observer for the verified locked-on ROM. Its fixed Level/VInt/object-loop
+The sixth is the user-authorized, opt-in `--initialization-timing`
+observer for verified S1 World REV01 and S3K locked-on ROMs. Its fixed Level/VInt/object-loop
 entrypoints may record only ordered `hold`, `resume` and `vint_0` operations
 for independently fingerprinted production initialization phases. It exports
 no counters, CPU/register/slot values, decoder progress or gameplay state.
@@ -299,7 +299,15 @@ loads or provisional callback tails must reject the whole staged capture.
 Successful completion must be checked before publication; Dispose stays cleanup-only.
 The stream has absolute movie rows and its own run-root `initialization_timing.jsonl`
 companion; it never populates physics/aux comparison rows or chooses their sync.
-See `docs/capture-s3k.md`. All other publication/review/approval rules still apply.
+S1 observes GM_Ending, credits-font setup and credits-demo GM_Level through
+fixed, opcode-checked cuts. Its initial-demo callback guard validates actual
+owners/routines including children, excludes the Basaran clock-reading range,
+and rejects reached LZ setup clock reads. This is a bounded reviewed closure,
+not permission to commute arbitrary callbacks. Ending initial-object interrupts
+remain unsupported. S1 opt-in output also carries a run-root terminal lag census;
+it selects existing loop admission and supplies no gameplay values.
+See `docs/capture-s1.md` and `docs/capture-s3k.md`. All other
+publication/review/approval rules still apply.
 
 Native observer builds are **not host-attested**. `build-observer.sh` pins the source
 commits, the clang packages, and the patch; it makes no claim about the identity of the

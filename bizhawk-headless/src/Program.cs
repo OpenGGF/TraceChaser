@@ -474,8 +474,9 @@ namespace BizHawk.Headless.Gpgx
                 gameplaySegment = parsed;
             }
             if (values.ContainsKey("--initialization-timing") && runId == null
-                && traceProfile != S3KCompleteRunSegmenter.LevelTraceProfile)
-                throw new ArgumentException("--initialization-timing requires an S3K complete run");
+                && traceProfile != S3KCompleteRunSegmenter.LevelTraceProfile
+                && traceProfile != S1RunCaptureRunner.LevelTraceProfile)
+                throw new ArgumentException("--initialization-timing requires an S1 or S3K complete run");
             if (runId != null && traceProfile != null)
             {
                 throw new ArgumentException(
@@ -1388,8 +1389,9 @@ namespace BizHawk.Headless.Gpgx
                 {
                     romSha1 = RomIdentity.ValidateSonic1Rev01(romBytes);
                 }
-                if (options.InitializationTiming && (options.Mode != CaptureMode.Trace || traceGame != "s3k"))
-                    throw new ArgumentException("--initialization-timing supports only S3K complete-run traces");
+                if (options.InitializationTiming && (options.Mode != CaptureMode.Trace
+                        || (traceGame != "s1" && traceGame != "s3k")))
+                    throw new ArgumentException("--initialization-timing supports only S1 or S3K complete-run traces");
                 Bk2Movie movie = null;
                 if (options.MoviePath != null)
                 {
@@ -2267,6 +2269,7 @@ namespace BizHawk.Headless.Gpgx
             NoReplacePublisher publisher = null;
             NoReplacePublisher.IncrementalStagingSession session = null;
             NoReplacePublisher.StagedPublicationSet staged = null;
+            NoReplacePublisher.StagedStream initializationTiming = null;
             try
             {
                 string manifestPath = Path.Combine(
@@ -2291,6 +2294,8 @@ namespace BizHawk.Headless.Gpgx
                     options.CreateCompressor());
                 session = publisher.OpenSession(
                     options.OutputDirectory);
+                if (options.InitializationTiming)
+                    initializationTiming = session.OpenFile("initialization_timing.jsonl");
                 using (var sink = new StagedRunSegmentSink(
                     session, expandNewlines))
                 using (new NativeStandardOutputSilencer())
@@ -2309,8 +2314,10 @@ namespace BizHawk.Headless.Gpgx
                         TraceContract.RecorderVersion,
                         0,
                         sink,
-                        File.ReadAllBytes(options.RomPath));
+                        File.ReadAllBytes(options.RomPath),
+                        initializationTiming == null ? null : initializationTiming.Writer);
                 }
+                if (initializationTiming != null) initializationTiming.Complete();
                 if (result.RunManifestJson != null)
                 {
                     session.StageFile(
@@ -2377,6 +2384,7 @@ namespace BizHawk.Headless.Gpgx
             }
             catch (Exception exception)
             {
+                if (initializationTiming != null) initializationTiming.Dispose();
                 if (session != null)
                 {
                     session.Dispose();

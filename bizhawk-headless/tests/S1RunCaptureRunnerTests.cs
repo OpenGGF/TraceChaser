@@ -28,6 +28,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
 
         public static void Register(ICollection<TestMain.TestCase> tests)
         {
+            if (Environment.GetEnvironmentVariable("S1_ROM_PATH") != null)
+                tests.Add(new TestMain.TestCase("S1RunCaptureRunner terminal census distinguishes EOF from hard stop", TerminalCensusEndpoint));
             tests.Add(new TestMain.TestCase(
                 "S1RunCaptureRunner records a level-ss-level round trip",
                 RecordsLevelSsLevelRoundTrip));
@@ -86,6 +88,25 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 "S1RunCaptureRunner publication rejects scratch legacy"
                 + " audit omission",
                 PublicationRejectsScratchLegacyAuditOmission));
+        }
+
+        private static void TerminalCensusEndpoint()
+        {
+            // A complete font setup can reach original EOF in GM_Credits,
+            // which has no endpoint-mode string. EOF authority is independent.
+            byte[] rom = File.ReadAllBytes(Environment.GetEnvironmentVariable("S1_ROM_PATH"));
+            foreach (int stop in new int[] { 0, 5 }) WithMovie(Rows(6), movie => {
+                var host = new FakeS1Host((h, frame) => {
+                    h.Ram[S1Ram.GameMode] = (byte)(frame < 4 ? 0x0C : 0x1C);
+                    h.IsLagged = frame == 5;
+                });
+                var output = new StringWriter();
+                var result = S1RunCaptureRunner.Capture(movie, host, "terminal-census", "synthetic.bk2",
+                    "2026-11-07", TraceContract.RecorderVersion, stop, new RunSegmentCollector(), rom, output);
+                AssertEx.Equal(false, result.RunManifestJson.Contains("expected_movie_end_mode"));
+                if (stop == 0) AssertContains(result.RunManifestJson, "\"terminal_admission_runs\": [1,1,1]");
+                else AssertEx.Equal(false, result.RunManifestJson.Contains("terminal_admission_runs"));
+            });
         }
 
         private static void PublicationRejectsScratchLegacyAuditOmission()

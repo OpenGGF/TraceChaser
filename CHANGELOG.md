@@ -6,6 +6,11 @@
   of predicting it from RunPLC entry. Interrupts before the actual eligibility
   tests or count write can no longer omit an arm or stamp it on an earlier row.
 
+- Record opt-in S1 ending, credits-font and credits-demo initialization timing
+  through the existing ordered phase contract, with real ROM identities and
+  fail-closed guards around clock-sensitive callbacks. Include the terminal
+  lag-admission census for these complete runs; default captures are unchanged.
+
 - Record opt-in S3K initialization timing for real fresh-load phases after the
   seeded bootstrap, with ROM-backed identities, explicit serviced/masked rows,
   reviewed object cuts and fail-closed publication of incomplete loads. Its

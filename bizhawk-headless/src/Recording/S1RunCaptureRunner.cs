@@ -106,7 +106,8 @@ namespace OpenGGF.BizHawk.Headless
             string luaScriptVersion,
             int stopAtFrame,
             IRunSegmentSink segmentSink,
-            byte[] requiredDynamicArtRom)
+            byte[] requiredDynamicArtRom,
+            TextWriter initializationTimingOutput = null)
         {
             if (requiredDynamicArtRom == null)
             {
@@ -117,7 +118,7 @@ namespace OpenGGF.BizHawk.Headless
             return CaptureCore(
                 movie, host, runId, sourceBk2, recordingDate,
                 luaScriptVersion, stopAtFrame, segmentSink,
-                requiredDynamicArtRom);
+                requiredDynamicArtRom, initializationTimingOutput);
         }
 
         /// <summary>
@@ -148,7 +149,8 @@ namespace OpenGGF.BizHawk.Headless
             string luaScriptVersion,
             int stopAtFrame,
             IRunSegmentSink segmentSink,
-            byte[] loadQueueRom)
+            byte[] loadQueueRom,
+            TextWriter initializationTimingOutput = null)
         {
             if (movie == null)
             {
@@ -196,10 +198,14 @@ namespace OpenGGF.BizHawk.Headless
                 : new S1PlcHardwareTimingObserver(loadQueueRom, host);
             state = new RunState(
                 runId, sourceBk2, recordingDate, luaScriptVersion,
-                segmentSink, loadQueueRom, dynamicArt, hardwareTiming);
+                segmentSink, loadQueueRom, dynamicArt, hardwareTiming,
+                initializationTimingOutput != null);
 
+            S1InitializationTimingObserver initializationTiming = null;
             try
             {
+                if (initializationTimingOutput != null)
+                    initializationTiming = new S1InitializationTimingObserver(host, loadQueueRom, () => state.HasRecordedRows);
                 using (IEnumerator<Bk2Frame> frames =
                     movie.OpenFrameStream().GetEnumerator())
                 {
@@ -212,7 +218,7 @@ namespace OpenGGF.BizHawk.Headless
                         // guard fired (the Lua's movie.mode() == "FINISHED"
                         // signal): finalize whatever is armed and stop.
                         state.FinalizeRunEnd(MapExpectedMovieEndMode(
-                            S1Ram.U8(host, S1Ram.GameMode)));
+                            S1Ram.U8(host, S1Ram.GameMode)), true);
                         break;
                     }
                     Bk2Frame frame = frames.Current;
@@ -233,6 +239,8 @@ namespace OpenGGF.BizHawk.Headless
                             "GPGX CompletedFrame is " + host.CompletedFrame
                             + "; expected " + rowsConsumed + ".");
                     }
+                    if (initializationTiming != null)
+                        initializationTiming.FlushFrame(rowsConsumed - 1, initializationTimingOutput);
                     // Every physical frame, armed or not, so the census
                     // covers the unrecorded rows between segments.
                     state.RecordPhysicalAdmission(rowsConsumed - 1, host);
@@ -257,7 +265,7 @@ namespace OpenGGF.BizHawk.Headless
                         state.FinalizeRunEnd(
                             hardStop
                                 ? null
-                                : MapExpectedMovieEndMode(gameMode));
+                                : MapExpectedMovieEndMode(gameMode), !hardStop);
                         break;
                     }
 
@@ -319,9 +327,11 @@ namespace OpenGGF.BizHawk.Headless
                     state.AppendLevelRow(frame, host);
                 }
                 }
+                if (initializationTiming != null) initializationTiming.VerifyComplete();
             }
             finally
             {
+                if (initializationTiming != null) initializationTiming.Dispose();
                 if (hardwareTiming != null)
                 {
                     hardwareTiming.Dispose();
@@ -368,6 +378,7 @@ namespace OpenGGF.BizHawk.Headless
             private readonly byte[] loadQueueRom;
             private readonly S1DynamicArtObserver dynamicArt;
             private readonly S1PlcHardwareTimingObserver hardwareTiming;
+            private readonly bool captureTerminalAdmission;
 
             private readonly List<RunManifestSegment> segments =
                 new List<RunManifestSegment>();
@@ -427,7 +438,8 @@ namespace OpenGGF.BizHawk.Headless
                 IRunSegmentSink segmentSink,
                 byte[] loadQueueRom,
                 S1DynamicArtObserver dynamicArt,
-                S1PlcHardwareTimingObserver hardwareTiming)
+                S1PlcHardwareTimingObserver hardwareTiming,
+                bool captureTerminalAdmission)
             {
                 this.runId = runId;
                 this.sourceBk2 = sourceBk2;
@@ -437,6 +449,7 @@ namespace OpenGGF.BizHawk.Headless
                 this.loadQueueRom = loadQueueRom;
                 this.dynamicArt = dynamicArt;
                 this.hardwareTiming = hardwareTiming;
+                this.captureTerminalAdmission = captureTerminalAdmission;
             }
 
             internal bool Started { get; private set; }
@@ -695,7 +708,7 @@ namespace OpenGGF.BizHawk.Headless
             /// (an empty run id string still counts — the caller maps env
             /// presence to non-null).
             /// </summary>
-            internal void FinalizeRunEnd(string expectedMovieEndMode)
+            internal void FinalizeRunEnd(string expectedMovieEndMode, bool originalMovieExhausted)
             {
                 if (DetourActive)
                 {
@@ -722,7 +735,12 @@ namespace OpenGGF.BizHawk.Headless
                             transitions,
                             dynamicArt == null
                                 ? null
-                                : dynamicArtGapTransitions);
+                                : dynamicArtGapTransitions,
+                            !captureTerminalAdmission || !originalMovieExhausted || segments.Count == 0 ? null
+                                : GapAdmissionCensus.Encode(physicalLag,
+                                    segments[segments.Count - 1].Bk2FrameOffset
+                                        + segments[segments.Count - 1].TraceFrameCount,
+                                    physicalLag.Count));
                     }
                     manifestWritten = true;
                 }
@@ -834,8 +852,11 @@ namespace OpenGGF.BizHawk.Headless
             /// (detours, boundaries, the pre-arm span) never reaches here,
             /// and its edges are dropped at the next BeginFrame.
             /// </summary>
+            public bool HasRecordedRows { get; private set; }
+
             private void CommitHardwareTimingRow()
             {
+                HasRecordedRows = true;
                 if (hardwareTiming != null)
                 {
                     hardwareTiming.CommitRow(traceFrame);

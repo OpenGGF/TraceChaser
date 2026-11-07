@@ -42,6 +42,35 @@ first recorded row, run-length encoded and alternating from non-lag.
   --output /absolute/scratch/s1-complete
 ```
 
+## Ending initialization timing
+
+For an approved complete-run publication, add `--initialization-timing` to the
+run-mode command. The staged run gains `initialization_timing.jsonl.gz`, using
+the existing ordered `hold`, `resume` and `vint_0` contract. Actual GM_Ending,
+credits-font setup and credits-demo GM_Level supply independent load/phase
+ordinals and ROM-backed operation fingerprints. No native counters, positions,
+RNG state or decoder progress enter this stream. Cold bootstrap is excluded.
+
+The same opt-in adds root `terminal_admission_runs`: alternating non-lag/lag
+run lengths covering the rows after the final segment to original movie EOF.
+Only its first run may be zero. It complements transition `gap_admission_runs`
+and selects the existing lag loop during the terminal tail. Active prepared
+initialization continuations retain their own ordered service authority.
+Without the option, legacy output stays unchanged.
+
+The World REV01 observer checks every fixed entrypoint opcode. Ordinary
+interrupts inside setup, unknown initial callback owners/routines, a Basaran
+that reaches its VBlank-sensitive branch, reached LZ setup clock reads, and
+unfinished loads reject the staged capture. Ending initial-object interrupts
+are still unsupported. Reviewed credits callbacks may commute zero-routine
+services only because their selected paths do not read the VBlank clock and
+that interrupt does not change gameplay RNG or the level counter. This is not
+an audio-chip ordering guarantee or general callback-timing support. A new
+unsupported callback needs evidence, not an inferred delay.
+
+Compare all physics/aux payloads and the unedited BK2 against the publication
+baseline, validate v5, and inspect the harness outcome before publishing.
+
 ## Ending credits demos
 
 The native `credits_demo` profile needs no BK2. Capture all eight ROM-owned

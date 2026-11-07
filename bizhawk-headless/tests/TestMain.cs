@@ -163,6 +163,7 @@ namespace OpenGGF.BizHawk.Headless.Tests
             DynamicArtTransferStateTests.Register(tests);
             S1DynamicArtObserverTests.Register(tests);
             S1PlcHardwareTimingObserverTests.Register(tests);
+            S1InitializationTimingObserverTests.Register(tests);
             S2DynamicArtObserverTests.Register(tests);
             GpgxHostTests.Register(tests);
             PreflightRunnerContractTests.Register(tests);

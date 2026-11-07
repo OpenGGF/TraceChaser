@@ -690,3 +690,15 @@ carries the constraints that are expensive to discover by trial: the owning
 `.csproj` source lists and production project reference, the test registry that silently drops
 unregistered classes, the ignored dependency/build roots that must not receive
 source files, and which kinds of test cannot run beside anything else.
+
+## S1 ending initialization observations
+
+Run-mode `--initialization-timing` supports S1 World REV01 as well as S3K.
+It records real resumable ending/credits loads in the existing initialization
+companion and includes S1 terminal lag admission. See
+[the S1 capture guide](../docs/capture-s1.md#ending-initialization-timing) for
+source identity, callback guards, publication requirements and bounded limits.
+`test.sh --filter S1InitializationTimingObserver --jobs 1` exercises phase
+ordering, cold-bootstrap exclusion, rejection paths, retail source vectors
+and all fixed instruction opcodes; supply the original `S1_ROM_PATH` for the
+last two controls. These units do not substitute for a native full-run capture.

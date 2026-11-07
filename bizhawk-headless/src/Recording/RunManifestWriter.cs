@@ -252,7 +252,8 @@ namespace OpenGGF.BizHawk.Headless
             string expectedMovieEndMode,
             IList<RunManifestSegment> segments,
             IList<RunManifestTransition> transitions,
-            IList<DynamicArtGapTransition> dynamicArtGapTransitions)
+            IList<DynamicArtGapTransition> dynamicArtGapTransitions,
+            IList<int> terminalAdmissionRuns = null)
         {
             if (game == null)
             {
@@ -300,6 +301,16 @@ namespace OpenGGF.BizHawk.Headless
             {
                 json.Append("  \"expected_movie_end_mode\": \"")
                     .Append(expectedMovieEndMode).Append("\",\n");
+            }
+            if (terminalAdmissionRuns != null)
+            {
+                json.Append("  \"terminal_admission_runs\": [");
+                for (int i = 0; i < terminalAdmissionRuns.Count; i++)
+                {
+                    if (i != 0) json.Append(',');
+                    json.Append(Dec(terminalAdmissionRuns[i]));
+                }
+                json.Append("],\n");
             }
             json.Append("  \"segments\": [\n");
             for (var index = 0; index < segments.Count; index++)
@@ -521,23 +532,24 @@ namespace OpenGGF.BizHawk.Headless
                 {
                     continue;
                 }
-                var runs = new List<int>();
-                bool expectLag = false;
-                int length = 0;
-                for (int row = start; row < end; row++)
-                {
-                    if (physicalLag[row] == expectLag)
-                    {
-                        length++;
-                        continue;
-                    }
-                    runs.Add(length);
-                    expectLag = !expectLag;
-                    length = 1;
-                }
-                runs.Add(length);
-                tx.GapAdmissionRuns = runs;
+                tx.GapAdmissionRuns = Encode(physicalLag, start, end);
             }
+        }
+
+        public static IList<int> Encode(IList<bool> physicalLag, int start, int end)
+        {
+            if (physicalLag == null || start < 0 || end < start || end > physicalLag.Count)
+                throw new ArgumentOutOfRangeException("invalid admission census range");
+            var runs = new List<int>();
+            bool expectedLag = false;
+            int length = 0;
+            for (int row = start; row < end; row++)
+            {
+                if (physicalLag[row] == expectedLag) { length++; continue; }
+                runs.Add(length); expectedLag = !expectedLag; length = 1;
+            }
+            runs.Add(length);
+            return runs;
         }
     }
 }
