@@ -4,8 +4,9 @@
 Purpose: prove the native ``--scd-trace`` rows read the right RAM by comparing
 them, frame for frame, with the separately implemented OpenGGF Sonic CD
 player-reference probe (``player_reference_probe.cs``, which polls 68K RAM
-through its own source-derived layout and accepts a frame only after its
-R11A program-identity windows match). Inputs: a trace directory and the probe's
+through its own source-derived layout and accepts a frame only after the
+layout's stage-program identity windows match; K2 used the R11A layout, and
+other stages need a layout whose windows come from that stage's disc file). Inputs: a trace directory and the probe's
 ``player.jsonl`` and ``av.jsonl`` from a run with the same disc, BIOS and input
 schedule. Origin: TraceChaser lane K2, 2026-11-12.
 
@@ -66,7 +67,7 @@ def compare(trace, player_rows, av_rows):
         frame = offset + n + 1
         player = probe.get(frame)
         if player is None or not player.get("accepted"):
-            errors.append(f"row {n}: probe frame {frame} missing or not accepted as R11A")
+            errors.append(f"row {n}: probe frame {frame} missing or not accepted by the probe layout")
             continue
         for column, value in expected_columns(player).items():
             checked += 1
