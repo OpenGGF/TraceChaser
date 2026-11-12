@@ -661,8 +661,23 @@ certify itself: `traces/compare_scd_player_reference.py` compares every row
 with the independent OpenGGF `player_reference_probe.cs` output over the same
 disc, BIOS and inputs.
 
-The current v5 validator rejects only `game: "scd"`, because its game set is
-`s1`, `s2` and `s3k`.
+`traces/validate_trace_v5.py` accepts `game: "scd"` in metadata and run
+manifests and checks its rows at the ordinary 42-column level width; the
+conformance pack's `accept-scd-level` case pins that.
+
+**Stage identity.** All 70 USA stage programs (`R11A`…`R83D`) begin with the
+same 256-byte MMD header, so `stage_program_header_sha256` shows that a stage
+program is loaded and detects a program change, but does not say which one.
+`stage_file` is derived from the zone, act, time zone and good-future RAM
+bytes. To prove the loaded file, compare Word RAM with the disc files.
+
+**Reaching any stage.** Every stage program is an entry in the retail stage
+select (`StageSels`, `src/CD Initial Program/IPX.asm`). At the title's PRESS
+START, enter Up, Down, Down, Left, Right, B (`ObjMenu_StageSelCheat`,
+`src/Title Screen/Objects/Menu/Main.asm`). Press each button for several
+frames: the title reads the pad only on non-lag V-INTs, so a one-frame tap can
+be missed. In the menu, holding Up or Down moves one entry every 8 loops, and
+Up wraps from the first entry to the last.
 
 ## Publishing a canonical fixture
 

@@ -88,6 +88,35 @@ class ValidateTraceV5Tests(unittest.TestCase):
         self.assertIn("recorder must be native-bizhawk-headless", result.stderr)
         self.assertIn("recorder_version must be 3.0", result.stderr)
 
+    def test_accepts_sonic_cd_stage_metadata_and_manifest_with_level_width(self) -> None:
+        self.write_fixture("scd", "scd_stage")
+        self.write_manifest({"game": "scd", "segments": [{"dir": "fixture"}],
+                             "member_order": ["fixture"]})
+
+        result = self.validate()
+
+        self.assertNotIn("game must be one of", result.stderr)
+
+    def test_rejects_an_unknown_game_in_metadata_and_manifest(self) -> None:
+        fixture = self.write_fixture("s4", "complete_run")
+        self.write_manifest({"game": "s4"})
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        expected = "game must be one of s1, s2, s3k, scd"
+        self.assertIn(f"{fixture / 'metadata.json'}: {expected}", result.stderr)
+        self.assertIn(f"{self.root / 'run_manifest.json'}: {expected}", result.stderr)
+
+    def test_rejects_sonic_cd_stage_rows_that_are_not_level_width(self) -> None:
+        fixture = self.write_fixture("scd", "scd_stage")
+        (fixture / "physics.csv").write_text("a,b\n1,2\n")
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(f"{fixture / 'physics.csv'}: row 1 has 2 columns; expected 42", result.stderr)
+
     def test_rejects_special_stage_rows_that_do_not_match_the_game_owned_width(self) -> None:
         fixture = self.write_fixture("s2", "s2_special_stage")
         (fixture / "physics.csv").write_text("a,b\n1,2\n")

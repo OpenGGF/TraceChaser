@@ -11,6 +11,9 @@ deterministic gzip), and optional auxiliary/timing streams permitted by its
 profile. Named runs add `run_manifest.json` and ordered segment directories.
 Plain and gzipped files may not both represent the same logical member.
 
+The `game` field of metadata and run manifests is one of `s1`, `s2`, `s3k` or
+`scd` (Sonic CD stages, which use the ordinary level row layout).
+
 Current native provenance is:
 
 ```json

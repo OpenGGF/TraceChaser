@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+# Sonic CD ("scd") stage traces use the ordinary 42-column level layout; the
+# game id selects nothing else in this validator.
+GAMES = frozenset({"s1", "s2", "s3k", "scd"})
+GAME_LIST = ", ".join(sorted(GAMES))
 LEGACY_KEYS = frozenset({
     "lua_script_version", "csv_version", "ss_csv_version",
     "hardware_timing_schema", "run_schema",
@@ -80,8 +84,8 @@ class Validation:
         self.validate_envelope(path, metadata)
         game = metadata.get("game")
         profile = metadata.get("trace_profile")
-        if game not in {"s1", "s2", "s3k"}:
-            self.reject(path, "game must be one of s1, s2, s3k")
+        if game not in GAMES:
+            self.reject(path, f"game must be one of {GAME_LIST}")
         # S1's native level and credits writers predate the shared profile
         # field and intentionally omit it; their v5 contract is identified by
         # the trace_type/zone surface.  S2 and S3K use the profile to select
@@ -118,8 +122,8 @@ class Validation:
             self.reject(path, "run manifest must be a JSON object")
             return
         self.validate_envelope(path, manifest)
-        if manifest.get("game") not in {"s1", "s2", "s3k"}:
-            self.reject(path, "game must be one of s1, s2, s3k")
+        if manifest.get("game") not in GAMES:
+            self.reject(path, f"game must be one of {GAME_LIST}")
         if not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
             self.reject(path, "run_id must be a non-empty string")
         if not isinstance(manifest.get("segments"), list):
