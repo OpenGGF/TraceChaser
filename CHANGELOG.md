@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add a scratch `--scd-trace` producer for Sonic CD (USA) stages. It boots the
+  user-supplied disc and pinned BIOS in Mega CD mode, replays a power-on BK2
+  and writes 42-column physics rows, S1-style aux events with per-row
+  `lag_state`, and `game: "scd"` metadata. The current v5 validator does not
+  yet accept that game id. An independent player-reference comparison script
+  and a BK2 schedule composer are included.
+
 - Observe S1 Nemesis PLC arming at the accepted pattern-count write instead
   of predicting it from RunPLC entry. Interrupts before the actual eligibility
   tests or count write can no longer omit an arm or stamp it on an earlier row.

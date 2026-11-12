@@ -16,6 +16,7 @@ supported capture path on Linux for every game.
 | KiS2 plain and full run | yes — chip observer profile, without native load audit; [contract](docs/kis2-run-mode.md) |
 | S3K standard (both profiles) | yes — gated |
 | S3K complete-run (level / bonus / special-stage) | yes — gated |
+| Sonic CD (USA) stage | scratch producer, not gated — [section](#sonic-cd-stage-recorder) |
 
 **This harness is the preferred capture path**, and the intended direction is that
 the Lua recorders are retired rather than kept at feature parity. It is roughly
@@ -579,6 +580,89 @@ capture into a temp directory and compare raw bytes.
 same semantics for scratch output from the **Windows Lua diagnostic route**,
 whose recorders still write uncompressed output. That output is corroborative
 only and must never be installed as a canonical fixture.
+
+## Sonic CD stage recorder
+
+`--scd-trace` records one Sonic CD (USA) stage as a trace-v5-shaped
+directory. It boots the disc on the same GPGX core in Mega CD mode, replays a
+power-on BK2 and polls main-CPU RAM after each frame. No callbacks are
+registered. It is a scratch producer: it is not gated and does not compress
+its payloads. Publishing into a consumer fixture tree is a separate step that
+needs approval.
+
+**Prerequisites.** You supply both inputs and pass them explicitly:
+
+- The Sonic CD (USA) CUE/BIN set. The CUE and data track must match the pinned
+  SHA-256 values in `ScdTraceCommand`.
+- The Sega CD Model 1 US v1.10 BIOS. Its SHA-1 must be
+  `f4f315adcef9b8feb0364c21ab7f0eaf5457f3ed`, and it is served only for the
+  `GEN+CD_BIOS_US` firmware request.
+
+Nothing is discovered or copied. Other regions and BIOS images are rejected,
+because the RAM map is the USA build's.
+
+```bash
+python3 -I bizhawk-headless/scd_stage_movie.py --schedule /abs/scratch/route.schedule.json \
+  --output /abs/scratch/route.bk2
+BIZHAWK_HOME=/abs/BizHawk-2.11-linux-x64 bash -c \
+  'source bizhawk-headless/common-env.sh && exec mono bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe \
+     --scd-trace --cue "/abs/media/Sonic CD (US).cue" --bios "/abs/media/Sega CD (U) - M1 V1.10.bin" \
+     --movie /abs/scratch/route.bk2 --output /abs/scratch/new-trace \
+     --tracechaser-root /abs/TraceChaser --input-repository-root /abs/OpenGGF \
+     --fixture-root /abs/OpenGGF/src/test/resources/traces'
+```
+
+`scd_stage_movie.py` turns a JSON list of held-button ranges (0-based BK2 rows)
+into a BK2 that uses BizHawk 2.11's default GPGX SyncSettings. The movie
+contains inputs only.
+
+**What is recorded.** The output has three files:
+
+- `physics.csv`: the ordinary 42-column level header with S1 formatting.
+  Rings come from `rings`, `gameplay_frame_counter` from `levelFrames`, and
+  `vblank_counter` from the low word of `levelVIntCounter`. `lag_counter` is a
+  placeholder `0000`. The sidekick block is zero.
+- `aux_state.jsonl`: the S1 standard event set. `object_*`, `slot_dump` and
+  `cursor_state` come from the CD spawner, which is S1's ObjPosLoad. S1's
+  `s1_obj64_state` is not emitted. A `lag_state` event (the emulator's lag flag
+  and lag count) is added for every row.
+- `metadata.json`: written last. It has the v5 envelope, `game: "scd"` and
+  `trace_profile: "scd_stage"`. It also records the time zone, the disc stage
+  file (for example `R11A`), a SHA-256 of the stage program's MMD header in
+  Word RAM, and the disc, BIOS and movie identities.
+
+**When recording starts and stops.** Recording arms on the first frame where
+all of these hold:
+
+- `levelStarted` is 1 and `gameMode` bit 7 is clear;
+- slot 0 holds ObjSonic with `oPlayerMoveLock` at 0;
+- demo and debug mode are both off.
+
+That detection frame is not recorded. Row N is sampled after BK2 row
+`bk2_frame_offset + N` is applied and one frame completes.
+
+Recording stops, without writing a partial row, when any of these happens:
+
+- the stage re-enters LevelStart;
+- the player leaves slot 0;
+- the MMD header changes;
+- the movie ends (under the S1 rule).
+
+The CD title-card lock (`ctrlLocked`) falls inside the recording.
+
+**What is not recorded.** The recorder does not capture:
+
+- Sub-CPU, PCM or CDDA state;
+- per-frame time zone or warp state;
+- special stages, demos, or stage-to-stage runs.
+
+**Checks.** `test.sh --filter Scd` runs the unit cases. The recorder does not
+certify itself: `traces/compare_scd_player_reference.py` compares every row
+with the independent OpenGGF `player_reference_probe.cs` output over the same
+disc, BIOS and inputs.
+
+The current v5 validator rejects only `game: "scd"`, because its game set is
+`s1`, `s2` and `s3k`.
 
 ## Publishing a canonical fixture
 
