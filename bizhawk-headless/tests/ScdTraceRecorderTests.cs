@@ -32,6 +32,12 @@ namespace OpenGGF.BizHawk.Headless.Tests
             tests.Add(new TestMain.TestCase("ScdTraceCaptureRunner arms after LevelStart and stops when it re-enters", ArmsAndStops));
             tests.Add(new TestMain.TestCase("ScdTraceCaptureRunner stops when the stage program changes", StopsOnProgramChange));
             tests.Add(new TestMain.TestCase("ScdAuxEventEngine maps the CD object spawner cursor", AuxMapsSpawnerCursor));
+            tests.Add(new TestMain.TestCase("ScdVIntServiceObserver hooks VInterrupt through mmdVInt and the installed vector", ObserverResolvesVInterrupt));
+            tests.Add(new TestMain.TestCase("ScdVIntServiceObserver rejects a vector or handler that is not the stage program's", ObserverRejectsForeignHandler));
+            tests.Add(new TestMain.TestCase("vint_service_timing marks only a frame with no observed entry, never from counters or lag", StreamFollowsObservedEntriesOnly));
+            tests.Add(new TestMain.TestCase("vint_service_timing is written empty when every VBlank was serviced", StreamIsEmptyWhenEveryRowServiced));
+            tests.Add(new TestMain.TestCase("ScdTraceCaptureRunner rejects two V-INT entries in one frame", RejectsTwoEntriesInOneFrame));
+            tests.Add(new TestMain.TestCase("ScdTraceCaptureRunner rejects a V-INT vector change during recording", RejectsVectorChange));
         }
 
         private static void RowReadsCdGlobals()
@@ -98,6 +104,8 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 h.Ram[ScdRam.PlayerBase + 0x09] = (byte)(0x40 + frame);
                 h.IsLagged = frame == 7;
                 h.LagCount = frame >= 7 ? 1 : 0;
+                InstallVector(h);
+                Enter(h, 1);
             });
             var wordRam = new FakeWordRam();
             WithMovie(12, movie =>
@@ -105,8 +113,10 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 var physics = new StringWriter();
                 var aux = new StringWriter();
                 var metadata = new StringWriter();
+                var vint = new StringWriter();
                 ScdTraceCaptureResult result = ScdTraceCaptureRunner.Capture(movie, host, wordRam,
-                    Inputs(), "2026-11-12", physics, aux, metadata);
+                    Inputs(), "2026-11-12", physics, aux, metadata, vint);
+                AssertEx.Equal("", vint.ToString());
                 AssertEx.Equal(5, result.Bk2FrameOffset);
                 AssertEx.Equal(3, result.TraceFrameCount);
                 string[] lines = physics.ToString().Split('\n');
@@ -135,12 +145,15 @@ namespace OpenGGF.BizHawk.Headless.Tests
             {
                 h.Ram[ScdRam.LevelStarted] = 1;
                 h.Ram[ScdRam.PlayerBase] = 1;
+                InstallVector(h);
+                Enter(h, 1);
                 if (frame == 4) wordRam.Header[0x0A] ^= 0xFF; // a new MMD entry address
             });
             WithMovie(10, movie =>
             {
                 ScdTraceCaptureResult result = ScdTraceCaptureRunner.Capture(movie, host, wordRam,
-                    Inputs(), "2026-11-12", new StringWriter(), new StringWriter(), new StringWriter());
+                    Inputs(), "2026-11-12", new StringWriter(), new StringWriter(), new StringWriter(),
+                    new StringWriter());
                 AssertEx.Equal(1, result.Bk2FrameOffset);
                 AssertEx.Equal(2, result.TraceFrameCount);
             });
@@ -162,6 +175,149 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 lines[lines.Count - 1]);
             AssertEx.Equal("{\"frame\":278,\"event\":\"lag_state\",\"lagged\":false,\"lagcount\":3}",
                 lines[lines.Count - 2]);
+        }
+
+        // A stage program laid out as Initialization.asm's MMD header: mmdVInt = JmpTo_VInt
+        // (jmp VInterrupt), VInterrupt beginning with bset #0,GAIRQ2 (Level/Main.asm:681-682).
+        private const uint JmpToVInt = 0x200028;
+        private const uint VInterrupt = 0x201000;
+
+        private static void InstallVector(FakeS1Host h)
+        {
+            h.Ram[ScdVIntServiceObserver.Level6TargetRam] = 0x00;
+            h.Ram[ScdVIntServiceObserver.Level6TargetRam + 1] = 0x20;
+            h.Ram[ScdVIntServiceObserver.Level6TargetRam + 2] = 0x00;
+            h.Ram[ScdVIntServiceObserver.Level6TargetRam + 3] = 0x28;
+        }
+
+        /// <summary>Fires the VInterrupt hook <paramref name="count"/> times once it is registered.</summary>
+        private static void Enter(FakeS1Host h, int count)
+        {
+            if (h.ExecuteCallbackAddress != VInterrupt || h.ExecuteCallbackDisposed) return;
+            for (int i = 0; i < count; i++) h.FireExecuteCallback(VInterrupt);
+        }
+
+        private static void ObserverResolvesVInterrupt()
+        {
+            var host = new FakeS1Host(null);
+            InstallVector(host);
+            using (ScdVIntServiceObserver observer = ScdVIntServiceObserver.Attach(host, new FakeWordRam()))
+            {
+                AssertEx.Equal(0x201000u, observer.VInterruptAddress);
+                AssertEx.Equal((uint?)0x201000u, host.ExecuteCallbackAddress);
+                host.FireExecuteCallback(VInterrupt);
+                AssertEx.Equal(null, observer.CloseRow(0));
+                AssertEx.Equal("{\"event\":\"vint_not_serviced\",\"raw_frame\":1}", observer.CloseRow(1));
+            }
+            AssertEx.Equal(true, host.ExecuteCallbackDisposed);
+        }
+
+        private static void ObserverRejectsForeignHandler()
+        {
+            var host = new FakeS1Host(null);
+            AssertEx.Throws<InvalidDataException>(() => ScdVIntServiceObserver.Attach(host, new FakeWordRam()),
+                "not the stage program's mmdVInt 0x200028");
+            InstallVector(host);
+            var noJump = new FakeWordRam();
+            noJump.Bytes[0x28] = 0x4E; noJump.Bytes[0x29] = 0x75; // rts
+            AssertEx.Throws<InvalidDataException>(() => ScdVIntServiceObserver.Attach(host, noJump),
+                "is not jmp (xxx).l");
+            var otherHandler = new FakeWordRam();
+            otherHandler.Bytes[0x1000 + 7] = 0x01; // bset #0,($A12001).l
+            AssertEx.Throws<InvalidDataException>(() => ScdVIntServiceObserver.Attach(host, otherHandler),
+                "does not begin with VInterrupt's bset #0,GAIRQ2");
+            AssertEx.Equal(null, host.ExecuteCallbackAddress);
+        }
+
+        /// <summary>
+        /// Rows 0-4 (frames 2-6) observe 1, 1, 0, 1, 1 entries. The RAM counters say otherwise on
+        /// purpose: on row 1 levelVIntCounter holds and the emulator flags lag (what a counter-derived
+        /// or lag-derived recorder would mark), and on row 2 the counter advances with no lag flag.
+        /// Only row 2, where no entry was observed, is marked.
+        /// </summary>
+        private static void StreamFollowsObservedEntriesOnly()
+        {
+            int[] entries = { 0, 0, 1, 1, 0, 1, 1, 1 };
+            uint[] counter = { 0, 0, 10, 10, 11, 12, 13, 14 };
+            var host = new FakeS1Host((h, frame) =>
+            {
+                h.Ram[ScdRam.LevelStarted] = 1;
+                h.Ram[ScdRam.PlayerBase] = 1;
+                InstallVector(h);
+                int f = Math.Min(frame, entries.Length - 1);
+                h.SetU16(ScdRam.LevelVIntCounterLow, (ushort)counter[f]);
+                h.IsLagged = frame == 3;
+                Enter(h, entries[f]);
+            });
+            WithMovie(7, movie =>
+            {
+                var vint = new StringWriter();
+                ScdTraceCaptureResult result = ScdTraceCaptureRunner.Capture(movie, host, new FakeWordRam(),
+                    Inputs(), "2026-11-13", new StringWriter(), new StringWriter(), new StringWriter(), vint);
+                AssertEx.Equal(1, result.Bk2FrameOffset);
+                AssertEx.Equal(5, result.TraceFrameCount);
+                AssertEx.Equal("{\"event\":\"vint_not_serviced\",\"raw_frame\":2}\n", vint.ToString());
+                AssertEx.Equal(true, host.ExecuteCallbackDisposed);
+            });
+        }
+
+        private static void StreamIsEmptyWhenEveryRowServiced()
+        {
+            var host = new FakeS1Host((h, frame) =>
+            {
+                h.Ram[ScdRam.LevelStarted] = 1;
+                h.Ram[ScdRam.PlayerBase] = 1;
+                InstallVector(h);
+                // The stop frame (frame 5: levelStarted 0) enters no V-INT; it is not a row.
+                if (frame == 5) h.Ram[ScdRam.LevelStarted] = 0;
+                else Enter(h, 1);
+            });
+            WithMovie(9, movie =>
+            {
+                var vint = new StringWriter();
+                ScdTraceCaptureResult result = ScdTraceCaptureRunner.Capture(movie, host, new FakeWordRam(),
+                    Inputs(), "2026-11-13", new StringWriter(), new StringWriter(), new StringWriter(), vint);
+                AssertEx.Equal(3, result.TraceFrameCount);
+                AssertEx.Equal("", vint.ToString());
+            });
+        }
+
+        private static void RejectsTwoEntriesInOneFrame()
+        {
+            var host = new FakeS1Host((h, frame) =>
+            {
+                h.Ram[ScdRam.LevelStarted] = 1;
+                h.Ram[ScdRam.PlayerBase] = 1;
+                InstallVector(h);
+                Enter(h, frame == 3 ? 2 : 1);
+            });
+            WithMovie(6, movie =>
+            {
+                AssertEx.Throws<InvalidDataException>(() =>
+                    ScdTraceCaptureRunner.Capture(movie, host, new FakeWordRam(), Inputs(), "2026-11-13",
+                        new StringWriter(), new StringWriter(), new StringWriter(), new StringWriter()),
+                    "Trace row 1 observed 2 V-INT entries");
+                AssertEx.Equal(true, host.ExecuteCallbackDisposed);
+            });
+        }
+
+        private static void RejectsVectorChange()
+        {
+            var host = new FakeS1Host((h, frame) =>
+            {
+                h.Ram[ScdRam.LevelStarted] = 1;
+                h.Ram[ScdRam.PlayerBase] = 1;
+                InstallVector(h);
+                if (frame == 4) h.Ram[ScdVIntServiceObserver.Level6TargetRam + 3] = 0x2E;
+                Enter(h, 1);
+            });
+            WithMovie(6, movie =>
+            {
+                AssertEx.Throws<InvalidDataException>(() =>
+                    ScdTraceCaptureRunner.Capture(movie, host, new FakeWordRam(), Inputs(), "2026-11-13",
+                        new StringWriter(), new StringWriter(), new StringWriter(), new StringWriter()),
+                    "during trace row 2");
+            });
         }
 
         private static ScdTraceInputs Inputs()
@@ -198,13 +354,26 @@ namespace OpenGGF.BizHawk.Headless.Tests
                 writer.Write(content);
         }
 
+        /// <summary>2M Word RAM holding a stage program header, JmpTo_VInt and VInterrupt's prologue.</summary>
         private sealed class FakeWordRam : IScdWordRamReader
         {
-            internal readonly byte[] Header = new byte[ScdRam.MmdHeaderBytes];
+            internal readonly byte[] Bytes = new byte[ScdVIntServiceObserver.WordRam2MSize];
+
+            internal FakeWordRam()
+            {
+                Bytes[0x10] = 0x00; Bytes[0x11] = 0x20; Bytes[0x12] = 0x00; Bytes[0x13] = 0x28; // mmdVInt
+                byte[] jump = { 0x4E, 0xF9, 0x00, 0x20, 0x10, 0x00 };                           // jmp VInterrupt
+                Array.Copy(jump, 0, Bytes, 0x28, jump.Length);
+                Array.Copy(ScdVIntServiceObserver.VInterruptPrologue, 0, Bytes, 0x1000,
+                    ScdVIntServiceObserver.VInterruptPrologue.Length);
+            }
+
+            /// <summary>The MMD header is the first 256 bytes.</summary>
+            internal byte[] Header { get { return Bytes; } }
 
             public byte ReadWordRam2MByte(int offset)
             {
-                return offset < Header.Length ? Header[offset] : (byte)0;
+                return Bytes[offset];
             }
         }
     }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Record Sonic CD lost V-INTs. `--scd-trace` now always writes
+  `vint_service_timing.jsonl`: one `{"event":"vint_not_serviced","raw_frame":N}`
+  per trace row whose VBlank produced no observed entry at `VInterrupt`, empty
+  when every row was serviced. Entry is counted by one fixed, opcode-checked
+  execute hook resolved from the stage program's own MMD header and installed
+  vector, never from counters or the lag flag; two entries in one frame fail
+  the capture. The v5 validator checks the stream's grammar and rejects an
+  event on a row that ran a main loop, or on a game that does not declare it.
+
 - Add a scratch `--scd-trace` producer for Sonic CD (USA) stages. It boots the
   user-supplied disc and pinned BIOS in Mega CD mode, replays a power-on BK2
   and writes 42-column physics rows, S1-style aux events with per-row

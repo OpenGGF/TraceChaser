@@ -135,6 +135,7 @@
     <Compile Include="src/Recording/ScdTraceCaptureRunner.cs" />
     <Compile Include="src/Recording/ScdTraceCsvWriter.cs" />
     <Compile Include="src/Recording/ScdTraceMetadataWriter.cs" />
+    <Compile Include="src/Recording/ScdVIntServiceObserver.cs" />
     <Compile Include="src/Recording/S1TraceMetadataWriter.cs" />
     <Compile Include="src/Recording/S2AuxEventEngine.cs" />
     <Compile Include="src/Recording/S2Ram.cs" />

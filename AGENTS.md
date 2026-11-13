@@ -219,7 +219,7 @@ them, and that is a decision rather than a gap —
 `bizhawk-headless/docs/s3k-profiles-and-hooks.md` §2.4 records the reasoning,
 and `bizhawk-headless/tests/S3KHookAbsenceTests.cs` pins it to the fixture bytes.
 
-Do not "helpfully" add general M68K exec/memory-write callback support. Six fixed,
+Do not "helpfully" add general M68K exec/memory-write callback support. Seven fixed,
 address-filtered observers are the permitted recorder exceptions.
 
 The first is the S3K hardware-timing submission observer at `M68K BUS` PC `0x001B46`,
@@ -270,7 +270,7 @@ the count and before the FIFO shifts, and the explicitly opted-in top-level `Que
 the FIFO descriptors, count word and the caller return address; it may not write RAM,
 classify by scene, fixture or frame, select a sync point, or feed a replay.
 
-All six are observers. None may select a trace sync point, mutate emulation state, carry
+All seven are observers. None may select a trace sync point, mutate emulation state, carry
 a gameplay value, or enable any diagnostic-hook output. Each one's Mono delegate must
 remain strongly rooted while registered and be deterministically unregistered when
 capture ends. Behavioral tests, ROM/disassembly evidence, independent review, and
@@ -308,6 +308,18 @@ remain unsupported. S1 opt-in output also carries a run-root terminal lag census
 it selects existing loop admission and supplies no gameplay values.
 See `docs/capture-s1.md` and `docs/capture-s3k.md`. All other
 publication/review/approval rules still apply.
+
+The seventh is the owner-approved (2026-11-13) Sonic CD (USA) V-INT entry observer
+(`ScdVIntServiceObserver`), always on in `--scd-trace`. It hooks only the first
+instruction of the loaded stage program's `VInterrupt` (`bset #0,GAIRQ2`,
+`src/Level/Main.asm:681-682`), resolved from the program's own MMD header
+(`mmdVInt` names `JmpTo_VInt`, `jmp VInterrupt`) and checked against the installed
+`_LEVEL6+2` vector at attach and on every row, with both instructions byte-checked.
+It counts entries per recorded frame and writes only the per-trace
+`vint_service_timing.jsonl` companion: an event for a row with no entry, nothing for
+one, and a rejected capture for two or more. It never derives an event from
+`levelVIntCounter`, `levelFrames` or the lag flag, and carries no counter, handler,
+decoder or gameplay value. See the Sonic CD section of `bizhawk-headless/README.md`.
 
 Native observer builds are **not host-attested**. `build-observer.sh` pins the source
 commits, the clang packages, and the patch; it makes no claim about the identity of the

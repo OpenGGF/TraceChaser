@@ -41,8 +41,11 @@ namespace OpenGGF.BizHawk.Headless
     /// recording stops without a partial row when levelStarted clears, the
     /// level re-initializes, the player object leaves slot 0 or that header
     /// changes (another program was loaded), or at movie end with the S1
-    /// Lua-parity rule. Observation is read-only RAM polling after each
-    /// FrameAdvance; no callbacks are registered.
+    /// Lua-parity rule. Row state is read-only RAM polling after each
+    /// FrameAdvance. The one execute hook is <see cref="ScdVIntServiceObserver"/>'s
+    /// count of actual V-INT entries, which only feeds the separate
+    /// vint_service_timing.jsonl companion (always written, empty when every
+    /// row's VBlank was serviced).
     /// </summary>
     public static class ScdTraceCaptureRunner
     {
@@ -54,7 +57,8 @@ namespace OpenGGF.BizHawk.Headless
             string recordingDate,
             TextWriter physicsCsv,
             TextWriter auxStateJsonl,
-            TextWriter metadataJson)
+            TextWriter metadataJson,
+            TextWriter vintServiceTimingJsonl)
         {
             if (movie == null) throw new ArgumentNullException("movie");
             if (host == null) throw new ArgumentNullException("host");
@@ -63,6 +67,7 @@ namespace OpenGGF.BizHawk.Headless
             if (recordingDate == null) throw new ArgumentNullException("recordingDate");
             if (physicsCsv == null || auxStateJsonl == null || metadataJson == null)
                 throw new ArgumentNullException("physicsCsv");
+            if (vintServiceTimingJsonl == null) throw new ArgumentNullException("vintServiceTimingJsonl");
 
             using (IEnumerator<Bk2Frame> frames = movie.OpenFrameStream().GetEnumerator())
             {
@@ -101,27 +106,40 @@ namespace OpenGGF.BizHawk.Headless
                 physicsCsv.Write('\n');
                 var aux = new ScdAuxEventEngine();
                 int row = 0;
-                while (true)
+                // V-INT entry is observed from row 0's frame on; the detection frame is not a row.
+                using (ScdVIntServiceObserver vint = ScdVIntServiceObserver.Attach(host, wordRam))
                 {
-                    if ((long)offset + row + 1 >= movie.FrameCount) break;
-                    if (!frames.MoveNext())
-                        throw new InvalidDataException("Movie input stream ended before row "
-                            + (offset + row) + " of " + movie.FrameCount + ".");
-                    Bk2Frame frame = frames.Current;
-                    S1TraceCaptureRunner.ApplyFrame(frame, host);
-                    host.Advance();
-                    RequireCompleted(host, offset + row + 1);
-                    if (!InStageMainLoop(host)
-                        || StageProgramHeaderSha256(wordRam) != start.StageProgramHeaderSha256)
-                        break;
-                    physicsCsv.Write(ScdTraceCsvWriter.FormatRow(row, S1InputMask.FromFrame(frame), host));
-                    physicsCsv.Write('\n');
-                    foreach (string line in aux.ProcessFrame(row, host, host.IsLagged, host.LagCount))
+                    while (true)
                     {
-                        auxStateJsonl.Write(line);
-                        auxStateJsonl.Write('\n');
+                        if ((long)offset + row + 1 >= movie.FrameCount) break;
+                        if (!frames.MoveNext())
+                            throw new InvalidDataException("Movie input stream ended before row "
+                                + (offset + row) + " of " + movie.FrameCount + ".");
+                        Bk2Frame frame = frames.Current;
+                        S1TraceCaptureRunner.ApplyFrame(frame, host);
+                        host.Advance();
+                        RequireCompleted(host, offset + row + 1);
+                        if (!InStageMainLoop(host)
+                            || StageProgramHeaderSha256(wordRam) != start.StageProgramHeaderSha256)
+                        {
+                            vint.DiscardFrame();
+                            break;
+                        }
+                        physicsCsv.Write(ScdTraceCsvWriter.FormatRow(row, S1InputMask.FromFrame(frame), host));
+                        physicsCsv.Write('\n');
+                        foreach (string line in aux.ProcessFrame(row, host, host.IsLagged, host.LagCount))
+                        {
+                            auxStateJsonl.Write(line);
+                            auxStateJsonl.Write('\n');
+                        }
+                        string vintEvent = vint.CloseRow(row);
+                        if (vintEvent != null)
+                        {
+                            vintServiceTimingJsonl.Write(vintEvent);
+                            vintServiceTimingJsonl.Write('\n');
+                        }
+                        row++;
                     }
-                    row++;
                 }
                 metadataJson.Write(ScdTraceMetadataWriter.Format(start, inputs, offset, row, recordingDate));
                 return new ScdTraceCaptureResult(offset, row, start);
@@ -154,8 +172,8 @@ namespace OpenGGF.BizHawk.Headless
 
     /// <summary>
     /// <c>--scd-trace</c> command: boots the explicit USA disc and BIOS,
-    /// replays one BK2 and publishes physics.csv, aux_state.jsonl and
-    /// metadata.json (last) into a new --output directory by staging and
+    /// replays one BK2 and publishes physics.csv, aux_state.jsonl,
+    /// vint_service_timing.jsonl and metadata.json (last) into a new --output directory by staging and
     /// rename. Payloads are left uncompressed: this is a scratch producer,
     /// and publication into a consumer fixture tree is a separate approved
     /// step.
@@ -215,13 +233,15 @@ namespace OpenGGF.BizHawk.Headless
             using (GpgxHost host = GpgxHost.OpenMegaCd(cue, bios, UsaFirmwareId, UsaBiosSha1, movie.SyncSettings))
             using (var physics = new StreamWriter(Path.Combine(staging, "physics.csv"), false, encoding))
             using (var aux = new StreamWriter(Path.Combine(staging, "aux_state.jsonl"), false, encoding))
+            using (var vint = new StreamWriter(Path.Combine(staging, ScdVIntServiceObserver.FileName), false, encoding))
             {
                 var metadata = new StringWriter(CultureInfo.InvariantCulture);
                 result = ScdTraceCaptureRunner.Capture(movie, host, host, inputs,
                     DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    physics, aux, metadata);
+                    physics, aux, metadata, vint);
                 physics.Flush();
                 aux.Flush();
+                vint.Flush();
                 File.WriteAllText(Path.Combine(staging, "metadata.json"), metadata.ToString(), encoding);
             }
             Directory.Move(staging, output);

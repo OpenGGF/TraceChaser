@@ -117,6 +117,73 @@ class ValidateTraceV5Tests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn(f"{fixture / 'physics.csv'}: row 1 has 2 columns; expected 42", result.stderr)
 
+    def write_scd_vint_rows(self, fixture: Path) -> None:
+        """R52A rows 1475-1479 (native): levelFrames $5AB held for three VBlank-only rows,
+        then $5AC; the V-INT counter makes two increments over the last three VBlanks."""
+        header = ["frame", "input", "camera_x", "camera_y", "rings", "gameplay_frame_counter",
+                  "vblank_counter"] + [f"c{n}" for n in range(35)]
+        rows = [header]
+        for row, (frames, vint) in enumerate([("05AB", "05F3"), ("05AB", "05F4"), ("05AB", "05F4"),
+                                              ("05AB", "05F4"), ("05AC", "05F6")]):
+            rows.append([f"{row:04X}", "0000", "0", "0", "0", frames, vint] + ["0"] * 35)
+        (fixture / "physics.csv").write_text("".join(",".join(r) + "\n" for r in rows))
+        metadata = json.loads((fixture / "metadata.json").read_text())
+        metadata["trace_frame_count"] = 5
+        (fixture / "metadata.json").write_text(json.dumps(metadata))
+
+    def test_accepts_sonic_cd_vint_service_events_on_vblank_only_rows_and_an_empty_stream(self) -> None:
+        observed = self.write_fixture("scd", "scd_stage", name="observed")
+        self.write_scd_vint_rows(observed)
+        (observed / "vint_service_timing.jsonl").write_text('{"event":"vint_not_serviced","raw_frame":3}\n')
+        empty = self.write_fixture("scd", "scd_stage", name="empty")
+        self.write_scd_vint_rows(empty)
+        (empty / "vint_service_timing.jsonl").write_text("")
+
+        result = self.validate()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_rejects_a_vint_service_event_derived_from_the_counter_shortfall(self) -> None:
+        # The first row whose vblank_counter falls short of one per row is row 4, which ran a
+        # main loop (levelFrames advanced): a counter-derived event lands there and is rejected.
+        fixture = self.write_fixture("scd", "scd_stage")
+        self.write_scd_vint_rows(fixture)
+        (fixture / "vint_service_timing.jsonl").write_text('{"event":"vint_not_serviced","raw_frame":4}\n')
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("line 1 raw_frame 4 ran a main loop; only a VBlank-only row can lose its V-INT",
+                      result.stderr)
+
+    def test_rejects_malformed_vint_service_streams_and_undeclaring_games(self) -> None:
+        cases = {
+            "row0": ('{"event":"vint_not_serviced","raw_frame":0}\n', "raw_frame 0 ran a main loop"),
+            "outside": ('{"event":"vint_not_serviced","raw_frame":5}\n', "raw_frame 5 is outside [0, 5)"),
+            "duplicate": ('{"event":"vint_not_serviced","raw_frame":3}\n'
+                          '{"event":"vint_not_serviced","raw_frame":3}\n', "raw_frame must be strictly increasing"),
+            "field": ('{"event":"vint_not_serviced","raw_frame":3,"counter":2}\n',
+                      "must have exactly the fields event and raw_frame"),
+            "event": ('{"event":"vint_serviced","raw_frame":3}\n', "line 1 has invalid event"),
+            "crlf": ('{"event":"vint_not_serviced","raw_frame":3}\r\n', "must use LF-terminated UTF-8 lines"),
+        }
+        for name, (content, message) in cases.items():
+            fixture = self.write_fixture("scd", "scd_stage", name=name)
+            self.write_scd_vint_rows(fixture)
+            (fixture / "vint_service_timing.jsonl").write_text(content, newline="")
+        s3k = self.write_fixture("s3k", "complete_run", name="s3k")
+        (s3k / "vint_service_timing.jsonl").write_text("")
+
+        result = self.validate()
+
+        self.assertNotEqual(0, result.returncode)
+        for name, (_, message) in cases.items():
+            with self.subTest(case=name):
+                self.assertIn(f"{self.root / name / 'vint_service_timing.jsonl'}: ", result.stderr)
+                self.assertIn(message, result.stderr)
+        self.assertIn(f"{s3k / 'vint_service_timing.jsonl'}: vint_service_timing.jsonl is declared only for "
+                      "scd stage traces", result.stderr)
+
     def test_rejects_special_stage_rows_that_do_not_match_the_game_owned_width(self) -> None:
         fixture = self.write_fixture("s2", "s2_special_stage")
         (fixture / "physics.csv").write_text("a,b\n1,2\n")

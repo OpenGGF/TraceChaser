@@ -45,6 +45,12 @@ PLC queue at their allowed service boundaries. Frame bounds, monotonic order,
 contiguous ordinals, and `sha256:` submission fingerprints are mandatory.
 Timing never supplies gameplay values or creates work.
 
+Sonic CD stage traces may carry `vint_service_timing.jsonl`: one
+`{"event":"vint_not_serviced","raw_frame":N}` per trace row whose VBlank
+produced no observed V-INT entry, empty when none did. Only `scd` declares it;
+each event must be on a row that repeats the previous row's
+`gameplay_frame_counter`. Absence means "not observed", not "none lost".
+
 Run manifests own ordered `segments`, `transitions`, and
 `dynamic_art_gap_transitions` arrays. Member order is semantic, segment
 directories must agree with their metadata, and every run includes the gap
