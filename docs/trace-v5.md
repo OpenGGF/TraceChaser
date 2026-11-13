@@ -11,6 +11,9 @@ deterministic gzip), and optional auxiliary/timing streams permitted by its
 profile. Named runs add `run_manifest.json` and ordered segment directories.
 Plain and gzipped files may not both represent the same logical member.
 
+The `game` field of metadata and run manifests is one of `s1`, `s2`, `s3k` or
+`scd` (Sonic CD stages, which use the ordinary level row layout).
+
 Current native provenance is:
 
 ```json
@@ -41,6 +44,12 @@ Kosinski module queue, direct Kosinski decompression queue, and the S1 Nemesis
 PLC queue at their allowed service boundaries. Frame bounds, monotonic order,
 contiguous ordinals, and `sha256:` submission fingerprints are mandatory.
 Timing never supplies gameplay values or creates work.
+
+Sonic CD stage traces may carry `vint_service_timing.jsonl`: one
+`{"event":"vint_not_serviced","raw_frame":N}` per trace row whose VBlank
+produced no observed V-INT entry, empty when none did. Only `scd` declares it;
+each event must be on a row that repeats the previous row's
+`gameplay_frame_counter`. Absence means "not observed", not "none lost".
 
 Run manifests own ordered `segments`, `transitions`, and
 `dynamic_art_gap_transitions` arrays. Member order is semantic, segment

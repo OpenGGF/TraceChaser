@@ -282,6 +282,12 @@ def _cases() -> list[Case]:
              {"metadata.json": _metadata("s3k", "s3k_special_stage"),
               "physics.csv": _csv(S3K_SPECIAL_HEADER, S3K_SPECIAL_ROW)},
              _special_semantics("s3k")),
+        Case("accept-scd-level", ("ordinary-42-columns", "aux-jsonl"), LEVEL_CONSUMER, {
+            "metadata.json": _metadata("scd", "scd_stage"),
+            "physics.csv": _csv(LEVEL_HEADER, LEVEL_ROW),
+            "aux_state.jsonl": (
+                b'{"frame":0,"event":"state_snapshot","tag":"scd","value":9}\n'),
+        }, _scd_semantics()),
         _accepted_run_case(),
     ]
     cases.extend([
@@ -726,6 +732,16 @@ def _ordinary_semantics(
         "aux_events": aux_events,
         "hardware_work_completed": timing_events,
     }
+
+
+def _scd_semantics() -> dict[str, Any]:
+    """Sonic CD stage traces reuse the ordinary level rows under game "scd"."""
+    semantics = _ordinary_semantics(
+        compressed=False,
+        aux_events=[{"frame": 0, "event": "state_snapshot", "tag": "scd", "value": 9}],
+        timing_events=[])
+    semantics["metadata"] = _metadata_semantics("scd", "scd_stage")
+    return semantics
 
 
 def _gzip_semantics() -> dict[str, Any]:

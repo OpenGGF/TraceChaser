@@ -16,6 +16,7 @@ supported capture path on Linux for every game.
 | KiS2 plain and full run | yes — chip observer profile, without native load audit; [contract](docs/kis2-run-mode.md) |
 | S3K standard (both profiles) | yes — gated |
 | S3K complete-run (level / bonus / special-stage) | yes — gated |
+| Sonic CD (USA) stage | scratch producer, not gated — [section](#sonic-cd-stage-recorder) |
 
 **This harness is the preferred capture path**, and the intended direction is that
 the Lua recorders are retired rather than kept at feature parity. It is roughly
@@ -579,6 +580,125 @@ capture into a temp directory and compare raw bytes.
 same semantics for scratch output from the **Windows Lua diagnostic route**,
 whose recorders still write uncompressed output. That output is corroborative
 only and must never be installed as a canonical fixture.
+
+## Sonic CD stage recorder
+
+`--scd-trace` records one Sonic CD (USA) stage as a trace-v5-shaped
+directory. It boots the disc on the same GPGX core in Mega CD mode, replays a
+power-on BK2 and polls main-CPU RAM after each frame. One execute hook counts
+V-INT entries for the `vint_service_timing.jsonl` companion (below); row state
+never comes from it. It is a scratch producer: it is not gated and does not compress
+its payloads. Publishing into a consumer fixture tree is a separate step that
+needs approval.
+
+**Prerequisites.** You supply both inputs and pass them explicitly:
+
+- The Sonic CD (USA) CUE/BIN set. The CUE and data track must match the pinned
+  SHA-256 values in `ScdTraceCommand`.
+- The Sega CD Model 1 US v1.10 BIOS. Its SHA-1 must be
+  `f4f315adcef9b8feb0364c21ab7f0eaf5457f3ed`, and it is served only for the
+  `GEN+CD_BIOS_US` firmware request.
+
+Nothing is discovered or copied. Other regions and BIOS images are rejected,
+because the RAM map is the USA build's.
+
+```bash
+python3 -I bizhawk-headless/scd_stage_movie.py --schedule /abs/scratch/route.schedule.json \
+  --output /abs/scratch/route.bk2
+BIZHAWK_HOME=/abs/BizHawk-2.11-linux-x64 bash -c \
+  'source bizhawk-headless/common-env.sh && exec mono bizhawk-headless/bin/Release/BizHawk.Headless.Gpgx.exe \
+     --scd-trace --cue "/abs/media/Sonic CD (US).cue" --bios "/abs/media/Sega CD (U) - M1 V1.10.bin" \
+     --movie /abs/scratch/route.bk2 --output /abs/scratch/new-trace \
+     --tracechaser-root /abs/TraceChaser --input-repository-root /abs/OpenGGF \
+     --fixture-root /abs/OpenGGF/src/test/resources/traces'
+```
+
+`scd_stage_movie.py` turns a JSON list of held-button ranges (0-based BK2 rows)
+into a BK2 that uses BizHawk 2.11's default GPGX SyncSettings. The movie
+contains inputs only.
+
+**What is recorded.** The output has four files:
+
+- `physics.csv`: the ordinary 42-column level header with S1 formatting.
+  Rings come from `rings`, `gameplay_frame_counter` from `levelFrames`, and
+  `vblank_counter` from the low word of `levelVIntCounter`. `lag_counter` is a
+  placeholder `0000`. The sidekick block is zero.
+- `aux_state.jsonl`: the S1 standard event set. `object_*`, `slot_dump` and
+  `cursor_state` come from the CD spawner, which is S1's ObjPosLoad. S1's
+  `s1_obj64_state` is not emitted. A `lag_state` event (the emulator's lag flag
+  and lag count) is added for every row.
+- `vint_service_timing.jsonl`: always written, and empty when every row's VBlank
+  was serviced. Each line is `{"event":"vint_not_serviced","raw_frame":N}` for a
+  trace row N whose frame produced no interrupt entry: native V-INT was still
+  running when that VBlank arrived, and the pending interrupt merged with the next
+  one (owner-approved timing admission, 2026-11-13). Entry is observed by an
+  execute hook on `VInterrupt`'s first instruction (`bset #0,GAIRQ2`,
+  `src/Level/Main.asm:681-682`). Its address comes from the loaded program: the
+  MMD header's `mmdVInt` (offset `$10`, `src/_Include/MMD.inc`) is `JmpTo_VInt`
+  (`jmp VInterrupt`, `src/Level/Initialization.asm:11-13,40-41`), which the IPX
+  loader installs as `_LEVEL6+2` (`src/CD Initial Program/IP.asm:84-87`). The
+  vector is checked at arm and on every row, both instructions are byte-checked,
+  and two entries in one frame fail the capture. The event is never derived
+  from `levelVIntCounter`, `levelFrames`, `vintRoutine` or the lag flag.
+  Recordings made before this file existed have no stream: a consumer treats
+  that as "not observed", not as "no lost V-INT".
+- `metadata.json`: written last. It has the v5 envelope, `game: "scd"` and
+  `trace_profile: "scd_stage"`. It also records the time zone, the disc stage
+  file (for example `R11A`), a SHA-256 of the stage program's MMD header in
+  Word RAM, and the disc, BIOS and movie identities.
+
+**When recording starts and stops.** Recording arms on the first frame where
+all of these hold:
+
+- `levelStarted` is 1 and `gameMode` bit 7 is clear;
+- slot 0 holds ObjSonic with `oPlayerMoveLock` at 0;
+- demo and debug mode are both off.
+
+That detection frame is not recorded. Row N is sampled after BK2 row
+`bk2_frame_offset + N` is applied and one frame completes.
+
+Recording stops, without writing a partial row, when any of these happens:
+
+- the stage re-enters LevelStart;
+- the player leaves slot 0;
+- the MMD header changes;
+- the movie ends (under the S1 rule).
+
+The CD title-card lock (`ctrlLocked`) falls inside the recording.
+
+**What is not recorded.** The recorder does not capture:
+
+- Sub-CPU, PCM or CDDA state;
+- per-frame time zone or warp state;
+- special stages, demos, or stage-to-stage runs.
+
+**Checks.** `test.sh --filter Scd` runs the unit cases. The recorder does not
+certify itself: `traces/compare_scd_player_reference.py` compares every row
+with the independent OpenGGF `player_reference_probe.cs` output over the same
+disc, BIOS and inputs.
+
+`traces/validate_trace_v5.py` accepts `game: "scd"` in metadata and run
+manifests and checks its rows at the ordinary 42-column level width; the
+conformance pack's `accept-scd-level` case pins that. It also checks
+`vint_service_timing.jsonl`: exactly `event` and `raw_frame`, strictly
+increasing rows inside the trace, `scd` only, and every event on a row that
+repeats the previous row's `gameplay_frame_counter`. An event placed from the
+counter instead (the first row whose `vblank_counter` falls short, which ran a
+main loop) is rejected.
+
+**Stage identity.** All 70 USA stage programs (`R11A`…`R83D`) begin with the
+same 256-byte MMD header, so `stage_program_header_sha256` shows that a stage
+program is loaded and detects a program change, but does not say which one.
+`stage_file` is derived from the zone, act, time zone and good-future RAM
+bytes. To prove the loaded file, compare Word RAM with the disc files.
+
+**Reaching any stage.** Every stage program is an entry in the retail stage
+select (`StageSels`, `src/CD Initial Program/IPX.asm`). At the title's PRESS
+START, enter Up, Down, Down, Left, Right, B (`ObjMenu_StageSelCheat`,
+`src/Title Screen/Objects/Menu/Main.asm`). Press each button for several
+frames: the title reads the pad only on non-lag V-INTs, so a one-frame tap can
+be missed. In the menu, holding Up or Down moves one entry every 8 loops, and
+Up wraps from the first entry to the last.
 
 ## Publishing a canonical fixture
 

@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+# Sonic CD ("scd") stage traces use the ordinary 42-column level layout; the
+# game id selects nothing else in this validator.
+GAMES = frozenset({"s1", "s2", "s3k", "scd"})
+GAME_LIST = ", ".join(sorted(GAMES))
 LEGACY_KEYS = frozenset({
     "lua_script_version", "csv_version", "ss_csv_version",
     "hardware_timing_schema", "run_schema",
@@ -39,6 +43,12 @@ KIND_ORDER = {
     "nemesis_plc_queue": 2,
 }
 FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}\Z")
+# Sonic CD lost-V-INT admission (OpenGGF hardware-timing contract, 2026-11-13):
+# one {"event":"vint_not_serviced","raw_frame":N} per trace row whose VBlank
+# produced no observed interrupt entry. Only scd stage traces declare it.
+VINT_SERVICE_FILE = "vint_service_timing.jsonl"
+VINT_SERVICE_FIELDS = frozenset({"event", "raw_frame"})
+VINT_SERVICE_GAMES = frozenset({"scd"})
 
 
 class Validation:
@@ -80,8 +90,8 @@ class Validation:
         self.validate_envelope(path, metadata)
         game = metadata.get("game")
         profile = metadata.get("trace_profile")
-        if game not in {"s1", "s2", "s3k"}:
-            self.reject(path, "game must be one of s1, s2, s3k")
+        if game not in GAMES:
+            self.reject(path, f"game must be one of {GAME_LIST}")
         # S1's native level and credits writers predate the shared profile
         # field and intentionally omit it; their v5 contract is identified by
         # the trace_type/zone surface.  S2 and S3K use the profile to select
@@ -109,6 +119,12 @@ class Validation:
         timing = self.single_payload(fixture_directory, "hardware_timing.jsonl", required=False)
         if timing is not None and valid_trace_frame_count:
             self.validate_timing(timing, trace_frame_count)
+        vint_service = self.single_payload(fixture_directory, VINT_SERVICE_FILE, required=False)
+        if vint_service is not None:
+            if game not in VINT_SERVICE_GAMES:
+                self.reject(vint_service, f"{VINT_SERVICE_FILE} is declared only for scd stage traces")
+            elif valid_trace_frame_count and physics is not None:
+                self.validate_vint_service(vint_service, physics, trace_frame_count)
 
     def validate_manifest(self, path: Path) -> None:
         manifest = self.read_json(path)
@@ -118,8 +134,8 @@ class Validation:
             self.reject(path, "run manifest must be a JSON object")
             return
         self.validate_envelope(path, manifest)
-        if manifest.get("game") not in {"s1", "s2", "s3k"}:
-            self.reject(path, "game must be one of s1, s2, s3k")
+        if manifest.get("game") not in GAMES:
+            self.reject(path, f"game must be one of {GAME_LIST}")
         if not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
             self.reject(path, "run_id must be a non-empty string")
         if not isinstance(manifest.get("segments"), list):
@@ -258,6 +274,56 @@ class Validation:
             if previous is not None and ordering <= previous:
                 self.reject(path, f"line {number} events must use canonical ordering")
             previous = ordering
+
+    def validate_vint_service(self, path: Path, physics: Path, frame_count: int) -> None:
+        """Grammar plus one structural rule: an event row must repeat the previous
+        row's gameplay_frame_counter (a VBlank-only row). A row that ran a main
+        loop cannot have lost its V-INT, so an event placed there (for example
+        from the first row whose vblank_counter falls short) is rejected."""
+        content = self.read_text(path)
+        rows = self.read_text(physics)
+        if content is None or rows is None:
+            return
+        if content and (not content.endswith("\n") or "\r" in content):
+            self.reject(path, f"{VINT_SERVICE_FILE} must use LF-terminated UTF-8 lines")
+            return
+        counters: list[str] = []
+        try:
+            reader = csv.reader(rows.splitlines())
+            header = next(reader, [])
+            column = header.index("gameplay_frame_counter")
+            counters = [row[column] for row in reader]
+        except (csv.Error, ValueError, IndexError):
+            self.reject(path, "physics rows have no readable gameplay_frame_counter")
+            return
+        previous: int | None = None
+        for number, line in enumerate(content.splitlines(), start=1):
+            if not line or line != line.strip():
+                self.reject(path, f"line {number} must be one compact JSON event")
+                continue
+            try:
+                event = json.loads(line, object_pairs_hook=reject_duplicate_keys)
+            except (json.JSONDecodeError, ValueError) as error:
+                self.reject(path, f"line {number} malformed JSON: {error}")
+                continue
+            if not isinstance(event, dict) or set(event) != VINT_SERVICE_FIELDS:
+                self.reject(path, f"line {number} must have exactly the fields event and raw_frame")
+                continue
+            if event["event"] != "vint_not_serviced":
+                self.reject(path, f"line {number} has invalid event")
+            raw_frame = event["raw_frame"]
+            if not isinstance(raw_frame, int) or isinstance(raw_frame, bool) or raw_frame < 0:
+                self.reject(path, f"line {number} has invalid raw_frame")
+                continue
+            if raw_frame >= frame_count:
+                self.reject(path, f"line {number} raw_frame {raw_frame} is outside [0, {frame_count})")
+                continue
+            if previous is not None and raw_frame <= previous:
+                self.reject(path, f"line {number} raw_frame must be strictly increasing")
+            previous = raw_frame
+            if raw_frame == 0 or raw_frame >= len(counters) or counters[raw_frame] != counters[raw_frame - 1]:
+                self.reject(path, f"line {number} raw_frame {raw_frame} ran a main loop; "
+                                  "only a VBlank-only row can lose its V-INT")
 
     def parse_timing_event(self, path: Path, number: int, line: str) -> tuple[int, str, str, int] | None:
         try:

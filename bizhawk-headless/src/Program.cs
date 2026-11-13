@@ -1303,6 +1303,14 @@ namespace BizHawk.Headless.Gpgx
                     ValidateProducerBoundary(ledgerArgs, ledgerTracechaserRoot, ledgerInputRoot, ledgerFixtureRoot);
                     return M68kLedgerWindowRunner.Run(ledgerArgs, Console.Out);
                 }
+                if (ScdTraceCommand.IsRequested(args))
+                {
+                    FinalPcmWindowRunner.RejectDuplicateFlags(args);
+                    string scdTracechaserRoot, scdInputRoot, scdFixtureRoot;
+                    string[] scdArgs = ExtractBoundaryArguments(args, out scdTracechaserRoot, out scdInputRoot, out scdFixtureRoot);
+                    ValidateProducerBoundary(scdArgs, scdTracechaserRoot, scdInputRoot, scdFixtureRoot);
+                    return ScdTraceCommand.Run(scdArgs, Console.Out);
+                }
                 if (FinalPcmWindowRunner.IsRequested(args))
                 {
                     FinalPcmWindowRunner.RejectDuplicateFlags(args);

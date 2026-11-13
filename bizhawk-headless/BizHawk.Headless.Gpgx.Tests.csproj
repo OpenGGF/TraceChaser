@@ -86,6 +86,7 @@
     <Compile Include="tests/S1SpecialStageWriterTests.cs" />
     <Compile Include="tests/S1TraceCaptureRunnerTests.cs" />
     <Compile Include="tests/S1TraceCsvWriterTests.cs" />
+    <Compile Include="tests/ScdTraceRecorderTests.cs" />
     <Compile Include="tests/S1TraceMetadataWriterTests.cs" />
     <Compile Include="tests/S2AuxArmBlockTests.cs" />
     <Compile Include="tests/S2AudioObserverProfileTests.cs" />
